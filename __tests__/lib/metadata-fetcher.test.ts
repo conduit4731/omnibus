@@ -150,6 +150,21 @@ describe('Metadata Pipeline: ComicVine Sync Engine', () => {
         }, expect.any(Object));
     });
 
+    it('does not queue EMBED_METADATA when "Write ComicInfo.xml" is off (#251)', async () => {
+        mocks.queueAdd.mockClear();
+        mocks.systemSettingFindUnique.mockImplementation(async ({ where }: any) =>
+            ({ value: where.key === 'metadata_write_comicinfo' ? 'false' : 'mock_api_key' }));
+        mocks.axiosGet.mockImplementation(async (url: string) => {
+            if (url.includes('/volume/')) return { data: { results: { name: 'Batman', start_year: '2016', publisher: { name: 'DC Comics' } } } };
+            if (url.includes('/issues/')) return { data: { number_of_total_results: 1, results: [{ id: 999, issue_number: '1', name: 'I Am Gotham Part 1', store_date: '2016-06-01' }] } };
+        });
+        mocks.existsSync.mockReturnValue(true);
+
+        const result = await syncSeriesMetadata('123', '/comics/Batman', 'COMICVINE');
+        expect(result.success).toBe(true);
+        expect(mocks.queueAdd).not.toHaveBeenCalledWith('EMBED_METADATA', expect.anything(), expect.anything());
+    });
+
     it('should fallback to local folder art if ComicVine returns no image', async () => {
         // Mock CV returning NO image
         mocks.axiosGet.mockImplementation(async (url: string) => {

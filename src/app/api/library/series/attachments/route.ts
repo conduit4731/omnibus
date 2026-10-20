@@ -20,6 +20,7 @@ import fs from 'fs';
 import { randomUUID } from 'crypto';
 import { UNMATCHED_DIR, isPathWithinRoots } from '@/lib/utils/paths';
 import { attachAsCollected } from '@/lib/match-collision';
+import { comicInfoWriteEnabled } from '@/lib/utils/comicinfo-write';
 
 // LOCAL: a collected edition (or annual run) the provider has no volume for — attached by name,
 // no sync lane; its books are the files whose names carry it (field report by robotshavehearts2).
@@ -53,7 +54,7 @@ async function queueLaneEmbed(attachmentId: string) {
             select: { id: true, filePath: true },
         });
         const issueIds = rows.filter(r => r.filePath).map(r => r.id);
-        if (issueIds.length === 0) return;
+        if (issueIds.length === 0 || !(await comicInfoWriteEnabled())) return;
         void omnibusQueue.add('EMBED_METADATA',
             { type: 'EMBED_METADATA', issueIds },
             { jobId: `EMBED_META_ATTACH_${attachmentId}_${Date.now()}` }

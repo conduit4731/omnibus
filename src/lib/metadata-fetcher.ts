@@ -8,6 +8,7 @@ import { parseComicVineCredits } from '@/lib/utils';
 import { getErrorMessage } from './utils/error';
 import { MetronProvider } from './metadata/providers/metron';
 import { omnibusQueue } from './queue';
+import { comicInfoWriteEnabled } from '@/lib/utils/comicinfo-write';
 import { markSystemFlag, countApiUsage } from './utils/system-flags';
 import { metronOptionalBudgetExhausted } from '@/lib/metron/client';
 import { metronCreditCandidatesWhere, metronDetailCreditsEnabled } from '@/lib/metron/credit-candidates';
@@ -284,19 +285,22 @@ export async function syncSeriesMetadata(metadataId: string, folderPath: string,
             }
 
             try {
-                // 15-minute rolling window for heavy disk I/O
-                const ioTimeWindow = Math.floor(Date.now() / 900000); 
+                // Respect Settings → Metadata → "Write ComicInfo.xml" (#251)
+                if (await comicInfoWriteEnabled()) {
+                    // 15-minute rolling window for heavy disk I/O
+                    const ioTimeWindow = Math.floor(Date.now() / 900000); 
                 
-                await omnibusQueue.add('EMBED_METADATA', { 
-                    type: 'EMBED_METADATA', 
-                    seriesId: series.id 
-                }, {
-                    jobId: `EMBED_META_${series.id}_${ioTimeWindow}`,
-                    delay: 300000, // 5-minute delay to let the entire batch finish downloading
-                    removeOnComplete: true,
-                    removeOnFail: true
-                });
-                Logger.log(`[Metadata] Queued XML injection for ${series.name}`, 'info');
+                    await omnibusQueue.add('EMBED_METADATA', { 
+                        type: 'EMBED_METADATA', 
+                        seriesId: series.id 
+                    }, {
+                        jobId: `EMBED_META_${series.id}_${ioTimeWindow}`,
+                        delay: 300000, // 5-minute delay to let the entire batch finish downloading
+                        removeOnComplete: true,
+                        removeOnFail: true
+                    });
+                    Logger.log(`[Metadata] Queued XML injection for ${series.name}`, 'info');
+                }
             } catch(e) {}
 
             Logger.log(`[Metadata] Successfully synced ${syncedCount} Metron issues.`, 'success');
@@ -573,19 +577,22 @@ export async function syncSeriesMetadata(metadataId: string, folderPath: string,
     }
 
     try {
-                // 15-minute rolling window for heavy disk I/O
-                const ioTimeWindow = Math.floor(Date.now() / 900000); 
+                // Respect Settings → Metadata → "Write ComicInfo.xml" (#251)
+                if (await comicInfoWriteEnabled()) {
+                    // 15-minute rolling window for heavy disk I/O
+                    const ioTimeWindow = Math.floor(Date.now() / 900000); 
                 
-                await omnibusQueue.add('EMBED_METADATA', { 
-                    type: 'EMBED_METADATA', 
-                    seriesId: series.id 
-                }, {
-                    jobId: `EMBED_META_${series.id}_${ioTimeWindow}`,
-                    delay: 300000, // 5-minute delay to let the entire batch finish downloading
-                    removeOnComplete: true,
-                    removeOnFail: true
-                });
-                Logger.log(`[Metadata] Queued XML injection for ${series.name}`, 'info');
+                    await omnibusQueue.add('EMBED_METADATA', { 
+                        type: 'EMBED_METADATA', 
+                        seriesId: series.id 
+                    }, {
+                        jobId: `EMBED_META_${series.id}_${ioTimeWindow}`,
+                        delay: 300000, // 5-minute delay to let the entire batch finish downloading
+                        removeOnComplete: true,
+                        removeOnFail: true
+                    });
+                    Logger.log(`[Metadata] Queued XML injection for ${series.name}`, 'info');
+                }
             } catch(e) {}
 
     Logger.log(`[Metadata] Successfully synced ${syncedCount} ComicVine issues.`, 'success');

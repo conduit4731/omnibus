@@ -6,6 +6,7 @@ import { AuditLogger } from '@/lib/audit-logger';
 import { omnibusQueue } from '@/lib/queue';
 import { Logger } from '@/lib/logger';
 import { getErrorMessage } from '@/lib/utils/error';
+import { comicInfoWriteEnabled } from '@/lib/utils/comicinfo-write';
 
 export async function PUT(request: Request) {
     const authOptions = await getAuthOptions();
@@ -46,7 +47,7 @@ export async function PUT(request: Request) {
             updates: updates.map((u: any) => ({ id: u.id, name: u.name, number: u.number }))
         }, (session.user as any).id);
 
-        if (updates.length > 0) {
+        if (updates.length > 0 && await comicInfoWriteEnabled()) {
             await omnibusQueue.add('EMBED_METADATA', { 
                 type: 'EMBED_METADATA', 
                 issueIds: updates.map((u: any) => u.id) 
