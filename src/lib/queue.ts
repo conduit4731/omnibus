@@ -7,6 +7,7 @@ import { Mailer } from './mailer';
 import { apiClient as axios } from '@/lib/api-client';
 import { isReleasedYet } from '@/lib/utils';
 import { searchAndDownload } from '@/lib/automation';
+import { backfillWantedGaps } from '@/lib/backfill-wanted';
 import packageJson from '../../package.json';
 import { getErrorMessage } from '@/lib/utils/error';
 import { ENGINE_URL, engineHeaders, engineFetchLong } from '@/lib/engine';
@@ -1054,12 +1055,21 @@ export function initWorker() {
                     }
                     if (parkedRetried > 0) details += `[PARKED] Re-searched ${parkedRetried} parked request(s) (awaiting/manual/dead-stalled) after ${awaitingRetryDays}d.\n`;
 
+                    // Fork: also request older gaps of monitored series, not just the 30 highest numbers above
+                    let backfilled: string[] = [];
+                    try {
+                        backfilled = await backfillWantedGaps(admin?.id || 'system');
+                        for (const name of backfilled) details += `[BACKFILL] Queued PENDING: ${name}\n`;
+                    } catch (e) {
+                        details += `[BACKFILL] Failed: ${getErrorMessage(e)}\n`; // never fail the monitor over it
+                    }
+
                     await prisma.jobLog.create({
                         data: {
                             jobType: 'SERIES_MONITOR',
                             status: 'COMPLETED',
                             durationMs: Date.now() - startTime,
-                            message: details + `\nFinal Summary: ${skeletonsCreated} calendar entries, ${newRequestsFound} new downloads, ${unreleasedUpgraded} upgrades, ${parkedRetried} parked re-searched.`
+                            message: details + `\nFinal Summary: ${skeletonsCreated} calendar entries, ${newRequestsFound} new downloads, ${unreleasedUpgraded} upgrades, ${parkedRetried} parked re-searched, ${backfilled.length} gaps backfilled.`
                         }
                     });
                     break;
