@@ -27,6 +27,23 @@ import { getErrorMessage } from "@/lib/utils/error"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
+// Read / in progress marker for a list entry; nothing for unread
+function ReadState({ progress }: { progress: { currentPage: number, totalPages: number, isCompleted: boolean } | null }) {
+  if (progress?.isCompleted) {
+      return <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 mt-1"><Check className="w-3 h-3" /> Read</div>
+  }
+  if (progress && progress.currentPage > 0) {
+      const pct = progress.totalPages > 0 ? Math.round(100 * (progress.currentPage + 1) / progress.totalPages) : 0
+      return (
+          <div className="flex items-center gap-2 mt-1">
+              <div className="h-1 w-20 rounded-full bg-muted overflow-hidden"><div className="h-full bg-primary" style={{ width: `${pct}%` }} /></div>
+              <span className="text-[10px] font-bold text-muted-foreground">Page {progress.currentPage + 1}{progress.totalPages > 0 ? ` / ${progress.totalPages}` : ""}</span>
+          </div>
+      )
+  }
+  return null
+}
+
 function ReadingListsContent() {
   const { data: session } = useSession()
   const isAdmin = session?.user?.role === 'ADMIN'
@@ -36,6 +53,10 @@ function ReadingListsContent() {
   
   const [lists, setLists] = useState<any[]>([])
   const [activeListId, setActiveListId] = useState<string | null>(null)
+  // The open list with its items + the user's progress; the sidebar only has names and counts (#252)
+  const [activeDetail, setActiveDetail] = useState<any | null>(null)
+  const [detailNonce, setDetailNonce] = useState(0)
+  const [hideRead, setHideRead] = useState(false)
   const [loading, setLoading] = useState(true)
   
   // Modals
@@ -145,7 +166,7 @@ function ReadingListsContent() {
 
   // Group sequential items of the same series to preserve reading order
   const groupedItems = useMemo(() => {
-      const activeList = lists.find(l => l.id === activeListId);
+      const activeList = activeDetail;
       if (!activeList) return [];
       
       const chunks: { id: string, seriesName: string, items: any[], startIndex: number }[] = [];
@@ -154,6 +175,7 @@ function ReadingListsContent() {
       let startIndex = 0;
 
       activeList.items.forEach((item: any, idx: number) => {
+          if (hideRead && item.progress?.isCompleted) return;
           const seriesName = item.issue?.series?.name || "Missing/Unlinked Issue";
           
           if (seriesName !== currentSeriesName) {
@@ -173,7 +195,7 @@ function ReadingListsContent() {
       }
 
       return chunks;
-  }, [lists, activeListId]);
+  }, [activeDetail, hideRead]);
 
   const toggleChunk = (chunkId: string) => {
       setExpandedChunks(prev => {
@@ -194,12 +216,23 @@ function ReadingListsContent() {
     }
   }, [paramId])
 
+  useEffect(() => {
+    if (!activeListId) { setActiveDetail(null); return; }
+    let cancelled = false;
+    fetch(`/api/reading-lists?id=${encodeURIComponent(activeListId)}&t=${Date.now()}`)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => { if (!cancelled && data) setActiveDetail(data) })
+      .catch(() => toast({ title: "Error", description: "Failed to load the reading list.", variant: "destructive" }))
+    return () => { cancelled = true };
+  }, [activeListId, detailNonce])
+
   const fetchLists = async (selectId?: string | null) => {
     try {
       const res = await fetch(`/api/reading-lists?t=${Date.now()}`)
       if (res.ok) {
         const data = await res.json()
         setLists(data)
+        setDetailNonce(n => n + 1) // reload the open list too (callers refetch after changing it)
         if (selectId && data.find((l:any) => l.id === selectId)) {
             setActiveListId(selectId)
         } else if (data.length > 0 && !activeListId) {
@@ -658,16 +691,13 @@ function ReadingListsContent() {
   const onDragEnd = async (result: any) => {
       if (!result.destination || !activeListId) return;
       
-      const activeListIndex = lists.findIndex(l => l.id === activeListId);
-      if (activeListIndex === -1) return;
+      if (activeDetail?.id !== activeListId) return;
 
-      const newLists = [...lists];
-      const items = Array.from(newLists[activeListIndex].items);
+      const items = Array.from(activeDetail.items);
       const [reorderedItem] = items.splice(result.source.index, 1);
       items.splice(result.destination.index, 0, reorderedItem);
 
-      newLists[activeListIndex].items = items;
-      setLists(newLists);
+      setActiveDetail({ ...activeDetail, items });
 
       const updatedOrder = items.map((item: any, index: number) => ({
           id: item.id,
@@ -694,8 +724,12 @@ function ReadingListsContent() {
       );
   }
 
-  const activeList = lists.find(l => l.id === activeListId);
-  const missingItems = activeList ? activeList.items.filter((i: any) => !i.issueId) : [];
+  const activeList = activeDetail?.id === activeListId ? activeDetail : null;
+  // Linked to a library issue that has no file yet (e.g. WANTED) counts as missing, not readable
+  const missingItems = activeList ? activeList.items.filter((i: any) => !i.issue?.filePath) : [];
+  const readCount = activeList ? activeList.items.filter((i: any) => i.progress?.isCompleted).length : 0;
+  const nextUp = activeList?.items.find((i: any) => i.issue?.filePath && !i.progress?.isCompleted);
+  const readerHref = (issue: any) => `/reader?path=${encodeURIComponent(issue.filePath)}&series=${encodeURIComponent(issue.series.folderPath)}`;
 
   return (
     <div className="container mx-auto py-10 px-6 max-w-[1400px] space-y-8 transition-colors duration-300">
@@ -771,7 +805,7 @@ function ReadingListsContent() {
                                           <h3 className={`font-bold truncate text-sm ${activeListId === list.id ? 'text-primary' : 'text-foreground'}`}>{list.name}</h3>
                                           {list.isGlobal && <span title={`Global List by ${list.user?.username || 'Unknown'}`}><Globe className="w-3 h-3 text-emerald-500 shrink-0" /></span>}
                                       </div>
-                                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-0.5">{list.items.length} Issues</p>
+                                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-0.5">{list.itemCount} Issues · {list.ownedCount} owned · {list.readCount} read</p>
                                   </div>
                               </div>
                           ))
@@ -791,6 +825,13 @@ function ReadingListsContent() {
                               </div>
                               
                               <div className="flex flex-wrap items-center gap-3 shrink-0 w-full xl:w-auto justify-start xl:justify-end">
+                                  {nextUp && (
+                                      <Button size="sm" asChild className="h-10 sm:h-auto font-bold shadow-sm bg-primary hover:bg-primary/90 text-primary-foreground" title={`${nextUp.issue.series.name} #${nextUp.issue.number}`}>
+                                          <Link href={readerHref(nextUp.issue)}>
+                                              <BookOpen className="w-4 h-4 mr-2" /> {readCount > 0 || nextUp.progress ? "Continue" : "Start"} · #{nextUp.issue.number}
+                                          </Link>
+                                      </Button>
+                                  )}
                                   {/* --- VIEW MODE TOGGLE --- */}
                                   <div className="flex items-center gap-1 bg-muted p-1 rounded-md border border-border shadow-inner">
                                       <Button variant={viewMode === 'grouped' ? 'default' : 'ghost'} size="sm" onClick={() => setViewMode('grouped')} className={`h-8 px-3 text-xs ${viewMode === 'grouped' ? 'shadow-sm bg-background text-foreground' : 'text-muted-foreground'}`}>
@@ -847,6 +888,20 @@ function ReadingListsContent() {
                               </div>
                           </div>
                           
+                          <div className="flex items-center gap-3 w-full">
+                              <div className="h-2 flex-1 rounded-full bg-muted overflow-hidden border border-border">
+                                  <div className="h-full bg-primary transition-all" style={{ width: `${activeList.items.length ? (100 * readCount / activeList.items.length) : 0}%` }} />
+                              </div>
+                              <span className="text-xs font-bold text-primary shrink-0">
+                                  {readCount} / {activeList.items.length} read · {activeList.items.length - missingItems.length} owned
+                              </span>
+                              {viewMode === 'grouped' && (
+                                  <Button size="sm" variant="ghost" className="h-7 px-2 text-xs shrink-0" onClick={() => setHideRead(h => !h)}>
+                                      {hideRead ? "Show read" : "Hide read"}
+                                  </Button>
+                              )}
+                          </div>
+
                           {activeList.description && (
                               <CardDescription className="text-primary/80 leading-relaxed text-sm sm:text-base break-words whitespace-normal w-full mt-2">
                                   {activeList.description}
@@ -878,6 +933,11 @@ function ReadingListsContent() {
                                                 <Badge variant="secondary" className="text-[10px] bg-primary/10 text-primary border-primary/20">
                                                     {chunk.items.length} Issues
                                                 </Badge>
+                                                {chunk.items.every((i: any) => i.progress?.isCompleted) ? (
+                                                    <Badge variant="secondary" className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800"><Check className="w-3 h-3 mr-1" />Read</Badge>
+                                                ) : chunk.items.some((i: any) => i.progress?.isCompleted) && (
+                                                    <span className="text-[10px] font-bold text-muted-foreground">{chunk.items.filter((i: any) => i.progress?.isCompleted).length} read</span>
+                                                )}
                                             </div>
                                             <div className="bg-background rounded-full p-1 shadow-sm border border-border">
                                                 {isExpanded ? <ChevronUp className="w-4 h-4 text-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
@@ -893,23 +953,24 @@ function ReadingListsContent() {
                                                     const coverUrl = activeList.coverUrl || issue?.coverUrl || (series?.folderPath ? `/api/library/cover?path=${encodeURIComponent(series.folderPath)}` : '/api/library/cover?path=missing');
 
                                                 return (
-                                                    <div key={item.id} className="flex items-center gap-4 p-3 bg-background border border-border rounded-xl shadow-sm hover:border-primary/50 transition-all">
+                                                    <div key={item.id} className={`flex items-center gap-4 p-3 bg-background border border-border rounded-xl shadow-sm hover:border-primary/50 transition-all ${item.progress?.isCompleted ? 'opacity-60' : ''}`}>
                                                         <span className="w-8 text-center font-mono text-xs font-bold text-muted-foreground">{index + 1}</span>
                                                         <div className="w-10 h-14 shrink-0 rounded overflow-hidden bg-muted border border-border">
                                                             <img src={coverUrl} className="w-full h-full object-cover" alt="" />
                                                     </div>
                                                     <div className="flex-1 min-w-0">
-                                                        {issue ? (
+                                                        {issue?.filePath ? (
                                                             <>
                                                                 <h4 className="font-bold text-sm truncate text-foreground">{series.name}</h4>
                                                                 <p className="text-xs text-muted-foreground truncate">Issue #{issue.number} • {issue.name || "Untitled"}</p>
+                                                                <ReadState progress={item.progress} />
                                                             </>
                                                         ) : (
                                                                 <h4 className="font-bold text-sm truncate text-muted-foreground">{item.title} (Missing File)</h4>
                                                         )}
                                                     </div>
                                                     <div className="flex items-center gap-2 pr-2 shrink-0">
-                                                        {!issue && (
+                                                        {!issue?.filePath && (
                                                             <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-primary" title="Re-check this item against the library" onClick={() => handleRefreshItem(item.id)} disabled={refreshingItemIds.has(item.id)}>
                                                                 {refreshingItemIds.has(item.id) ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                                                             </Button>
@@ -919,9 +980,9 @@ function ReadingListsContent() {
                                                                 {resyncingSeriesIds.has(series.id) ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                                                             </Button>
                                                         )}
-                                                        {issue && (
+                                                        {issue?.filePath && (
                                                             <Button size="sm" asChild className="h-8 shadow-sm font-bold bg-primary hover:bg-primary/90 text-primary-foreground">
-                                                                <Link href={`/reader?path=${encodeURIComponent(issue.filePath)}&series=${encodeURIComponent(series.folderPath)}`}>
+                                                                <Link href={readerHref(issue)}>
                                                                     <BookOpen className="w-3.5 h-3.5 sm:mr-2" /> <span className="hidden sm:inline">Read</span>
                                                                 </Link>
                                                             </Button>
@@ -951,7 +1012,7 @@ function ReadingListsContent() {
                                           const series = issue?.series;
                                           const coverUrl = activeList.coverUrl || issue?.coverUrl || (series?.folderPath ? `/api/library/cover?path=${encodeURIComponent(series.folderPath)}` : '/api/library/cover?path=missing');
 
-                                          if (!issue) {
+                                          if (!issue?.filePath) {
                                               const isRequesting = requestingIds.has(item.id);
                                               const isAlreadyRequested = requestedIds.has(item.id);
                                               
@@ -1005,7 +1066,7 @@ function ReadingListsContent() {
                                                       <div 
                                                           ref={provided.innerRef} 
                                                           {...provided.draggableProps} 
-                                                          className={`flex items-center gap-4 p-3 bg-background border border-border rounded-xl shadow-sm transition-all ${snapshot.isDragging ? 'shadow-xl scale-[1.02] border-primary z-50 ring-2 ring-primary/20' : 'hover:border-primary/50'}`}
+                                                          className={`flex items-center gap-4 p-3 bg-background border border-border rounded-xl shadow-sm transition-all ${snapshot.isDragging ? 'shadow-xl scale-[1.02] border-primary z-50 ring-2 ring-primary/20' : 'hover:border-primary/50'} ${item.progress?.isCompleted && !snapshot.isDragging ? 'opacity-60' : ''}`}
                                                       >
                                                           <div {...provided.dragHandleProps} className="px-2 py-4 text-muted-foreground hover:text-primary cursor-grab active:cursor-grabbing">
                                                               <GripVertical className="w-5 h-5" />
@@ -1024,6 +1085,7 @@ function ReadingListsContent() {
                                                                   <span className="font-bold text-foreground shrink-0">Issue #{issue.number}</span>
                                                                   <span className="truncate hidden sm:inline">• {issue.name || "Untitled Issue"}</span>
                                                               </div>
+                                                              <ReadState progress={item.progress} />
                                                           </div>
 
                                                           <div className="flex items-center gap-2 shrink-0 pr-2">
@@ -1033,7 +1095,7 @@ function ReadingListsContent() {
                                                                   </Button>
                                                               )}
                                                               <Button size="sm" asChild className="h-8 shadow-sm font-bold bg-primary hover:bg-primary/90 text-primary-foreground">
-                                                                  <Link href={`/reader?path=${encodeURIComponent(issue.filePath)}&series=${encodeURIComponent(series.folderPath)}`}>
+                                                                  <Link href={readerHref(issue)}>
                                                                       <BookOpen className="w-3.5 h-3.5 sm:mr-2" /> <span className="hidden sm:inline">Read</span>
                                                                   </Link>
                                                               </Button>
@@ -1055,6 +1117,8 @@ function ReadingListsContent() {
                       </DragDropContext>
                   )}
               </div>
+          ) : activeListId ? (
+              <div className="flex justify-center py-32"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
           ) : (
               <div className="hidden lg:flex flex-col items-center justify-center py-32 text-center border-2 border-dashed rounded-xl border-border bg-background">
                   <FolderOpen className="w-16 h-16 text-muted-foreground/30 mb-4" />

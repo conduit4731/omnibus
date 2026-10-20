@@ -109,7 +109,7 @@ interface Collection {
   name: string;
   userId?: string | null;
   isGlobal?: boolean;
-  items?: { id: string }[];
+  itemCount?: number;
   user?: { username: string } | null;
 }
 
@@ -1541,7 +1541,7 @@ function LibraryContent() {
                                 {c.isGlobal && <span title="Global List"><Globe className="w-3 h-3 text-emerald-500 shrink-0" /></span>}
                             </p>
                             <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold mt-0.5">
-                                {c.items?.length || 0} Items {c.isGlobal && ` • Global (${c.user?.username || 'Unknown'})`}
+                                {c.itemCount ?? 0} Items {c.isGlobal && ` • Global (${c.user?.username || 'Unknown'})`}
                             </p>
                         </div>
                         <Button aria-label={`Delete list: ${c.name}`} variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20" onClick={() => setCollectionToDelete(c.id)}>

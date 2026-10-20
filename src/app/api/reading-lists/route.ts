@@ -24,79 +24,84 @@ export async function GET(request: Request) {
             ? {}
             : { OR: [{ issueId: null }, { issue: { series: { libraryId: { in: accessibleLibs } } } }] };
 
-        let lists = await prisma.readingList.findMany({
-            where: { OR: [ { userId: userId }, { isGlobal: true }, { userId: null } ] },
+        const visible = { OR: [ { userId: userId }, { isGlobal: true }, { userId: null } ] };
+        const listId = new URL(request.url).searchParams.get('id');
+
+        // Overview (no ?id): names + counts only. Loading every item of every list made the page unusable
+        // with a few hundred imported CBL lists (#252); items come per list via ?id=.
+        if (!listId) {
+            const lists = await prisma.readingList.findMany({
+                where: visible,
+                include: { user: { select: { username: true } } }, // Important for the UI to display the creator of Global lists
+                orderBy: { updatedAt: 'desc' }
+            });
+            const items = await prisma.readingListItem.findMany({
+                where: { listId: { in: lists.map(l => l.id) }, ...itemAccessWhere },
+                select: { listId: true, issueId: true, issue: { select: { filePath: true } } }
+            });
+            const completed = new Set((await prisma.readProgress.findMany({
+                where: { userId, isCompleted: true }, select: { issueId: true }
+            })).map(p => p.issueId));
+            const counts = new Map(lists.map(l => [l.id, { itemCount: 0, ownedCount: 0, readCount: 0 }]));
+            for (const item of items) {
+                const c = counts.get(item.listId)!;
+                c.itemCount++;
+                if (item.issue?.filePath) c.ownedCount++;
+                if (item.issueId && completed.has(item.issueId)) c.readCount++;
+            }
+            return NextResponse.json(lists.map(l => ({ ...l, ...counts.get(l.id) })));
+        }
+
+        const loadList = () => prisma.readingList.findFirst({
+            where: { id: listId, ...visible },
             include: {
-                user: { select: { username: true } }, // Important for the UI to display the creator of Global lists
+                user: { select: { username: true } },
                 items: {
                     where: itemAccessWhere,
                     orderBy: { order: 'asc' },
                     include: { issue: { include: { series: true } } }
                 }
-            },
-            orderBy: { updatedAt: 'desc' }
+            }
         });
-
-        let requiresRefresh = false;
-        const missingItemsMeta: { id: string, source: string }[] = [];
+        let list = await loadList();
+        if (!list) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
         // Auto-link logic: Find items that were imported from a CSV or Auto-builder that have a Metadata ID but no local database linkage yet
-        for (const list of lists) {
-            for (const item of list.items) {
-                if (!item.issueId && item.cvIssueId) {
-                    missingItemsMeta.push({ id: item.cvIssueId.toString(), source: item.metadataSource || 'COMICVINE' });
-                }
+        const unlinked = list.items.filter(item => !item.issueId && item.cvIssueId);
+        if (unlinked.length > 0) {
+            const bySource = new Map<string, string[]>();
+            for (const item of unlinked) {
+                const source = item.metadataSource || 'COMICVINE';
+                bySource.set(source, [...(bySource.get(source) || []), item.cvIssueId!.toString()]);
             }
-        }
-
-        if (missingItemsMeta.length > 0) {
             const potentialIssues = await prisma.issue.findMany({
-                where: { 
-                    OR: missingItemsMeta.map(m => ({ metadataId: m.id, metadataSource: m.source }))
-                }
+                where: { OR: [...bySource].map(([source, ids]) => ({ metadataSource: source, metadataId: { in: ids } })) },
+                select: { id: true, metadataId: true, metadataSource: true }
             });
-            
             const linkUpdates = [];
-
-            for (const list of lists) {
-                for (const item of list.items) {
-                    if (!item.issueId && item.cvIssueId) {
-                        const validIssue = potentialIssues.find(i => i.metadataId === item.cvIssueId!.toString() && i.metadataSource === (item.metadataSource || 'COMICVINE'));
-                        
-                        if (validIssue) {
-                            linkUpdates.push(
-                                prisma.readingListItem.update({
-                                    where: { id: item.id },
-                                    data: { issueId: validIssue.id }
-                                })
-                            );
-                        }
-                    }
+            for (const item of unlinked) {
+                const validIssue = potentialIssues.find(i => i.metadataId === item.cvIssueId!.toString() && i.metadataSource === (item.metadataSource || 'COMICVINE'));
+                if (validIssue) {
+                    linkUpdates.push(prisma.readingListItem.update({ where: { id: item.id }, data: { issueId: validIssue.id } }));
                 }
             }
-
             if (linkUpdates.length > 0) {
                 await prisma.$transaction(linkUpdates);
-                requiresRefresh = true;
+                list = (await loadList())!;
             }
         }
 
-        if (requiresRefresh) {
-            lists = await prisma.readingList.findMany({
-                where: { OR: [{ userId: userId }, { isGlobal: true }, { userId: null }] },
-                include: {
-                    user: { select: { username: true } },
-                    items: {
-                        where: itemAccessWhere,
-                        orderBy: { order: 'asc' },
-                        include: { issue: { include: { series: true } } }
-                    }
-                },
-                orderBy: { updatedAt: 'desc' }
-            });
-        }
+        // The user's progress per linked issue, so the list can show read / in progress / unread (#253)
+        const progress = await prisma.readProgress.findMany({
+            where: { userId, issueId: { in: list.items.flatMap(i => i.issueId ? [i.issueId] : []) } },
+            select: { issueId: true, currentPage: true, totalPages: true, isCompleted: true }
+        });
+        const progressByIssue = new Map(progress.map(p => [p.issueId, p]));
 
-        return NextResponse.json(lists);
+        return NextResponse.json({
+            ...list,
+            items: list.items.map(item => ({ ...item, progress: (item.issueId && progressByIssue.get(item.issueId)) || null }))
+        });
     } catch (error: unknown) {
         Logger.log(`[Reading Lists API] Error: ${getErrorMessage(error)}`, 'error');
         return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });

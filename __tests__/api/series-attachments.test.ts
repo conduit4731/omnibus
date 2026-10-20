@@ -17,6 +17,7 @@ vi.mock('@/lib/db', () => ({
         attachedVolume: { findMany: vi.fn(), findUnique: vi.fn(), findFirst: vi.fn(), upsert: vi.fn(), delete: vi.fn() },
         issue: { groupBy: vi.fn(), findMany: vi.fn(), updateMany: vi.fn(), deleteMany: vi.fn(), update: vi.fn(), delete: vi.fn(), count: vi.fn() },
         library: { findMany: vi.fn(async () => [{ id: 'lib1', path: '/comics' }]) },
+        systemSetting: { findUnique: vi.fn(async () => null) }, // "Write ComicInfo.xml" unset = on
     }
 }));
 // LOCAL attachments with a sourcePath hand the move to the collision helper; the route is tested
