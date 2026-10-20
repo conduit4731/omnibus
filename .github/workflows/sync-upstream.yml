@@ -1,0 +1,58 @@
+# Fork only: merges hankscafe/omnibus main into this fork's main once a week, after tests pass.
+# The Unraid server pulls main and rebuilds its image afterwards (omnibus-update.sh there).
+# A failed run (merge conflict, red tests) leaves main untouched; GitHub mails the failure.
+# shortcut: GITHUB_TOKEN may not push commits that change files in .github/workflows; if upstream
+# edits its workflows, the push step fails and the merge has to be pushed by hand once.
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'   # Mondays 03:00 UTC
+  workflow_dispatch:
+    inputs:
+      test_only:
+        description: 'Run the type-check and tests even if upstream has nothing new (no push)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge upstream/main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/hankscafe/omnibus.git
+          git fetch upstream main --tags
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "Nothing new upstream."
+            echo "NEW=0" >> "$GITHUB_ENV"
+          else
+            git merge --no-edit upstream/main
+            echo "NEW=1" >> "$GITHUB_ENV"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: env.NEW == '1' || inputs.test_only
+        with:
+          node-version: '22'
+
+      - name: Type-check and test the merge
+        if: env.NEW == '1' || inputs.test_only
+        run: |
+          npm ci --legacy-peer-deps
+          npx prisma generate
+          npx tsc --noEmit
+          npx vitest run
+
+      - name: Push
+        if: env.NEW == '1'
+        run: git push origin HEAD:main --tags
