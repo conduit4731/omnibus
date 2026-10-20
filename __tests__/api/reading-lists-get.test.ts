@@ -45,8 +45,8 @@ describe('GET /api/reading-lists (#252 / #253)', () => {
 
         expect(mocks.listFindMany.mock.calls[0][0].include.items).toBeUndefined();
         expect(body).toEqual([
-            { id: 'l1', name: 'Zero Year', itemCount: 4, ownedCount: 2, readCount: 1 },
-            { id: 'l2', name: 'Empty', itemCount: 0, ownedCount: 0, readCount: 0 },
+            { id: 'l1', name: 'Zero Year', itemCount: 4, ownedCount: 2, readCount: 1, publisher: 'Other', category: 'Lists', era: 'Unknown era', eraStart: 9999 },
+            { id: 'l2', name: 'Empty', itemCount: 0, ownedCount: 0, readCount: 0, publisher: 'Other', category: 'Lists', era: 'Unknown era', eraStart: 9999 },
         ]);
     });
 

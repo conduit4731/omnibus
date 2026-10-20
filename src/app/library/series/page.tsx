@@ -1042,10 +1042,12 @@ function SeriesContent() {
     }
   }
 
-  const handleBulkProgress = async (markAsRead: boolean) => {
+  // ids = null: the current selection; otherwise these issues (the "Mark all read" button passes all of them)
+  const handleBulkProgress = async (markAsRead: boolean, ids: Set<string> | null = null) => {
+    const targets = ids ?? selectedIssues;
     setIsBulkProcessing(true);
     try {
-        const issuesToUpdate = downloadedIssues.filter(i => selectedIssues.has(i.id));
+        const issuesToUpdate = downloadedIssues.filter(i => targets.has(i.id) && i.fullPath);
         const promises = issuesToUpdate.map(issue =>
             fetch('/api/progress', {
                 method: 'POST',
@@ -1061,13 +1063,13 @@ function SeriesContent() {
         await Promise.all(promises);
 
         setDownloadedIssues(prev => prev.map(i => {
-            if (selectedIssues.has(i.id)) {
+            if (targets.has(i.id) && i.fullPath) {
                 return { ...i, isRead: markAsRead, readProgress: markAsRead ? 100 : 0 };
             }
             return i;
         }));
 
-        toast({ title: "Bulk Update Success", description: `Marked ${selectedIssues.size} issues as ${markAsRead ? 'read' : 'unread'}.` });
+        toast({ title: "Bulk Update Success", description: `Marked ${issuesToUpdate.length} issues as ${markAsRead ? 'read' : 'unread'}.` });
         setSelectedIssues(new Set());
         setIsSelectionMode(false);
     } catch (e) {
@@ -1831,6 +1833,22 @@ function SeriesContent() {
                                   : (<><Download className="w-4 h-4 sm:mr-1" /><span className="hidden sm:inline">Download Series</span></>)}
                           </Button>
                       )}
+                      {downloadedIssues.some(i => i.fullPath) && (() => {
+                          const allRead = downloadedIssues.every(i => !i.fullPath || i.isRead);
+                          return (
+                              <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  className="h-8 px-3 text-xs font-bold bg-muted hover:bg-muted/80 text-foreground border border-border"
+                                  onClick={() => handleBulkProgress(!allRead, new Set(downloadedIssues.map(i => i.id)))}
+                                  disabled={isBulkProcessing || isSelectionMode}
+                                  title={allRead ? "Mark every issue of this series unread" : "Mark every issue of this series read"}
+                              >
+                                  {isBulkProcessing ? <Loader2 className="w-4 h-4 sm:mr-1 animate-spin" /> : allRead ? <EyeOff className="w-4 h-4 sm:mr-1" /> : <CheckCircle2 className="w-4 h-4 sm:mr-1" />}
+                                  <span className="hidden sm:inline">{allRead ? "Mark All Unread" : "Mark All Read"}</span>
+                              </Button>
+                          );
+                      })()}
                       <div className="flex items-center gap-1 border border-border rounded-md p-1 bg-background shadow-sm shrink-0">
                           <Button variant={isSelectionMode ? "secondary" : "ghost"} size="sm" className="h-8 px-2 text-xs font-bold" onClick={() => { setIsSelectionMode(!isSelectionMode); setSelectedIssues(new Set()); }}>
                               {isSelectionMode ? <Square className="w-4 h-4 sm:mr-1" /> : <CheckSquare className="w-4 h-4 sm:mr-1" />}

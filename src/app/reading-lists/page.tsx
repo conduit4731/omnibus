@@ -18,7 +18,7 @@ import {
     BookOpen, Trash2, Plus, GripVertical, Loader2, Image as ImageIcon,
     ArrowLeft, ListOrdered, Calendar, Minus, FolderOpen, CloudDownload,
     Check, DownloadCloud, Sparkles, Globe, ExternalLink, Share2, Info,
-    ChevronDown, ChevronUp, LayoutList, List, RefreshCw
+    ChevronDown, ChevronUp, LayoutList, List, RefreshCw, Star
 } from "lucide-react"
 import Link from "next/link"
 import { Badge } from "@/components/ui/badge"
@@ -26,6 +26,7 @@ import { Logger } from "@/lib/logger"
 import { getErrorMessage } from "@/lib/utils/error"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { ReadingListPicker } from "@/components/reading-list-picker"
 
 // Read / in progress marker for a list entry; nothing for unread
 function ReadState({ progress }: { progress: { currentPage: number, totalPages: number, isCompleted: boolean } | null }) {
@@ -57,6 +58,8 @@ function ReadingListsContent() {
   const [activeDetail, setActiveDetail] = useState<any | null>(null)
   const [detailNonce, setDetailNonce] = useState(0)
   const [hideRead, setHideRead] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [mainListId, setMainListId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   
   // Modals
@@ -226,9 +229,25 @@ function ReadingListsContent() {
     return () => { cancelled = true };
   }, [activeListId, detailNonce])
 
+  const handleSetMainList = async (id: string | null) => {
+    const res = await fetch('/api/reading-lists/main', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listId: id }) })
+    if (res.ok) {
+        setMainListId(id)
+        toast({ title: id ? "Main list set" : "Main list cleared" })
+    } else {
+        toast({ title: "Error", description: "Failed to save the main list.", variant: "destructive" })
+    }
+  }
+
   const fetchLists = async (selectId?: string | null) => {
     try {
-      const res = await fetch(`/api/reading-lists?t=${Date.now()}`)
+      const [res, mainRes] = await Promise.all([
+        fetch(`/api/reading-lists?t=${Date.now()}`),
+        fetch(`/api/reading-lists/main?t=${Date.now()}`),
+      ])
+      const main = mainRes.ok ? (await mainRes.json()).listId : null
+      setMainListId(main)
+      if (!selectId && !activeListId) selectId = main
       if (res.ok) {
         const data = await res.json()
         setLists(data)
@@ -744,75 +763,42 @@ function ReadingListsContent() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)] gap-8 items-start">
-          <div className="space-y-4">
-              <div className="flex flex-col gap-2">
-                  <Button className="w-full font-bold shadow-md bg-primary hover:bg-primary/90 text-primary-foreground border-0" onClick={() => setAutoBuildModalOpen(true)}>
-                      <Sparkles className="w-4 h-4 mr-2" /> Auto-Build Story Arc
-                  </Button>
-                  <Button variant="outline" className="w-full font-bold shadow-sm border-primary/30 text-primary bg-primary/5 hover:bg-primary/10" onClick={() => setCblModalOpen(true)}>
-                      <DownloadCloud className="w-4 h-4 mr-2" /> Import from .CBL
-                  </Button>
-                  <Button variant="outline" className="w-full font-bold shadow-sm border-primary/30 text-primary bg-primary/5 hover:bg-primary/10" onClick={() => setCsvModalOpen(true)}>
-                      <DownloadCloud className="w-4 h-4 mr-2" /> Import from CSV
-                  </Button>
-                  <div className="grid grid-cols-2 gap-2">
-                      <Button variant="outline" className="w-full font-bold shadow-sm border-primary/30 text-primary bg-primary/5 hover:bg-primary/10 px-2 text-xs" onClick={() => setAniListModalOpen(true)}>
-                          <DownloadCloud className="w-4 h-4 mr-2 shrink-0" /> AniList
-                      </Button>
-                      <Button variant="outline" className="w-full font-bold shadow-sm border-primary/30 text-primary bg-primary/5 hover:bg-primary/10 px-2 text-xs" onClick={() => setMalModalOpen(true)}>
-                          <DownloadCloud className="w-4 h-4 mr-2 shrink-0" /> MAL
-                      </Button>
-                  </div>
-                  <Button variant="outline" className="w-full font-bold shadow-sm border-primary/30 text-primary bg-primary/5 hover:bg-primary/10" onClick={() => setCreateModalOpen(true)}>
-                      <Plus className="w-4 h-4 mr-2" /> Create Empty List
-                  </Button>
-                  
-                  <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                          <Button variant="outline" className="w-full font-bold shadow-sm border-primary/30 text-primary bg-primary/5 hover:bg-primary/10">
-                              <ExternalLink className="w-4 h-4 mr-2" /> Lookup Arc IDs
-                          </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent className="w-full sm:w-[260px] bg-popover border-border z-[100]">
-                          <DropdownMenuItem asChild className="cursor-pointer hover:bg-muted">
-                              <a href="https://comicvine.gamespot.com/story-arcs/" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2">ComicVine Story Arcs</a>
-                          </DropdownMenuItem>
-                          <DropdownMenuItem asChild className="cursor-pointer hover:bg-muted">
-                              <a href="https://metron.cloud/arc/" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2">Metron.Cloud Story Arcs</a>
-                          </DropdownMenuItem>
-                      </DropdownMenuContent>
-                  </DropdownMenu>
-              </div>
-
-              <Card className="shadow-sm border-border bg-background">
-                  <div className="p-2 flex flex-col gap-1">
-                      {lists.length === 0 ? (
-                          <div className="p-4 text-center text-sm text-muted-foreground italic">No reading lists created yet.</div>
-                      ) : (
-                          lists.map(list => (
-                              <div 
-                                  key={list.id} 
-                                  onClick={() => setActiveListId(list.id)}
-                                  className={`px-3 py-2.5 rounded-md flex items-center justify-between cursor-pointer transition-all ${
-                                      activeListId === list.id 
-                                      ? 'bg-primary/10 border border-primary/30 shadow-sm' 
-                                      : 'border border-transparent hover:bg-muted/50'
-                                  }`}
-                              >
-                                  <div className="min-w-0 pr-2">
-                                      <div className="flex items-center gap-2">
-                                          <h3 className={`font-bold truncate text-sm ${activeListId === list.id ? 'text-primary' : 'text-foreground'}`}>{list.name}</h3>
-                                          {list.isGlobal && <span title={`Global List by ${list.user?.username || 'Unknown'}`}><Globe className="w-3 h-3 text-emerald-500 shrink-0" /></span>}
-                                      </div>
-                                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-0.5">{list.itemCount} Issues · {list.ownedCount} owned · {list.readCount} read</p>
-                                  </div>
-                              </div>
-                          ))
-                      )}
-                  </div>
-              </Card>
+      <div className="space-y-6">
+          {/* Fork: one bar with the list picker + import menu instead of a sidebar listing every list */}
+          <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" className="h-11 font-bold border-primary/30 bg-primary/5 hover:bg-primary/10 text-primary max-w-full" onClick={() => setPickerOpen(true)}>
+                  <ListOrdered className="w-4 h-4 mr-2 shrink-0" />
+                  <span className="truncate">{lists.find(l => l.id === activeListId)?.name || "Choose a reading list"}</span>
+                  {activeListId && activeListId === mainListId && <Star className="w-3.5 h-3.5 ml-2 fill-amber-400 text-amber-400 shrink-0" />}
+                  <ChevronDown className="w-4 h-4 ml-2 shrink-0" />
+              </Button>
+              <span className="text-xs text-muted-foreground font-bold">{lists.length} lists</span>
+              <div className="flex-1" />
+              <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                      <Button className="h-11 font-bold shadow-md bg-primary hover:bg-primary/90 text-primary-foreground border-0"><Plus className="w-4 h-4 mr-2" /> New / Import</Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-[240px] bg-popover border-border z-[100]">
+                      <DropdownMenuItem className="cursor-pointer" onClick={() => setAutoBuildModalOpen(true)}><Sparkles className="w-4 h-4 mr-2" /> Auto-Build Story Arc</DropdownMenuItem>
+                      <DropdownMenuItem className="cursor-pointer" onClick={() => setCblModalOpen(true)}><DownloadCloud className="w-4 h-4 mr-2" /> Import from .CBL</DropdownMenuItem>
+                      <DropdownMenuItem className="cursor-pointer" onClick={() => setCsvModalOpen(true)}><DownloadCloud className="w-4 h-4 mr-2" /> Import from CSV</DropdownMenuItem>
+                      <DropdownMenuItem className="cursor-pointer" onClick={() => setAniListModalOpen(true)}><DownloadCloud className="w-4 h-4 mr-2" /> AniList</DropdownMenuItem>
+                      <DropdownMenuItem className="cursor-pointer" onClick={() => setMalModalOpen(true)}><DownloadCloud className="w-4 h-4 mr-2" /> MAL</DropdownMenuItem>
+                      <DropdownMenuItem className="cursor-pointer" onClick={() => setCreateModalOpen(true)}><Plus className="w-4 h-4 mr-2" /> Create Empty List</DropdownMenuItem>
+                      <DropdownMenuItem asChild className="cursor-pointer"><a href="https://comicvine.gamespot.com/story-arcs/" target="_blank" rel="noopener noreferrer"><ExternalLink className="w-4 h-4 mr-2" /> ComicVine Story Arcs</a></DropdownMenuItem>
+                      <DropdownMenuItem asChild className="cursor-pointer"><a href="https://metron.cloud/arc/" target="_blank" rel="noopener noreferrer"><ExternalLink className="w-4 h-4 mr-2" /> Metron Story Arcs</a></DropdownMenuItem>
+                  </DropdownMenuContent>
+              </DropdownMenu>
           </div>
+          <ReadingListPicker
+              open={pickerOpen}
+              onOpenChange={setPickerOpen}
+              lists={lists}
+              activeId={activeListId}
+              mainId={mainListId}
+              onSelect={setActiveListId}
+              onSetMain={handleSetMainList}
+          />
 
           {activeList ? (
               <div className="space-y-6">
@@ -1120,9 +1106,10 @@ function ReadingListsContent() {
           ) : activeListId ? (
               <div className="flex justify-center py-32"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
           ) : (
-              <div className="hidden lg:flex flex-col items-center justify-center py-32 text-center border-2 border-dashed rounded-xl border-border bg-background">
+              <div className="flex flex-col items-center justify-center py-32 text-center border-2 border-dashed rounded-xl border-border bg-background">
                   <FolderOpen className="w-16 h-16 text-muted-foreground/30 mb-4" />
                   <p className="text-lg font-bold text-muted-foreground">Select a reading list to manage.</p>
+                  <Button variant="outline" className="mt-4 font-bold" onClick={() => setPickerOpen(true)}>Choose a reading list</Button>
               </div>
           )}
       </div>

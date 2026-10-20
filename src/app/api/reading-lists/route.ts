@@ -6,6 +6,7 @@ import { getAuthOptions } from '@/app/api/auth/[...nextauth]/options';
 import { getErrorMessage } from '@/lib/utils/error';
 import { Logger } from '@/lib/logger';
 import { getAccessibleLibraryIds } from '@/lib/library-access';
+import { classifyList, eraFor, medianYear, yearFromTitle } from '@/lib/reading-list-groups';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,19 +38,27 @@ export async function GET(request: Request) {
             });
             const items = await prisma.readingListItem.findMany({
                 where: { listId: { in: lists.map(l => l.id) }, ...itemAccessWhere },
-                select: { listId: true, issueId: true, issue: { select: { filePath: true } } }
+                select: { listId: true, issueId: true, title: true, issue: { select: { filePath: true, series: { select: { publisher: true, year: true } } } } }
             });
             const completed = new Set((await prisma.readProgress.findMany({
                 where: { userId, isCompleted: true }, select: { issueId: true }
             })).map(p => p.issueId));
-            const counts = new Map(lists.map(l => [l.id, { itemCount: 0, ownedCount: 0, readCount: 0 }]));
+            const counts = new Map(lists.map(l => [l.id, { itemCount: 0, ownedCount: 0, readCount: 0, publishers: [] as (string | null)[], years: [] as number[] }]));
             for (const item of items) {
                 const c = counts.get(item.listId)!;
                 c.itemCount++;
                 if (item.issue?.filePath) c.ownedCount++;
                 if (item.issueId && completed.has(item.issueId)) c.readCount++;
+                c.publishers.push(item.issue?.series?.publisher ?? null);
+                const year = item.issue?.series?.year ?? yearFromTitle(item.title);
+                if (year) c.years.push(year);
             }
-            return NextResponse.json(lists.map(l => ({ ...l, ...counts.get(l.id) })));
+            // Publisher + era for the list picker (fork: reading lists grouped like DC / Marvel → era)
+            return NextResponse.json(lists.map(l => {
+                const { publishers, years, ...c } = counts.get(l.id)!;
+                const { publisher, category } = classifyList(l, publishers);
+                return { ...l, ...c, publisher, category, ...eraFor(publisher, medianYear(years)) };
+            }));
         }
 
         const loadList = () => prisma.readingList.findFirst({
