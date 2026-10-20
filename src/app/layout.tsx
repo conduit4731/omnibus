@@ -97,6 +97,29 @@ export default async function RootLayout({
         <link rel="apple-touch-icon" href="/icon-192x192.png" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         
+        {/* Fork: browsers that refuse web storage (Brave on iOS with Shields blocking site data makes
+            localStorage null) crashed every page that reads it. Swap in an in-memory store for this tab. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              ['localStorage', 'sessionStorage'].forEach(function (name) {
+                var ok = false;
+                try { var s = window[name]; s.setItem('__omnibus_probe', '1'); s.removeItem('__omnibus_probe'); ok = true; } catch (e) {}
+                if (ok) return;
+                var data = {};
+                var mem = {
+                  getItem: function (k) { return Object.prototype.hasOwnProperty.call(data, k) ? data[k] : null; },
+                  setItem: function (k, v) { data[k] = String(v); },
+                  removeItem: function (k) { delete data[k]; },
+                  clear: function () { data = {}; },
+                  key: function (i) { return Object.keys(data)[i] || null; },
+                  get length() { return Object.keys(data).length; }
+                };
+                try { Object.defineProperty(window, name, { value: mem, configurable: true }); } catch (e) {}
+              });
+            `,
+          }}
+        />
         {/* EXACT ANTI-FOUC SCRIPT: Perfectly matches your ThemeProvider & globals.css */}
         <script
           dangerouslySetInnerHTML={{
