@@ -27,6 +27,7 @@ import { getErrorMessage } from "@/lib/utils/error"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ReadingListPicker } from "@/components/reading-list-picker"
+import { nextInList } from "@/lib/reading-list-next"
 
 // Read / in progress marker for a list entry; nothing for unread
 function ReadState({ progress }: { progress: { currentPage: number, totalPages: number, isCompleted: boolean } | null }) {
@@ -59,6 +60,7 @@ function ReadingListsContent() {
   const [detailNonce, setDetailNonce] = useState(0)
   const [hideRead, setHideRead] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [skipNoticeOpen, setSkipNoticeOpen] = useState(false)
   const [mainListId, setMainListId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   
@@ -747,7 +749,7 @@ function ReadingListsContent() {
   // Linked to a library issue that has no file yet (e.g. WANTED) counts as missing, not readable
   const missingItems = activeList ? activeList.items.filter((i: any) => !i.issue?.filePath) : [];
   const readCount = activeList ? activeList.items.filter((i: any) => i.progress?.isCompleted).length : 0;
-  const nextUp = activeList?.items.find((i: any) => i.issue?.filePath && !i.progress?.isCompleted);
+  const { item: nextUp, skipped: skippedMissing } = nextInList<any>(activeList?.items || []);
   const readerHref = (issue: any) => `/reader?path=${encodeURIComponent(issue.filePath)}&series=${encodeURIComponent(issue.series.folderPath)}`;
 
   return (
@@ -811,11 +813,17 @@ function ReadingListsContent() {
                               </div>
                               
                               <div className="flex flex-wrap items-center gap-3 shrink-0 w-full xl:w-auto justify-start xl:justify-end">
-                                  {nextUp && (
+                                  {nextUp && skippedMissing.length === 0 && (
                                       <Button size="sm" asChild className="h-10 sm:h-auto font-bold shadow-sm bg-primary hover:bg-primary/90 text-primary-foreground" title={`${nextUp.issue.series.name} #${nextUp.issue.number}`}>
                                           <Link href={readerHref(nextUp.issue)}>
-                                              <BookOpen className="w-4 h-4 mr-2" /> {readCount > 0 || nextUp.progress ? "Continue" : "Start"} · #{nextUp.issue.number}
+                                              <BookOpen className="w-4 h-4 mr-2" /> {readCount > 0 || nextUp.progress ? "Continue" : "Start"} · {nextUp.issue.series.name} #{nextUp.issue.number}
                                           </Link>
+                                      </Button>
+                                  )}
+                                  {/* The next entries in order are missing: say so before jumping over them */}
+                                  {skippedMissing.length > 0 && (
+                                      <Button size="sm" className="h-10 sm:h-auto font-bold shadow-sm bg-amber-500 hover:bg-amber-500/90 text-white" onClick={() => setSkipNoticeOpen(true)}>
+                                          <Info className="w-4 h-4 mr-2" /> {nextUp ? `Continue · ${nextUp.issue.series.name} #${nextUp.issue.number}` : "Continue"} · {skippedMissing.length} missing
                                       </Button>
                                   )}
                                   {/* --- VIEW MODE TOGGLE --- */}
@@ -919,6 +927,9 @@ function ReadingListsContent() {
                                                 <Badge variant="secondary" className="text-[10px] bg-primary/10 text-primary border-primary/20">
                                                     {chunk.items.length} Issues
                                                 </Badge>
+                                                {chunk.items.some((i: any) => !i.issue?.filePath) && (
+                                                    <Badge variant="secondary" className="text-[10px] bg-orange-50 text-orange-600 border-orange-200 dark:bg-orange-900/20 dark:text-orange-400 dark:border-orange-800">{chunk.items.filter((i: any) => !i.issue?.filePath).length} missing</Badge>
+                                                )}
                                                 {chunk.items.every((i: any) => i.progress?.isCompleted) ? (
                                                     <Badge variant="secondary" className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800"><Check className="w-3 h-3 mr-1" />Read</Badge>
                                                 ) : chunk.items.some((i: any) => i.progress?.isCompleted) && (
@@ -1113,6 +1124,30 @@ function ReadingListsContent() {
               </div>
           )}
       </div>
+
+      <Dialog open={skipNoticeOpen} onOpenChange={setSkipNoticeOpen}>
+        <DialogContent className="sm:max-w-[480px] bg-background border-border rounded-xl">
+            <DialogHeader>
+                <DialogTitle>{skippedMissing.length} {skippedMissing.length === 1 ? "issue is" : "issues are"} not in your library</DialogTitle>
+                <DialogDescription>
+                    {nextUp ? `These come next in the reading order. Continue with the next issue you have, ${nextUp.issue.series.name} #${nextUp.issue.number}, or request the missing ones first.` : "Everything left in this list is missing. Request it to keep reading."}
+                </DialogDescription>
+            </DialogHeader>
+            <ul className="max-h-60 overflow-y-auto text-sm space-y-1 border border-border rounded-lg p-3 bg-muted/30">
+                {skippedMissing.map((i: any) => <li key={i.id} className="truncate"><span className="text-orange-500 font-bold mr-2">✕</span>{i.issue?.series ? `${i.issue.series.name} #${i.issue.number}` : i.title}</li>)}
+            </ul>
+            <DialogFooter className="gap-2">
+                <Button variant="outline" className="font-bold" disabled={isBulkDownloading} onClick={() => { setSkipNoticeOpen(false); handleDownloadAllMissing(skippedMissing); }}>
+                    <CloudDownload className="w-4 h-4 mr-2" /> Request missing ({skippedMissing.length})
+                </Button>
+                {nextUp && (
+                    <Button asChild className="font-bold">
+                        <Link href={readerHref(nextUp.issue)}><BookOpen className="w-4 h-4 mr-2" /> Continue with #{nextUp.issue.number}</Link>
+                    </Button>
+                )}
+            </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={createModalOpen} onOpenChange={setCreateModalOpen}>
         <DialogContent className="sm:max-w-[425px] bg-background border-border rounded-xl">

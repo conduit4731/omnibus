@@ -52,7 +52,8 @@ function DynamicCover({ metadataId, metadataSource, issueNumber, fallbackUrl, al
     );
 }
 
-export function ContinueReading() {
+// excludePaths (fork): issues the main reading list shelf already shows
+export function ContinueReading({ excludePaths }: { excludePaths?: Set<string> } = {}) {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
@@ -82,7 +83,8 @@ export function ContinueReading() {
       }
   };
 
-  if (loading || items.length === 0) return null;
+  const shown = excludePaths ? items.filter(item => !excludePaths.has(item.filePath)) : items;
+  if (loading || shown.length === 0) return null;
 
   return (
     <div className="space-y-4">
@@ -96,7 +98,7 @@ export function ContinueReading() {
       </div>
       
       <div className="flex overflow-x-auto gap-4 pb-6 pt-4 px-2 snap-x no-scrollbar -mx-2">
-        {items.map((item) => (
+        {shown.map((item) => (
             <div 
               key={item.id} 
               className="group relative flex-none w-[calc(50%-0.5rem)] md:w-[calc(25%-0.75rem)] lg:w-[calc(14.285%-0.857rem)] aspect-[2/3] bg-muted rounded-lg overflow-hidden shadow-sm hover:scale-[1.03] transition-[transform,box-shadow] duration-200 cursor-pointer border border-border snap-start"

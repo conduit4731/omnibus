@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react"
 import { RequestSearch } from "@/components/request-search"
 import { ComicGrid } from "@/components/comic-grid"
 import { ContinueReading } from "@/components/ContinueReading"
+import { ReadingListUpNext } from "@/components/reading-list-up-next"
 import { RecommendationsShelf } from "@/components/recommendations-shelf"
 import { ForYouShelf } from "@/components/for-you-shelf"
 import { RecentlyAdded } from "@/components/recently-added"
@@ -34,6 +35,7 @@ import { getErrorMessage } from "@/lib/utils/error"
 export default function Home() {
   const { data: session } = useSession()
   const { toast } = useToast()
+  const [readingListPaths, setReadingListPaths] = useState<Set<string> | undefined>(undefined)
   const [pendingCount, setPendingCount] = useState(0)
   const [openReportsCount, setOpenReportsCount] = useState(0)
   const [manualDownloadsCount, setManualDownloadsCount] = useState(0)
@@ -446,9 +448,14 @@ export default function Home() {
           </div>
         </div>
 
+        {/* Main reading list (fork) */}
+        <div className="w-full relative z-10">
+          <ReadingListUpNext onLoaded={setReadingListPaths} />
+        </div>
+
         {/* Jump Back In Shelf */}
         <div className="w-full relative z-10">
-          <ContinueReading />
+          <ContinueReading excludePaths={readingListPaths} />
         </div>
 
         {/* Recommendations Shelf */}
