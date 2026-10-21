@@ -10,8 +10,9 @@ export type ListSummary = {
     publisher: string, category: string, subject: string | null, era: string, eraStart: number, covers: string[],
 }
 
+import { displayListName } from "@/lib/reading-list-groups"
 /** "[Marvel] Civil War" -> "Civil War": the publisher is shown under the title anyway. */
-export const displayName = (name: string) => name.replace(/^\s*\[[^\]]*\]\s*/, '')
+export const displayName = displayListName
 
 // Cards without enough library covers ask the server for ComicVine covers: visible cards are collected
 // for a moment and sent together (one ComicVine call per 30 lists on the server).

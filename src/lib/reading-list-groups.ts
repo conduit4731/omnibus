@@ -93,3 +93,6 @@ export function pickPortrait(results: any[], name: string, publisher: string): s
     const best = exact || fits[0];
     return best?.image?.medium_url || best?.image?.original_url || null;
 }
+
+/** "[Marvel] Civil War" -> "Civil War": the publisher is shown separately (shared by API and cards). */
+export const displayListName = (name: string) => name.replace(/^\s*\[[^\]]*\]\s*/, '');

@@ -9,7 +9,7 @@ import { useSession } from "next-auth/react"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { 
-  ChevronLeft, BookOpen, Layers, Loader2, Image as ImageIcon, 
+  ChevronLeft, BookOpen, Layers, ListOrdered, Loader2, Image as ImageIcon, 
   Info, Calendar, PenTool, Paintbrush, Download, ExternalLink, 
   RefreshCw, Search, Edit, Copy, Check, CloudDownload, CloudOff, Heart, Trash2,
   CheckCircle2, DownloadCloud, Users, Sparkles, AlertTriangle,
@@ -93,6 +93,7 @@ function SeriesContent() {
   // not on disk; each carries `coveredBy` naming the book.
   const [coveredIssues, setCoveredIssues] = useState<any[]>([]);
 
+  const [seriesLists, setSeriesLists] = useState<{ lists: SeriesListRef[], byIssue: Record<string, SeriesListRef[]> }>({ lists: [], byIssue: {} })
   const [seriesInfo, setSeriesInfo] = useState<{name: string, cover: string | null, cvId: number | null, metadataId: string | null, metadataSource: string, path: string | null, id: string | null, isFavorite: boolean, isFollowing: boolean, publisher: string | null, year: string | null, description: string | null, status: string | null, bookType: string | null, monitored: boolean, isManga: boolean, universe?: string | null, seriesGroup?: string | null, matchState?: string, hasCustomCover?: boolean, genres?: string[]}>({
     name: "", cover: null, cvId: null, metadataId: null, metadataSource: 'COMICVINE', path: null, id: null, isFavorite: false, isFollowing: false, publisher: null, year: null, description: null, status: null, bookType: null, monitored: false, isManga: false, matchState: 'MATCHED', hasCustomCover: false, genres: []
   });
@@ -298,6 +299,13 @@ function SeriesContent() {
       setSortMode(mode);
       try { localStorage.setItem(ISSUE_SORT_STORAGE_KEY, mode); } catch { /* private mode */ }
   };
+
+  // Fork: reading lists / events this series appears in (series page section + per-issue chips)
+  useEffect(() => {
+    if (!seriesInfo.id) return
+    fetch(`/api/reading-lists/for-series?seriesId=${encodeURIComponent(seriesInfo.id)}`)
+      .then(r => r.ok ? r.json() : null).then(d => d && setSeriesLists(d)).catch(() => {})
+  }, [seriesInfo.id])
 
   const sortedDownloaded = useMemo(() => sortIssuesForDisplay(downloadedIssues, sortMode), [downloadedIssues, sortMode]);
   const sortedMissing = useMemo(() => sortIssuesForDisplay(missingIssues, sortMode), [missingIssues, sortMode]);
@@ -1748,6 +1756,29 @@ function SeriesContent() {
                   </>
               )}
 
+              {/* Fork: reading orders, events and character lists this series is part of (Batcave-style) */}
+              {seriesLists.lists.length > 0 && (
+                  <div className="space-y-3 mb-8">
+                      <h4 className="font-black flex items-center gap-2 text-xl text-foreground tracking-tight border-b-2 border-border pb-4">
+                          <ListOrdered className="w-6 h-6 text-primary" /> Reading Orders &amp; Events ({seriesLists.lists.length})
+                      </h4>
+                      {['Events', 'Master Reading Order', 'Characters', 'Teams'].concat([...new Set(seriesLists.lists.map(l => l.category || 'Lists'))].filter(c => !['Events', 'Master Reading Order', 'Characters', 'Teams'].includes(c))).map(cat => {
+                          const inCat = seriesLists.lists.filter(l => (l.category || 'Lists') === cat)
+                          if (!inCat.length) return null
+                          return (
+                              <div key={cat} className="flex flex-wrap items-center gap-2">
+                                  <span className="text-[11px] font-black uppercase tracking-widest text-muted-foreground w-36 shrink-0">{cat === 'Master Reading Order' ? 'Reading orders' : cat}</span>
+                                  {inCat.map(l => (
+                                      <Link key={l.id} href={`/reading-lists?id=${l.id}`} className="text-xs font-bold px-2.5 py-1 rounded-full border border-border hover:border-primary hover:text-primary bg-background">
+                                          {l.name} <span className="text-muted-foreground font-normal">· {l.issueCount} {l.issueCount === 1 ? 'issue' : 'issues'}</span>
+                                      </Link>
+                                  ))}
+                              </div>
+                          )
+                      })}
+                  </div>
+              )}
+
               {/* Collected editions read as their own shelf — never mixed into the run, and never
                   counted among it (a trade reprints issues you may already own). */}
               {(collectedEditions.length > 0 || missingCollectedEditions.length > 0) && (
@@ -1893,7 +1924,7 @@ function SeriesContent() {
                                       {issue.readProgress > 0 && !isRead && <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-black/50"><div className="h-full bg-primary" style={{ width: `${issue.readProgress}%` }} /></div>}
                                     </div>
                                     <div className="flex flex-col justify-between flex-1 py-1 min-w-0">
-                                      <div><h5 className={cn("font-bold text-base line-clamp-2 leading-tight", isRead ? 'text-muted-foreground' : 'text-foreground')}>{issue.name}</h5>{issue.parsedNum !== null && <span className="text-[10px] mt-1 font-black text-muted-foreground uppercase tracking-widest">{laneLabel(issue)} #{issue.parsedNum}</span>}</div>
+                                      <div><h5 className={cn("font-bold text-base line-clamp-2 leading-tight", isRead ? 'text-muted-foreground' : 'text-foreground')}>{issue.name}</h5>{issue.parsedNum !== null && <span className="text-[10px] mt-1 font-black text-muted-foreground uppercase tracking-widest">{laneLabel(issue)} #{issue.parsedNum}</span>}<ListChips lists={seriesLists.byIssue[issue.id]} /></div>
                                       <div className="flex flex-wrap items-center gap-1.5 mt-3">
                                         <Button size="sm" variant={isSelected && !isSelectionMode ? "default" : "outline"} className="flex-1 font-bold shadow-md min-w-[70px]" asChild onClick={(e) => { if (isSelectionMode) { e.preventDefault(); } else { e.stopPropagation(); } }}>
                                             <Link href={`/reader?path=${encodeURIComponent(issue.fullPath)}&series=${encodeURIComponent(folderPath || '')}`}>
@@ -1970,7 +2001,7 @@ function SeriesContent() {
                                                       </div>
                                                   </td>
                                                   <td className="px-4 py-3 font-bold">
-                                                      <div className={cn("line-clamp-2 leading-tight", isRead ? 'text-muted-foreground' : 'text-foreground')}>{issue.name}</div>
+                                                      <div className={cn("line-clamp-2 leading-tight", isRead ? 'text-muted-foreground' : 'text-foreground')}>{issue.name}</div><ListChips lists={seriesLists.byIssue[issue.id]} />
                                                       {issue.parsedNum !== null && <div className="text-[10px] mt-1 font-black text-muted-foreground uppercase tracking-widest">{laneLabel(issue)} #{issue.parsedNum}</div>}
                                                   </td>
                                                   <td className="px-4 py-3 text-center">
@@ -2071,7 +2102,7 @@ function SeriesContent() {
                                       <div key={issue.id} onClick={() => setActiveIssue(issue)} className="flex gap-4 p-4 bg-muted/30 border border-border/50 rounded-xl shadow-sm opacity-80 hover:opacity-100 transition-all cursor-pointer">
                                         <div className="w-20 h-28 shrink-0 rounded-md overflow-hidden bg-muted border border-border grayscale">{issue.coverUrl || seriesInfo.cover ? <img src={issue.coverUrl || seriesInfo.cover} onError={coverImgError(seriesInfo.cover)} className="w-full h-full object-cover" alt="" /> : <ImageIcon className="w-8 h-8 m-auto mt-10 text-muted-foreground/50" />}</div>
                                         <div className="flex flex-col justify-between flex-1 py-1 min-w-0">
-                                            <div><h5 className="font-bold text-base line-clamp-2 text-foreground leading-tight">{issue.name}</h5><span className="text-[10px] mt-1 font-black text-muted-foreground uppercase tracking-widest">{laneLabel(issue)} #{issue.parsedNum}</span></div>
+                                            <div><h5 className="font-bold text-base line-clamp-2 text-foreground leading-tight">{issue.name}</h5><span className="text-[10px] mt-1 font-black text-muted-foreground uppercase tracking-widest">{laneLabel(issue)} #{issue.parsedNum}</span><ListChips lists={seriesLists.byIssue[issue.id]} /></div>
                                             <div className="flex flex-wrap items-center gap-2 mt-3">{isAlreadyRequested ? <Button size="sm" variant="secondary" disabled className="flex-1 h-9 bg-green-50 text-green-700 dark:bg-green-900/20 border-green-200 opacity-100 cursor-not-allowed"><Check className="w-4 h-4 mr-2"/> Queued</Button> : <Button size="sm" variant="outline" className="flex-1 h-9 font-black text-[10px] border-border hover:bg-muted uppercase tracking-wider min-w-[80px]" onClick={(e) => { e.stopPropagation(); handleRequestMissing(issue); }} disabled={isRequesting}>{isRequesting ? <Loader2 className="w-4 h-4 animate-spin mr-2"/> : <CloudDownload className="w-4 h-4 mr-2"/>}Request</Button>}</div>
                                         </div>
                                       </div>
@@ -2101,7 +2132,7 @@ function SeriesContent() {
                                                           </div>
                                                       </td>
                                                       <td className="px-4 py-3 font-bold">
-                                                          <div className="line-clamp-2 leading-tight text-foreground">{issue.name}</div>
+                                                          <div className="line-clamp-2 leading-tight text-foreground">{issue.name}</div><ListChips lists={seriesLists.byIssue[issue.id]} />
                                                           {issue.parsedNum !== null && <div className="text-[10px] mt-1 font-black text-muted-foreground uppercase tracking-widest">{laneLabel(issue)} #{issue.parsedNum}</div>}
                                                       </td>
                                                       <td className="px-4 py-3 text-right">
@@ -2672,6 +2703,21 @@ function SeriesContent() {
               </DialogFooter>
           </DialogContent>
       </Dialog>
+    </div>
+  )
+}
+
+// Fork: "Event: The New 52" chips on an issue (Batcave-style), linking to the reading list
+type SeriesListRef = { id: string, name: string, category?: string, issueCount?: number }
+function ListChips({ lists }: { lists?: SeriesListRef[] }) {
+  if (!lists?.length) return null
+  return (
+    <div className="flex flex-wrap gap-1 mt-1">
+      {lists.slice(0, 2).map(l => (
+        <Link key={l.id} href={`/reading-lists?id=${l.id}`} onClick={e => e.stopPropagation()} title={l.name}
+          className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-primary/10 text-primary hover:bg-primary/20 truncate max-w-[180px]">{l.name}</Link>
+      ))}
+      {lists.length > 2 && <span className="text-[10px] font-bold text-muted-foreground px-1" title={lists.slice(2).map(l => l.name).join(', ')}>+{lists.length - 2}</span>}
     </div>
   )
 }

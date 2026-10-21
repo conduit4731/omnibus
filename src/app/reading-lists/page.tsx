@@ -904,6 +904,11 @@ function ReadingListsContent() {
                               </CardTitle>
                           </CardHeader>
                           <CardContent className="space-y-1">
+                              {/* Fork: Batcave-style "at a glance" */}
+                              <p className="text-xs text-muted-foreground pb-2">
+                                  {lists.find(l => l.id === activeList.id)?.publisher && <><b className="text-foreground">{lists.find(l => l.id === activeList.id)?.publisher}</b> · </>}
+                                  <b className="text-foreground">{activeList.items.length}</b> issues from <b className="text-foreground">{seriesSummary.length}</b> titles · biggest: {[...seriesSummary].sort((a, b) => b.items.length - a.items.length).slice(0, 5).map(x => `${x.name} (${x.items.length})`).join(', ')}{seriesSummary.length > 5 ? ` and ${seriesSummary.length - 5} more` : ''}
+                              </p>
                               {(showAllSeries ? seriesSummary : seriesSummary.slice(0, 8)).map(({ name, items }) => {
                                   const owned = ownedOf(items);
                                   return (
