@@ -7,7 +7,7 @@ import { ChevronLeft, ChevronRight, ImageIcon, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Chip } from "@/components/list-cards"
 import { normalizePublisher } from "@/lib/reading-list-groups"
-import { type CalendarView, daysBetween, globalWeekOffsets, iso, parseDay, rangeFor, shift } from "@/lib/calendar-range"
+import { type CalendarView, chunks, daysBetween, iso, parseDay, rangeFor, shift } from "@/lib/calendar-range"
 
 export type Release = {
     id: string | number, seriesName: string, issueNumber: string, publisher: string, releaseDate: string,
@@ -24,14 +24,15 @@ const owned = (r: Release) => r.libraryState === 'IN_LIBRARY' || r.inLibrary
 async function load(source: Source, from: string, to: string): Promise<Release[]> {
     if (source !== 'global') {
         const res = await fetch(`/api/calendar?weekOffset=0&from=${from}&to=${to}${source === 'followed' ? '&scope=followed' : ''}`)
-        return res.ok ? (await res.json()).releases || [] : []
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Could not load releases.')
+        return (await res.json()).releases || []
     }
-    // Metron only serves whole Sunday–Saturday weeks (cached per week on the server): fetch them in turn
+    // The global pull list takes the whole range in one Metron pass (a month view = one call; server-cached)
     const seen = new Map<string, Release>()
-    for (const w of globalWeekOffsets(from, to, new Date())) {
-        const res = await fetch(`/api/calendar/global?weekOffset=${w}`)
-        const data = res.ok ? await res.json() : {}
-        for (const r of (data.releases || []) as Release[]) seen.set(String(r.id), r)
+    for (const c of chunks(from, to, 42)) {
+        const res = await fetch(`/api/calendar/global?from=${c.from}&to=${c.to}`)
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Could not load the global pull list.')
+        for (const r of ((await res.json()).releases || []) as Release[]) seen.set(String(r.id), r)
     }
     return [...seen.values()].filter(r => r.releaseDate >= from && r.releaseDate <= to)
 }
@@ -63,6 +64,7 @@ function Line({ r }: { r: Release }) {
 export function ReleaseCalendar({ source, view, onViewChange }: { source: Source, view: CalendarView, onViewChange: (v: CalendarView) => void }) {
     const [anchor, setAnchor] = useState(() => parseDay(iso(new Date())))
     const [releases, setReleases] = useState<Release[] | null>(null)
+    const [error, setError] = useState<string | null>(null)
     const [publisher, setPublisher] = useState('All')
     const range = useMemo(() => rangeFor(view, anchor), [view, anchor])
     const yearBlocked = source === 'global' && view === 'year'
@@ -70,8 +72,10 @@ export function ReleaseCalendar({ source, view, onViewChange }: { source: Source
     useEffect(() => {
         if (yearBlocked) { setReleases([]); return }
         let cancelled = false
-        setReleases(null)
-        load(source, range.from, range.to).then(r => { if (!cancelled) setReleases(r) })
+        setReleases(null); setError(null)
+        load(source, range.from, range.to)
+            .then(r => { if (!cancelled) setReleases(r) })
+            .catch(e => { if (!cancelled) { setError(e instanceof Error ? e.message : String(e)); setReleases([]) } })
         return () => { cancelled = true }
     }, [source, range.from, range.to, yearBlocked])
 
@@ -123,7 +127,9 @@ export function ReleaseCalendar({ source, view, onViewChange }: { source: Source
                 </>
             )}
 
-            {yearBlocked ? (
+            {error ? (
+                <div className="py-16 text-center text-sm text-muted-foreground">{error}</div>
+            ) : yearBlocked ? (
                 <p className="text-center text-muted-foreground py-16">The year view needs ~50 Metron requests for the global list. Use it on <b>My Pull List</b> or <b>Tracked Series</b>, or switch to month.</p>
             ) : releases === null ? (
                 <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>

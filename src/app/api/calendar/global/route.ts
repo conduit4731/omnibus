@@ -9,6 +9,7 @@ import { getErrorMessage } from '@/lib/utils/error';
 import { findLocalSeriesMatch } from '@/lib/utils/series-match';
 import { getMetronAuth, metronGet, MetronHttpError, MetronRateLimitError } from '@/lib/metron/client';
 
+const MAX_RANGE_DAYS = 45;
 const TAGGED_PUBLISHERS = ['DC Comics', 'Marvel', 'Image', 'Dark Horse Comics', 'IDW Publishing', 'BOOM! Studios', 'Dynamite Entertainment', 'Titan Comics', 'Rebellion'];
 
 export async function GET(request: Request) {
@@ -30,21 +31,32 @@ export async function GET(request: Request) {
         const end = new Date(start);
         end.setUTCDate(start.getUTCDate() + 6); // 7 day window inclusive
 
-        const startDateStr = start.toISOString().split('T')[0];
-        const endDateStr = end.toISOString().split('T')[0];
+        let startDateStr = start.toISOString().split('T')[0];
+        let endDateStr = end.toISOString().split('T')[0];
         const todayStr = today.toISOString().split('T')[0];
-        
-        // --- BUMP CACHE TO v16: year-aware library/monitored matching (recompute stale v15 entries) ---
-        const cacheKey = `calendar_global_v16p_${todayStr}_offset_${weekOffset}`; // fork: + publisher tags
-        
-        const cache = await prisma.systemSetting.findUnique({ where: { key: cacheKey } });
 
-        if (cache && cache.value) {
-            return NextResponse.json({ 
-                startDate: startDateStr, 
-                endDate: endDateStr, 
-                releases: JSON.parse(cache.value) 
-            });
+        // Fork: ?from=&to= (up to 45 days) — the calendar's week / month views fetch their whole range in one
+        // pass (one issue list + one query per tagged publisher) instead of 15-20 Metron calls per week.
+        const from = searchParams.get('from'), to = searchParams.get('to');
+        if (from && to) {
+            const day = /^\d{4}-\d{2}-\d{2}$/;
+            const span = (Date.parse(to) - Date.parse(from)) / 86400000;
+            if (!day.test(from) || !day.test(to) || !(span >= 0 && span <= MAX_RANGE_DAYS)) {
+                return NextResponse.json({ error: `from/to must be YYYY-MM-DD, at most ${MAX_RANGE_DAYS} days apart.` }, { status: 400 });
+            }
+            startDateStr = from; endDateStr = to;
+        }
+        
+        // Fork: cached per date range. A range that ended before today no longer changes and is kept; a
+        // current or future one is refetched once a day. (Was: one key per day and week offset, so every
+        // week was fetched again each day and the old keys piled up.)
+        const cacheKey = `calendar_global_v17_${startDateStr}_${endDateStr}`;
+        const cache = await prisma.systemSetting.findUnique({ where: { key: cacheKey } });
+        if (cache?.value) {
+            const cached = JSON.parse(cache.value);
+            if (endDateStr < todayStr || cached.fetchedAt === todayStr) {
+                return NextResponse.json({ startDate: startDateStr, endDate: endDateStr, releases: cached.releases });
+            }
         }
 
         const metronAuth = await getMetronAuth();
@@ -61,7 +73,7 @@ export async function GET(request: Request) {
         // long one ends the fetch). A failure is NOT cached: the next view tries again, instead of the
         // empty week the old loop cached for the rest of the day.
         try {
-            while (nextUrl && allIssues.length < 1000) {
+            while (nextUrl && allIssues.length < 5000) { // fork: up to 45 days per call
                 const res = await metronGet(nextUrl, { auth: metronAuth, pace: 'interactive', cache: false });
                 if (res.status !== 200) throw new MetronHttpError(res.status);
                 const data: any = res.data || {};
@@ -84,7 +96,7 @@ export async function GET(request: Request) {
             try {
                 let url: string | null = `https://metron.cloud/api/issue/?store_date_range_after=${startDateStr}&store_date_range_before=${endDateStr}&publisher_name=${encodeURIComponent(name)}`;
                 const ids: number[] = [];
-                while (url && ids.length < 1000) {
+                while (url && ids.length < 5000) {
                     const res = await metronGet(url, { auth: metronAuth, pace: 'interactive', cache: false });
                     if (res.status !== 200) break;
                     const data: any = res.data || {};
@@ -178,22 +190,12 @@ export async function GET(request: Request) {
             }
         }
 
-        await prisma.systemSetting.upsert({
-            where: { key: cacheKey },
-            update: { value: JSON.stringify(formattedReleases) },
-            create: { key: cacheKey, value: JSON.stringify(formattedReleases) }
-        });
+        const value = JSON.stringify({ fetchedAt: todayStr, releases: formattedReleases });
+        await prisma.systemSetting.upsert({ where: { key: cacheKey }, update: { value }, create: { key: cacheKey, value } });
 
-        const oldDate = new Date(today);
-        oldDate.setUTCDate(today.getUTCDate() - 1);
-        const oldDateStr = oldDate.toISOString().split('T')[0];
-        
+        // Older cache generations (v15, v16 and the fork's v16p day keys)
         await prisma.systemSetting.deleteMany({
-            where: { key: { startsWith: `calendar_global_v15_` } }
-        }).catch(()=>{});
-
-        await prisma.systemSetting.deleteMany({
-            where: { key: { startsWith: `calendar_global_v16_${oldDateStr}` } }
+            where: { OR: ['calendar_global_v15_', 'calendar_global_v16_', 'calendar_global_v16p_'].map(p => ({ key: { startsWith: p } })) }
         }).catch(()=>{});
 
         return NextResponse.json({ startDate: startDateStr, endDate: endDateStr, releases: formattedReleases });

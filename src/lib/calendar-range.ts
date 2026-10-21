@@ -28,13 +28,14 @@ export function shift(view: CalendarView, anchor: Date, dir: -1 | 1): Date {
     return new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth() + dir, 1));
 }
 
-/** weekOffset values of /api/calendar/global (Sunday–Saturday weeks relative to today) covering from..to. */
-export function globalWeekOffsets(from: string, to: string, today: Date): number[] {
-    const sunday = (d: Date) => addDays(d, -d.getUTCDay());
-    const base = sunday(parseDay(iso(today))).getTime();
-    const offsets: number[] = [];
-    for (let w = sunday(parseDay(from)); w <= parseDay(to); w = addDays(w, 7)) offsets.push(Math.round((w.getTime() - base) / (7 * DAY)));
-    return offsets;
+/** from..to cut into consecutive pieces of at most maxDays days (the global pull list takes up to 45 per call). */
+export function chunks(from: string, to: string, maxDays: number): { from: string, to: string }[] {
+    const out: { from: string, to: string }[] = [];
+    for (let d = parseDay(from); d <= parseDay(to); d = addDays(d, maxDays)) {
+        const end = addDays(d, maxDays - 1);
+        out.push({ from: iso(d), to: end < parseDay(to) ? iso(end) : to });
+    }
+    return out;
 }
 
 /** Days from..to inclusive. */

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { daysBetween, globalWeekOffsets, parseDay, rangeFor, shift } from '@/lib/calendar-range';
+import { chunks, daysBetween, parseDay, rangeFor, shift } from '@/lib/calendar-range';
 
 const d = parseDay;
 
@@ -18,10 +18,11 @@ describe('calendar ranges (fork)', () => {
         expect(shift('year', d('2026-10-21'), -1).toISOString().slice(0, 10)).toBe('2025-10-01');
     });
 
-    it('maps a range to the global endpoint\'s Sunday weeks relative to today', () => {
-        // today Wed 2026-10-21 -> its week starts Sun 2026-10-18 = offset 0
-        expect(globalWeekOffsets('2026-10-19', '2026-10-25', d('2026-10-21'))).toEqual([0, 1]);   // Mon..Sun touches two Sunday weeks
-        expect(globalWeekOffsets('2026-10-11', '2026-10-17', d('2026-10-21'))).toEqual([-1]);
+    it('cuts a range into pieces the global endpoint accepts', () => {
+        expect(chunks('2026-09-28', '2026-11-08', 42)).toEqual([{ from: '2026-09-28', to: '2026-11-08' }]);   // a month view: one call
+        expect(chunks('2026-10-01', '2026-10-10', 4)).toEqual([
+            { from: '2026-10-01', to: '2026-10-04' }, { from: '2026-10-05', to: '2026-10-08' }, { from: '2026-10-09', to: '2026-10-10' }]);
+        expect(chunks('2026-10-21', '2026-10-21', 42)).toEqual([{ from: '2026-10-21', to: '2026-10-21' }]);
     });
 
     it('lists the days of a range', () => {
