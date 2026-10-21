@@ -262,9 +262,9 @@ export function SiteHeader() {
 
           {/* MOBILE HAMBURGER MENU — shows below lg */}
           {!mounted ? (
-             <div className="lg:hidden w-10 h-10 shrink-0" />
+             <div className="xl:hidden w-10 h-10 shrink-0" />
           ) : session ? (
-            <div className="lg:hidden flex items-center shrink-0">
+            <div className="xl:hidden flex items-center shrink-0">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" size="icon" className="h-10 w-10 shrink-0">
@@ -311,7 +311,7 @@ export function SiteHeader() {
           </Link>
 
           {/* DESKTOP NAV — COMIC PANEL FRAME (lg+) */}
-          <nav className="hidden lg:flex items-center gap-2">
+          <nav className="hidden xl:flex items-center gap-1">
             <Link href="/" className={cn("uppercase tracking-[0.08em] font-extrabold text-sm px-3 py-1.5 whitespace-nowrap transition-colors duration-200 ease-out motion-reduce:transition-none active:scale-95", pathname === "/" ? "bg-card border-2 border-primary shadow-[3px_3px_0_rgb(0_0_0/0.45)] dark:shadow-[3px_3px_0_rgb(255_255_255/0.2)] text-primary transition-all" : "text-muted-foreground hover:text-foreground")}>Home</Link>
             <Link href="/library" className={cn("uppercase tracking-[0.08em] font-extrabold text-sm px-3 py-1.5 whitespace-nowrap transition-colors duration-200 ease-out motion-reduce:transition-none active:scale-95", pathname?.startsWith("/library") ? "bg-card border-2 border-primary shadow-[3px_3px_0_rgb(0_0_0/0.45)] dark:shadow-[3px_3px_0_rgb(255_255_255/0.2)] text-primary transition-all" : "text-muted-foreground hover:text-foreground")}>Library</Link>
             <Link href="/reading-lists" className={cn("uppercase tracking-[0.08em] font-extrabold text-sm px-3 py-1.5 whitespace-nowrap transition-colors duration-200 ease-out motion-reduce:transition-none active:scale-95", pathname?.startsWith("/reading-lists") ? "bg-card border-2 border-primary shadow-[3px_3px_0_rgb(0_0_0/0.45)] dark:shadow-[3px_3px_0_rgb(255_255_255/0.2)] text-primary transition-all" : "text-muted-foreground hover:text-foreground")}>Reading Lists</Link>

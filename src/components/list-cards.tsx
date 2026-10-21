@@ -2,11 +2,53 @@
 "use client"
 
 import Link from "next/link"
+import { useEffect, useRef, useState } from "react"
 import { BookOpen, ListOrdered } from "lucide-react"
 
 export type ListSummary = {
     id: string, name: string, itemCount: number, ownedCount: number, readCount: number,
     publisher: string, category: string, subject: string | null, era: string, eraStart: number, covers: string[],
+}
+
+/** "[Marvel] Civil War" -> "Civil War": the publisher is shown under the title anyway. */
+export const displayName = (name: string) => name.replace(/^\s*\[[^\]]*\]\s*/, '')
+
+// Cards without enough library covers ask the server for ComicVine covers: visible cards are collected
+// for a moment and sent together (one ComicVine call per 30 lists on the server).
+const coverRequests = new Map<string, (covers: string[]) => void>()
+let flushTimer: ReturnType<typeof setTimeout> | null = null
+function requestCovers(id: string): Promise<string[]> {
+    return new Promise(resolve => {
+        coverRequests.set(id, resolve)
+        if (flushTimer) return
+        flushTimer = setTimeout(async function flush() {
+            const batch = [...coverRequests.entries()].slice(0, 30)
+            batch.forEach(([k]) => coverRequests.delete(k))
+            try {
+                const res = await fetch('/api/reading-lists/covers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: batch.map(([k]) => k) }) })
+                const data = res.ok ? await res.json() : {}
+                batch.forEach(([k, done]) => done(data[k] || []))
+            } catch { batch.forEach(([, done]) => done([])) }
+            flushTimer = coverRequests.size ? setTimeout(flush, 300) : null
+        }, 200)
+    })
+}
+
+/** Library covers of the list, topped up from ComicVine once the card is on screen. */
+export function useListCovers(list: { id: string, covers: string[] }) {
+    const ref = useRef<HTMLAnchorElement>(null)
+    const [covers, setCovers] = useState(list.covers)
+    useEffect(() => {
+        if (list.covers.length >= 3 || !ref.current) return
+        const io = new IntersectionObserver(([e]) => {
+            if (!e.isIntersecting) return
+            io.disconnect()
+            requestCovers(list.id).then(c => c.length > list.covers.length && setCovers(c))
+        }, { rootMargin: "400px" })
+        io.observe(ref.current)
+        return () => io.disconnect()
+    }, [list.id, list.covers])
+    return { ref, covers }
 }
 
 /** Reading time like Batcave's "about 58 h": roughly 12 minutes per issue. */
@@ -20,7 +62,7 @@ export function FannedCovers({ covers, className = "" }: { covers: string[], cla
     const [front, left, right] = covers
     const card = "absolute top-0 h-full aspect-[2/3] rounded-md overflow-hidden shadow-xl border border-black/30 bg-muted"
     return (
-        <div className={`relative h-48 sm:h-56 w-full ${className}`}>
+        <div className={`relative w-full ${className || "h-48 sm:h-56"}`}>
             {right && <img src={right} alt="" className={`${card} left-1/2 translate-x-[-10%] rotate-[8deg] opacity-80`} />}
             {left && <img src={left} alt="" className={`${card} left-1/2 translate-x-[-90%] -rotate-[8deg] opacity-80`} />}
             {front ? (
@@ -44,10 +86,11 @@ export function OwnedBadge({ list }: { list: ListSummary }) {
 
 export function ListCard({ list }: { list: ListSummary }) {
     const readPct = list.itemCount ? Math.round(100 * list.readCount / list.itemCount) : 0
+    const { ref, covers } = useListCovers(list)
     return (
-        <Link href={`/reading-lists?id=${list.id}`} className="group flex flex-col items-center text-center gap-1.5 p-3 rounded-xl hover:bg-muted/40 transition-colors">
-            <FannedCovers covers={list.covers} className="mb-3" />
-            <h3 className="font-bold text-base leading-tight line-clamp-2">{list.name}</h3>
+        <Link ref={ref} href={`/reading-lists?id=${list.id}`} className="group flex flex-col items-center text-center gap-1.5 p-3 rounded-xl hover:bg-muted/40 transition-colors">
+            <FannedCovers covers={covers} className="h-48 sm:h-56 mb-3" />
+            <h3 className="font-bold text-base leading-tight line-clamp-2">{displayName(list.name)}</h3>
             <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">{list.publisher} · {list.era}</p>
             <p className="text-xs text-muted-foreground">{list.itemCount} issues · {readingTime(list.itemCount)}</p>
             <OwnedBadge list={list} />

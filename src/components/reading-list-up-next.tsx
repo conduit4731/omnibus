@@ -4,12 +4,11 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowRight, BookOpen, Check, Info, ListOrdered } from "lucide-react";
+import { ArrowRight, BookOpen, Info, ListOrdered } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { nextInList } from "@/lib/reading-list-next";
-
-const SHOWN = 8;
+import { FannedCovers, displayName } from "@/components/list-cards";
 
 const label = (item: any) => item.issue?.series ? `${item.issue.series.name} #${item.issue.number}` : item.title;
 const cover = (item: any) => item.issue?.coverUrl
@@ -37,64 +36,47 @@ export function ReadingListUpNext({ onLoaded }: { onLoaded?: (filePaths: Set<str
     const { item: next, index, skipped } = nextInList<any>(list.items);
     if (!next && skipped.length === 0) return null; // finished
     const read = list.items.filter((i: any) => i.progress?.isCompleted).length;
-    // From the first skipped gap (or the next issue) onwards, in reading order
-    const from = skipped.length > 0 ? list.items.indexOf(skipped[0]) : index;
-    const shown = list.items.slice(from, from + SHOWN);
+    const pct = list.items.length ? Math.round(100 * read / list.items.length) : 0;
+    // The next issue in front, the ones after it in reading order fanned out behind (like the Events cards)
+    const stack = next ? [next, ...list.items.slice(index + 1, index + 3)] : skipped.slice(0, 3);
     const open = (item: any) => router.push(`/reader?path=${encodeURIComponent(item.issue.filePath)}&series=${encodeURIComponent(item.issue.series.folderPath)}`);
+    const page = next?.progress && !next.progress.isCompleted && next.progress.currentPage > 0 && next.progress.totalPages > 0
+        ? `Page ${next.progress.currentPage + 1} of ${next.progress.totalPages}` : null;
 
     return (
-        <div className="space-y-3">
-            <div className="flex items-center justify-between gap-4">
-                <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                        <Badge className="bg-primary/15 text-primary border-primary/30 shrink-0"><ListOrdered className="w-3 h-3 mr-1" /> Reading List</Badge>
-                        <span className="text-xs font-bold text-muted-foreground">{read} / {list.items.length} read</span>
+        <div className="rounded-2xl border border-border bg-card/60 backdrop-blur-sm p-5 sm:p-6 flex flex-col sm:flex-row items-center gap-6 sm:gap-10">
+            <button className="group w-56 sm:w-64 shrink-0" onClick={() => next && open(next)} title={next ? `Read ${label(next)}` : undefined}>
+                <FannedCovers covers={stack.map(cover)} className="h-64 sm:h-72" />
+            </button>
+            <div className="min-w-0 flex-1 space-y-3 text-center sm:text-left">
+                <div className="flex items-center gap-2 justify-center sm:justify-start">
+                    <Badge className="bg-primary/15 text-primary border-primary/30 shrink-0"><ListOrdered className="w-3 h-3 mr-1" /> Reading List</Badge>
+                    <span className="text-xs font-bold text-muted-foreground">{read} / {list.items.length} read</span>
+                </div>
+                <h2 className="text-2xl sm:text-3xl font-black tracking-tight leading-tight">{displayName(list.name)}</h2>
+                {next && (
+                    <div>
+                        <p className="text-xs uppercase tracking-widest font-bold text-muted-foreground">Up next</p>
+                        <p className="text-lg font-bold">{label(next)}</p>
+                        {page && <p className="text-xs text-muted-foreground">{page}</p>}
                     </div>
-                    <h2 className="text-2xl font-bold tracking-tight text-foreground truncate mt-1">{list.name}</h2>
+                )}
+                <div className="h-1.5 w-full max-w-md rounded-full bg-muted overflow-hidden mx-auto sm:mx-0"><div className="h-full bg-primary" style={{ width: `${pct}%` }} /></div>
+                {skipped.length > 0 && (
+                    <div className="flex items-start gap-2 text-sm rounded-lg border border-amber-300/50 bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 px-3 py-2 text-left max-w-xl">
+                        <Info className="w-4 h-4 mt-0.5 shrink-0" />
+                        <span>
+                            <b>{skipped.length} missing</b> before this ({skipped.slice(0, 3).map(label).join(', ')}{skipped.length > 3 ? ', …' : ''}).
+                            {next ? <> Continuing with the next one you have.</> : <> Request them in the list to keep reading.</>}
+                        </span>
+                    </div>
+                )}
+                <div className="flex flex-wrap gap-2 justify-center sm:justify-start pt-1">
+                    {next && <Button className="font-bold" onClick={() => open(next)}><BookOpen className="w-4 h-4 mr-2" /> {read > 0 || next.progress ? 'Continue' : 'Start'}</Button>}
+                    <Button asChild variant="outline" className="font-bold border-primary/50 text-primary hover:bg-primary/10">
+                        <Link href={`/reading-lists?id=${list.id}`}>Open List <ArrowRight className="w-4 h-4 ml-1" /></Link>
+                    </Button>
                 </div>
-                <Button asChild variant="outline" size="sm" className="border-primary/50 text-primary hover:bg-primary/10 group font-bold shrink-0">
-                    <Link href={`/reading-lists?id=${list.id}`}>
-                        <span>Open List</span> <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
-                    </Link>
-                </Button>
-            </div>
-
-            {skipped.length > 0 && (
-                <div className="flex items-start gap-2 text-sm rounded-lg border border-amber-300/50 bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 px-3 py-2">
-                    <Info className="w-4 h-4 mt-0.5 shrink-0" />
-                    <span>
-                        <b>{skipped.length} missing</b> next in the order ({skipped.slice(0, 3).map(label).join(', ')}{skipped.length > 3 ? ', …' : ''}).
-                        {next ? <> Continuing with <b>{label(next)}</b>, the next one you have.</> : <> Request them in the list to keep reading.</>}
-                    </span>
-                </div>
-            )}
-
-            <div className="flex overflow-x-auto gap-4 pb-4 pt-2 px-2 snap-x no-scrollbar -mx-2">
-                {shown.map((item: any) => {
-                    const owned = !!item.issue?.filePath;
-                    const isNext = item === next;
-                    return (
-                        <div
-                            key={item.id}
-                            onClick={() => owned && open(item)}
-                            title={owned ? label(item) : `${label(item)} – not in your library`}
-                            className={`group relative flex-none w-[calc(50%-0.5rem)] md:w-[calc(25%-0.75rem)] lg:w-[calc(14.285%-0.857rem)] aspect-[2/3] rounded-lg overflow-hidden border snap-start transition-[transform] duration-200 ${owned ? 'cursor-pointer hover:scale-[1.03] bg-muted' : 'bg-muted/40 border-dashed'} ${isNext ? 'ring-2 ring-primary border-primary' : 'border-border'}`}
-                        >
-                            <img src={cover(item)} alt="" className={`object-cover w-full h-full ${owned ? '' : 'grayscale opacity-40'}`} />
-                            {isNext && <Badge className="absolute top-2 left-2 z-10 bg-primary text-primary-foreground shadow"><BookOpen className="w-3 h-3 mr-1" /> Up next</Badge>}
-                            {item.progress?.isCompleted && <Badge className="absolute top-2 left-2 z-10 bg-emerald-600 text-white shadow"><Check className="w-3 h-3 mr-1" /> Read</Badge>}
-                            <div className="absolute bottom-0 left-0 w-full p-2.5 bg-linear-to-t from-black/90 via-black/60 to-transparent">
-                                <p className="text-white font-bold text-xs line-clamp-2 drop-shadow-md">{label(item)}</p>
-                                {!owned && <p className="text-[10px] font-bold uppercase tracking-wider text-orange-400 mt-0.5">Not in library</p>}
-                                {owned && !item.progress?.isCompleted && item.progress?.currentPage > 0 && item.progress?.totalPages > 0 && (
-                                    <div className="w-full bg-white/30 h-1 rounded-full overflow-hidden mt-1.5">
-                                        <div className="bg-primary h-full" style={{ width: `${Math.round(100 * (item.progress.currentPage + 1) / item.progress.totalPages)}%` }} />
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    );
-                })}
             </div>
         </div>
     );
