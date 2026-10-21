@@ -92,8 +92,9 @@ function StatusRing({ requests, active, onSelect }: { requests: any[], active: s
 }
 
 // Fork: compact one-line request (table view)
-function RequestRow({ req, getStatusColor, onCancel, onRetry, isAdmin, isSelectionMode, isSelected, onToggleSelect }: {
+function RequestRow({ req, getStatusColor, onCancel, onRetry, isAdmin, isSelectionMode, isSelected, onToggleSelect, sameLink = [] }: {
   req: any, getStatusColor: (status: string) => string, onCancel: (id: string) => void, onRetry: (id: string) => void, isAdmin: boolean,
+  sameLink?: any[], // other requests waiting on the same manual download link (one pack for many issues)
   isSelectionMode: boolean, isSelected: boolean, onToggleSelect: (id: string) => void
 }) {
   const [isCancelling, setIsCancelling] = useState(false);
@@ -107,7 +108,7 @@ function RequestRow({ req, getStatusColor, onCancel, onRetry, isAdmin, isSelecti
         <Badge variant="outline" className={`${getStatusColor(req.status)} text-[10px] font-bold uppercase tracking-wider whitespace-nowrap`}>{statusLabel(req.status)}</Badge>
         {needsAction(req) && <p className="text-[9px] font-black uppercase text-amber-500 mt-0.5">Action needed</p>}
       </td>
-      <td className="px-3 py-2 max-w-0 w-full"><p className="truncate font-medium" title={name}><SeriesLink folderPath={req.seriesPath}>{name}</SeriesLink></p></td>
+      <td className="px-3 py-2 max-w-0 w-full"><p className="truncate font-medium" title={name}><SeriesLink folderPath={req.seriesPath}>{name}</SeriesLink>{sameLink.length > 0 && <span className="ml-2 text-[10px] font-black px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-500" title={`${sameLink.length + 1} requests share this download`}>×{sameLink.length + 1}</span>}</p></td>
       <td className="px-3 py-2 hidden md:table-cell text-xs text-muted-foreground whitespace-nowrap max-w-48 truncate">{providerOf(req)}</td>
       <td className="px-3 py-2 hidden sm:table-cell text-xs text-muted-foreground whitespace-nowrap">{new Date(req.createdAt).toLocaleDateString()}</td>
       <td className="px-3 py-2 w-14 text-xs font-mono text-primary">{req.status === 'DOWNLOADING' ? `${req.progress}%` : ''}</td>
@@ -118,7 +119,7 @@ function RequestRow({ req, getStatusColor, onCancel, onRetry, isAdmin, isSelecti
           </Button>
         )}
         {req.status === 'MANUAL_DDL' && (
-          <Button size="icon" variant="ghost" className="h-7 w-7" title="Retry GetComics automatically" onClick={() => onRetry(req.id)}><RefreshCw className="w-3.5 h-3.5" /></Button>
+          <Button size="icon" variant="ghost" className="h-7 w-7" title="Retry GetComics automatically" onClick={() => [req, ...sameLink].forEach(x => onRetry(x.id))}><RefreshCw className="w-3.5 h-3.5" /></Button>
         )}
         {needsAction(req) && isAdmin && (
           <Button size="icon" variant="ghost" asChild className="h-7 w-7" title="Admin queue: upload the downloaded file, interactive search, approve">
@@ -470,9 +471,20 @@ export default function RequestsPage() {
   };
   const isAdmin = (session?.user as any)?.role === 'ADMIN';
 
+  // Needs action: requests waiting on the same manual link (a pack covering many issues) share one row
+  const actionRows = useMemo(() => {
+      if (activeTab !== "NEEDS_ACTION") return null;
+      const byLink = new Map<string, any[]>();
+      for (const req of filteredRequests) {
+          const key = req.status === 'MANUAL_DDL' && req.downloadLink ? req.downloadLink : req.id;
+          byLink.set(key, [...(byLink.get(key) || []), req]);
+      }
+      return [...byLink.values()].map(([req, ...sameLink]) => ({ req, sameLink }));
+  }, [activeTab, filteredRequests]);
   const limit = parseInt(pageSize);
-  const totalPages = Math.ceil(filteredRequests.length / limit) || 1;
+  const totalPages = Math.ceil((actionRows?.length ?? filteredRequests.length) / limit) || 1;
   const paginatedRequests = filteredRequests.slice((page - 1) * limit, page * limit);
+  const tableRows = actionRows ? actionRows.slice((page - 1) * limit, page * limit) : paginatedRequests.map(req => ({ req, sameLink: [] as any[] }));
   
   // Calculate which of the currently visible requests are eligible for cancellation
   const cancellableRequests = useMemo(() => paginatedRequests.filter(r => CANCELLABLE.includes(r.status)), [paginatedRequests]);
@@ -544,8 +556,8 @@ export default function RequestsPage() {
           <div className="rounded-xl border border-border bg-background/80 overflow-hidden">
               <table className="w-full table-fixed sm:table-auto">
                   <tbody>
-                      {paginatedRequests.map(req => (
-                          <RequestRow key={req.id} req={req} getStatusColor={getStatusColor} onCancel={handleCancelRequest} onRetry={handleRetry} isAdmin={isAdmin}
+                      {tableRows.map(({ req, sameLink }) => (
+                          <RequestRow key={req.id} req={req} sameLink={sameLink} getStatusColor={getStatusColor} onCancel={handleCancelRequest} onRetry={handleRetry} isAdmin={isAdmin}
                               isSelectionMode={isSelectionMode} isSelected={selectedRequests.has(req.id)} onToggleSelect={toggleRequestSelection} />
                       ))}
                   </tbody>
