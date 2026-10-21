@@ -17,12 +17,14 @@ import { AuditLogger } from '@/lib/audit-logger';
 import { MetronProvider } from '@/lib/metadata/providers/metron';
 import { getMetronCover } from '@/lib/metadata/providers/metron-cover';
 import { lazyMetronAuth } from '@/lib/metron/client';
-import { normalizeFractionNumbers } from '@/lib/utils/issue-parser';
+import { normalizeFractionNumbers, extractIssueNumber, isSameIssue } from '@/lib/utils/issue-parser';
 import { ownedCoverageBySeries } from '@/lib/coverage-ownership';
 import { omnibusQueue } from '@/lib/queue';
 import { cachedCvGet } from '@/lib/metadata/metadata-cache';
 import { followSeries, followSeriesByCatalogId } from '@/lib/follows';
 import { replaceNamingToken, sanitizeNamingPart } from '@/lib/utils/naming';
+
+const OPEN_REQUEST_STATUSES = ['PENDING', 'PENDING_APPROVAL', 'DOWNLOADING', 'MANUAL_DDL', 'STALLED', 'AWAITING_RELEASE', 'UNRELEASED'];
 
 export const dynamic = 'force-dynamic';
 
@@ -462,6 +464,22 @@ export async function POST(request: NextRequest) {
     } else {
       const searchName = type === 'issue' && body.issueNumber && !name.includes(`#${body.issueNumber}`)
         ? `${name} #${body.issueNumber}` : name;
+
+      // Fork: no second open request for the same issue (repeated "Request missing" clicks made 37 for 13 issues)
+      const wantedNumber = body.issueNumber || extractIssueNumber(searchName);
+      // A failed lookup must not block the request: worst case is a duplicate, as before.
+      let open: { activeDownloadName: string | null }[] = [];
+      if (resolvedCvId && wantedNumber) {
+        try {
+          open = await prisma.request.findMany({
+            where: { volumeId: resolvedCvId.toString(), status: { in: OPEN_REQUEST_STATUSES } },
+            select: { activeDownloadName: true },
+          });
+        } catch { open = []; }
+      }
+      if (open.some(r => isSameIssue(extractIssueNumber(r.activeDownloadName || ''), wantedNumber))) {
+        return NextResponse.json({ success: true, alreadyRequested: true, message: `${searchName} is already requested.` });
+      }
 
       if (body.issueNumber && (!image || image.includes('placeholder') || image.includes('default'))) {
          const fallback = await getMetronCover(name, body.issueNumber, await metronAuth());

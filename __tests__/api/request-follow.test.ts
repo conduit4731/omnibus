@@ -31,7 +31,7 @@ vi.mock('@/lib/follows', () => ({
 vi.mock('@/lib/db', () => ({
     prisma: {
         user: { findUnique: vi.fn() },
-        request: { create: vi.fn(), findFirst: vi.fn(), findUnique: vi.fn(), update: vi.fn(), count: vi.fn() },
+        request: { create: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), findUnique: vi.fn(), update: vi.fn(), count: vi.fn() },
         series: { upsert: vi.fn(), findUnique: vi.fn(), findFirst: vi.fn() },
         library: { findMany: vi.fn() },
         systemSetting: { findUnique: vi.fn(), findMany: vi.fn() }
@@ -49,6 +49,8 @@ describe('API: request auto-follow (POST)', () => {
         (prisma.library.findMany as any).mockResolvedValue([{ id: 'lib1', path: '/data/comics', isManga: false, isDefault: true }]);
         (prisma.request.create as any).mockResolvedValue({ id: 'req-1', status: 'PENDING' });
         (prisma.request.findFirst as any).mockResolvedValue(null);
+        (prisma.request.findMany as any).mockResolvedValue([]);
+        (prisma.request.create as any).mockClear();
     });
 
     it('volume request (monitorOnly) follows the upserted series for the requester', async () => {
@@ -70,5 +72,24 @@ describe('API: request auto-follow (POST)', () => {
         expect(res.status).toBe(200);
         expect(followSeriesByCatalogId).toHaveBeenCalledWith('user-1', 'COMICVINE', '555');
         expect(followSeries).not.toHaveBeenCalled();
+    });
+
+    it('does not create a second open request for the same issue (fork)', async () => {
+        (prisma.request.findMany as any).mockResolvedValue([{ activeDownloadName: 'Saga #001: Chapter One' }]);
+        const res = await POST(new NextRequest('http://localhost/api/request', {
+            method: 'POST',
+            body: JSON.stringify({ type: 'issue', cvId: 555, name: 'Saga #1', publisher: 'Image', year: '2012', issueNumber: '1' })
+        }));
+        const body = await res.json();
+
+        expect(body.alreadyRequested).toBe(true);
+        expect(prisma.request.create).not.toHaveBeenCalled();
+        // another issue of the same series still goes through
+        (prisma.request.findMany as any).mockResolvedValue([{ activeDownloadName: 'Saga #1' }]);
+        await POST(new NextRequest('http://localhost/api/request', {
+            method: 'POST',
+            body: JSON.stringify({ type: 'issue', cvId: 555, name: 'Saga #2', publisher: 'Image', year: '2012', issueNumber: '2' })
+        }));
+        expect(prisma.request.create).toHaveBeenCalledTimes(1);
     });
 });
