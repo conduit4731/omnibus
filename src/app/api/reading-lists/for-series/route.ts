@@ -1,16 +1,15 @@
 // Fork only: which reading lists (events, reading orders, characters) a series appears in, and per issue
-// which events / reading orders it belongs to - for the series page, like Batcave's "Event: The New 52".
+// chips like Batcave's "Event: The New 52": the issue's era ("New 52", from its year and the publisher) and its events.
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getServerSession } from 'next-auth/next';
 import { getAuthOptions } from '@/app/api/auth/[...nextauth]/options';
 import { listMeta } from '@/lib/reading-list-meta';
-import { displayListName } from '@/lib/reading-list-groups';
+import { displayListName, namedEra, normalizePublisher } from '@/lib/reading-list-groups';
 
 export const dynamic = 'force-dynamic';
 
-// Shown as chips on single issues; character lists are too broad for that and only appear in the summary
-const ISSUE_CHIP_CATEGORIES = new Set(['Events', 'Master Reading Order']);
+type Chip = { name: string, href: string, kind: 'era' | 'event' };
 
 export async function GET(request: Request) {
     const session = await getServerSession(await getAuthOptions());
@@ -19,7 +18,10 @@ export async function GET(request: Request) {
     const seriesId = new URL(request.url).searchParams.get('seriesId');
     if (!seriesId) return NextResponse.json({ error: 'Missing seriesId' }, { status: 400 });
 
-    const issues = await prisma.issue.findMany({ where: { seriesId }, select: { id: true, metadataId: true } });
+    const [series, issues] = await Promise.all([
+        prisma.series.findUnique({ where: { id: seriesId }, select: { publisher: true, year: true } }),
+        prisma.issue.findMany({ where: { seriesId }, select: { id: true, metadataId: true, releaseDate: true } }),
+    ]);
     const byCv = new Map(issues.filter(i => /^\d+$/.test(i.metadataId || '')).map(i => [Number(i.metadataId), i.id]));
     const items = await prisma.readingListItem.findMany({
         where: {
@@ -43,11 +45,17 @@ export async function GET(request: Request) {
         id: l.id, name: displayListName(l.name), category: meta.get(l.id)?.category || 'Lists', issueCount: l.issues.size, issueIds: [...l.issues],
     })).sort((a, b) => b.issueCount - a.issueCount || a.name.localeCompare(b.name));
 
-    const byIssue: Record<string, { id: string, name: string }[]> = {};
-    // Events first on the chips (the specific story), then the long reading orders
-    for (const l of [...result].sort((a, b) => Number(b.category === 'Events') - Number(a.category === 'Events'))) {
-        if (!ISSUE_CHIP_CATEGORIES.has(l.category)) continue;
-        for (const issueId of l.issueIds) (byIssue[issueId] ||= []).push({ id: l.id, name: l.name });
+    // Era first (every issue has one), then its events; reading orders and character lists only in the summary
+    const byIssue: Record<string, Chip[]> = {};
+    const publisher = normalizePublisher(series?.publisher);
+    for (const i of issues) {
+        const year = parseInt(i.releaseDate?.slice(0, 4) || '', 10) || series?.year || null;
+        const era = namedEra(publisher, year);
+        if (era) byIssue[i.id] = [{ name: era, kind: 'era', href: `/events?publisher=${encodeURIComponent(publisher!)}&era=${encodeURIComponent(era)}` }];
+    }
+    for (const l of result) {
+        if (l.category !== 'Events') continue;
+        for (const issueId of l.issueIds) (byIssue[issueId] ||= []).push({ name: l.name, kind: 'event', href: `/reading-lists?id=${l.id}` });
     }
     return NextResponse.json({ lists: result.map(({ issueIds: _ids, ...l }) => l), byIssue });
 }

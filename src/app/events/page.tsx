@@ -22,6 +22,13 @@ export default function EventsPage() {
     const [sort, setSort] = useState<"size" | "era" | "name">("size")
     const [query, setQuery] = useState("")
 
+    // Era chips on series pages link here with ?publisher=DC&era=New%2052
+    useEffect(() => {
+        const p = new URLSearchParams(window.location.search)
+        if (p.get('publisher')) setPublisher(p.get('publisher')!)
+        if (p.get('era')) setEra(p.get('era')!)
+    }, [])
+
     useEffect(() => {
         fetch('/api/reading-lists').then(r => r.ok ? r.json() : []).then((all: ListSummary[]) => setLists(all.filter(l => l.category === 'Events')))
     }, [])

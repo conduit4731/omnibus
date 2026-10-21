@@ -94,7 +94,7 @@ function SeriesContent() {
   // not on disk; each carries `coveredBy` naming the book.
   const [coveredIssues, setCoveredIssues] = useState<any[]>([]);
 
-  const [seriesLists, setSeriesLists] = useState<{ lists: SeriesListRef[], byIssue: Record<string, SeriesListRef[]> }>({ lists: [], byIssue: {} })
+  const [seriesLists, setSeriesLists] = useState<{ lists: SeriesListRef[], byIssue: Record<string, IssueChip[]> }>({ lists: [], byIssue: {} })
   const [seriesInfo, setSeriesInfo] = useState<{name: string, cover: string | null, cvId: number | null, metadataId: string | null, metadataSource: string, path: string | null, id: string | null, isFavorite: boolean, isFollowing: boolean, publisher: string | null, year: string | null, description: string | null, status: string | null, bookType: string | null, monitored: boolean, isManga: boolean, universe?: string | null, seriesGroup?: string | null, matchState?: string, hasCustomCover?: boolean, genres?: string[]}>({
     name: "", cover: null, cvId: null, metadataId: null, metadataSource: 'COMICVINE', path: null, id: null, isFavorite: false, isFollowing: false, publisher: null, year: null, description: null, status: null, bookType: null, monitored: false, isManga: false, matchState: 'MATCHED', hasCustomCover: false, genres: []
   });
@@ -2714,17 +2714,20 @@ function SeriesContent() {
   )
 }
 
-// Fork: "Event: The New 52" chips on an issue (Batcave-style), linking to the reading list
+// Fork: Batcave-style chips on an issue: its era ("New 52", to the events of that era) and its events (to the list)
 type SeriesListRef = { id: string, name: string, category?: string, issueCount?: number }
-function ListChips({ lists }: { lists?: SeriesListRef[] }) {
+type IssueChip = { name: string, href: string, kind: 'era' | 'event' }
+function ListChips({ lists }: { lists?: IssueChip[] }) {
   if (!lists?.length) return null
   return (
     <div className="flex flex-wrap gap-1 mt-1">
-      {lists.slice(0, 2).map(l => (
-        <Link key={l.id} href={`/reading-lists?id=${l.id}`} onClick={e => e.stopPropagation()} title={l.name}
-          className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-primary/10 text-primary hover:bg-primary/20 truncate max-w-[180px]">{l.name}</Link>
+      {lists.slice(0, 3).map(l => (
+        <Link key={l.href} href={l.href} onClick={e => e.stopPropagation()} title={l.kind === 'era' ? `Era: ${l.name}` : `Event: ${l.name}`}
+          className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded truncate max-w-[180px]",
+            l.kind === 'era' ? "bg-muted text-muted-foreground hover:text-foreground" : "bg-primary/10 text-primary hover:bg-primary/20")}>
+          {l.kind === 'event' && <span className="opacity-70">Event: </span>}{l.name}</Link>
       ))}
-      {lists.length > 2 && <span className="text-[10px] font-bold text-muted-foreground px-1" title={lists.slice(2).map(l => l.name).join(', ')}>+{lists.length - 2}</span>}
+      {lists.length > 3 && <span className="text-[10px] font-bold text-muted-foreground px-1" title={lists.slice(3).map(l => l.name).join(', ')}>+{lists.length - 3}</span>}
     </div>
   )
 }

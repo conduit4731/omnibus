@@ -47,6 +47,11 @@ export function eraFor(publisher: string, year: number | null): { era: string, e
     return { era: era.name, eraStart: era.from };
 }
 
+/** The publisher's named era ("New 52") for a year; null when the publisher has no named eras. */
+export function namedEra(publisher: string | null, year: number | null): string | null {
+    return publisher && ERAS[publisher] && year !== null ? eraFor(publisher, year).era : null;
+}
+
 /** Median of the years, or null when there are none. */
 export function medianYear(years: number[]): number | null {
     if (years.length === 0) return null;
