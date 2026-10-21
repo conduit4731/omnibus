@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyList, eraFor, medianYear, normalizePublisher, yearFromTitle } from '@/lib/reading-list-groups';
+import { classifyList, eraFor, medianYear, normalizePublisher, subjectOf, yearFromTitle } from '@/lib/reading-list-groups';
 
 describe('reading list grouping (fork)', () => {
     it('normalizes publisher names', () => {
@@ -34,5 +34,13 @@ describe('reading list grouping (fork)', () => {
             .toEqual({ publisher: 'DC', category: 'Lists' });
         expect(classifyList({ name: '[Marvel] Civil War' }, [null])).toEqual({ publisher: 'Marvel', category: 'Lists' });
         expect(classifyList({ name: 'Mixed bag' }, [])).toEqual({ publisher: 'Other', category: 'Lists' });
+    });
+
+    it('reads the character from the repo path', () => {
+        expect(subjectOf('comics-ro: DC/Characters/Batman/[DC] Batman - New 52.cbl')).toBe('Batman');
+        expect(subjectOf('comics-ro: DC/Characters/unsorted/Batgirl/Batgirl 003.cbl')).toBe('Batgirl');
+        expect(subjectOf('comics-ro: DC/Characters/Green Lantern/Reddit/GL 06.cbl')).toBe('Green Lantern');
+        expect(subjectOf('comics-ro: DC/Events/CBRO/x.cbl')).toBeNull();
+        expect(subjectOf('my own list')).toBeNull();
     });
 });

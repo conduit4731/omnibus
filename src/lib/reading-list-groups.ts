@@ -77,3 +77,19 @@ export function classifyList(list: { name: string, description?: string | null }
     const category = path && path.length > 2 ? path[1] : 'Lists';
     return { publisher: publisher ?? 'Other', category };
 }
+
+/** Character a "comics-ro: DC/Characters/<name>/…" list is about ("unsorted/<name>" skipped); null otherwise. */
+export function subjectOf(description?: string | null): string | null {
+    if (!description?.startsWith('comics-ro: ')) return null;
+    const parts = description.slice('comics-ro: '.length).split('/');
+    if (parts[1] !== 'Characters' || parts.length < 4) return null;
+    return parts[2] === 'unsorted' ? parts[3] : parts[2];
+}
+
+/** Best ComicVine character result: exact name first, publisher must match when the result names one. */
+export function pickPortrait(results: any[], name: string, publisher: string): string | null {
+    const fits = results.filter(r => !r?.publisher?.name || normalizePublisher(r.publisher.name) === publisher);
+    const exact = fits.find(r => r?.name?.toLowerCase() === name.toLowerCase());
+    const best = exact || fits[0];
+    return best?.image?.medium_url || best?.image?.original_url || null;
+}

@@ -808,6 +808,10 @@ function ReadingListsContent() {
                       <CardHeader className="flex flex-col gap-4">
                           <div className="flex flex-col xl:flex-row xl:items-start justify-between gap-4 w-full">
                               <div className="flex flex-wrap items-center gap-3 min-w-0 flex-1">
+                                {/* Fork: cover of the first issue as the list's hero image (Batcave-style) */}
+                                {activeList.items.find((i: any) => i.issue?.coverUrl)?.issue?.coverUrl && (
+                                    <img src={activeList.items.find((i: any) => i.issue?.coverUrl).issue.coverUrl} alt="" className="w-20 sm:w-28 aspect-[2/3] object-cover rounded-lg shadow-lg border border-border shrink-0" />
+                                )}
                                 <CardTitle className="text-2xl sm:text-3xl font-black text-primary leading-tight break-words">{activeList.name}</CardTitle>
                                 {activeList.isGlobal && <Badge variant="outline" className="shrink-0 bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-900/20 dark:border-emerald-800"><Globe className="w-3 h-3 mr-1"/> Global ({activeList.user?.username || 'Unknown'})</Badge>}
                               </div>

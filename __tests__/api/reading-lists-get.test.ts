@@ -8,15 +8,19 @@ const mocks = vi.hoisted(() => ({
     itemFindMany: vi.fn(),
     progressFindMany: vi.fn(),
     issueFindMany: vi.fn(),
+    itemGroupBy: vi.fn(),
 }));
 
 vi.mock('next-auth/next', () => ({ getServerSession: mocks.getServerSession }));
 vi.mock('@/app/api/auth/[...nextauth]/options', () => ({ getAuthOptions: vi.fn() }));
+vi.mock('@/lib/reading-list-meta', () => ({
+    listMeta: vi.fn(async (lists: any[]) => new Map(lists.map(l => [l.id, { publisher: 'DC', category: 'Events', era: 'New 52', eraStart: 2011, covers: [] }]))),
+}));
 vi.mock('@/lib/library-access', () => ({ getAccessibleLibraryIds: vi.fn().mockResolvedValue('ALL') }));
 vi.mock('@/lib/db', () => ({
     prisma: {
         readingList: { findMany: mocks.listFindMany, findFirst: mocks.listFindFirst },
-        readingListItem: { findMany: mocks.itemFindMany, update: vi.fn() },
+        readingListItem: { findMany: mocks.itemFindMany, groupBy: mocks.itemGroupBy, update: vi.fn() },
         readProgress: { findMany: mocks.progressFindMany },
         issue: { findMany: mocks.issueFindMany },
         $transaction: vi.fn(),
@@ -33,20 +37,21 @@ describe('GET /api/reading-lists (#252 / #253)', () => {
 
     it('returns only list summaries with item / owned / read counts, never the items', async () => {
         mocks.listFindMany.mockResolvedValue([{ id: 'l1', name: 'Zero Year' }, { id: 'l2', name: 'Empty' }]);
-        mocks.itemFindMany.mockResolvedValue([
-            { listId: 'l1', issueId: 'i1', issue: { filePath: '/data/comics/a.cbz' } }, // owned + read
-            { listId: 'l1', issueId: 'i2', issue: { filePath: '/data/comics/b.cbz' } }, // owned, unread
-            { listId: 'l1', issueId: 'i3', issue: { filePath: null } },                 // WANTED: not owned
-            { listId: 'l1', issueId: null, issue: null },                               // placeholder
-        ]);
         mocks.progressFindMany.mockResolvedValue([{ issueId: 'i1' }]);
+        // counted by the database: all items, items whose issue has a file, items the user completed
+        mocks.itemGroupBy.mockImplementation(async ({ where }: any) =>
+            where.issue ? [{ listId: 'l1', _count: { _all: 2 } }]
+            : where.issueId ? [{ listId: 'l1', _count: { _all: 1 } }]
+            : [{ listId: 'l1', _count: { _all: 4 } }]);
 
         const body = await (await GET(req())).json();
 
         expect(mocks.listFindMany.mock.calls[0][0].include.items).toBeUndefined();
+        expect(mocks.itemFindMany).not.toHaveBeenCalled();
+        expect(mocks.itemGroupBy.mock.calls.find((c: any) => c[0].where.issueId)?.[0].where.issueId).toEqual({ in: ['i1'] });
         expect(body).toEqual([
-            { id: 'l1', name: 'Zero Year', itemCount: 4, ownedCount: 2, readCount: 1, publisher: 'Other', category: 'Lists', era: 'Unknown era', eraStart: 9999 },
-            { id: 'l2', name: 'Empty', itemCount: 0, ownedCount: 0, readCount: 0, publisher: 'Other', category: 'Lists', era: 'Unknown era', eraStart: 9999 },
+            { id: 'l1', name: 'Zero Year', itemCount: 4, ownedCount: 2, readCount: 1, publisher: 'DC', category: 'Events', era: 'New 52', eraStart: 2011, covers: [] },
+            { id: 'l2', name: 'Empty', itemCount: 0, ownedCount: 0, readCount: 0, publisher: 'DC', category: 'Events', era: 'New 52', eraStart: 2011, covers: [] },
         ]);
     });
 
