@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { nextInList } from "@/lib/reading-list-next";
 import { FannedCovers, displayName } from "@/components/list-cards";
+import { SeriesLink } from "@/components/series-link";
 
 const label = (item: any) => item.issue?.series ? `${item.issue.series.name} #${item.issue.number}` : item.title;
 const cover = (item: any) => item.issue?.coverUrl
@@ -58,7 +59,7 @@ export function ReadingListUpNext({ onLoaded }: { onLoaded?: (filePaths: Set<str
                 {next && (
                     <div>
                         <p className="text-xs uppercase tracking-widest font-bold text-muted-foreground">Up next</p>
-                        <p className="text-lg font-bold">{label(next)}</p>
+                        <p className="text-lg font-bold"><SeriesLink series={next.issue?.series}>{label(next)}</SeriesLink></p>
                         {page && <p className="text-xs text-muted-foreground">{page}</p>}
                     </div>
                 )}

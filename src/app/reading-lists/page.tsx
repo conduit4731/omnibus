@@ -1,7 +1,7 @@
 // src/app/reading-lists/page.tsx
 "use client"
 
-import { useState, useEffect, Suspense, useMemo } from "react"
+import { useState, useEffect, Suspense } from "react"
 import { useSession } from "next-auth/react"
 import { useSearchParams } from "next/navigation"
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd"
@@ -18,7 +18,7 @@ import {
     BookOpen, Trash2, Plus, GripVertical, Loader2, Image as ImageIcon,
     ArrowLeft, ListOrdered, Calendar, Minus, FolderOpen, CloudDownload,
     Check, DownloadCloud, Sparkles, Globe, ExternalLink, Share2, Info,
-    ChevronDown, ChevronUp, LayoutList, List, RefreshCw, Star
+    ChevronDown, LayoutList, List, RefreshCw, Star
 } from "lucide-react"
 import Link from "next/link"
 import { Badge } from "@/components/ui/badge"
@@ -28,6 +28,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ReadingListPicker } from "@/components/reading-list-picker"
 import { nextInList } from "@/lib/reading-list-next"
+import { SeriesLink } from "@/components/series-link"
 
 // Fork: series an entry belongs to, also when the issue is not in the library ("Catwoman (2011) #47" -> "Catwoman (2011)")
 const seriesOfItem = (item: any): string => item.issue?.series
@@ -181,51 +182,8 @@ function ReadingListsContent() {
 
   const [isMounted, setIsMounted] = useState(false)
 
-  // --- New State for Grouped View ---
-  const [viewMode, setViewMode] = useState<'grouped' | 'flat'>('grouped')
-  const [expandedChunks, setExpandedChunks] = useState<Set<string>>(new Set())
-
-  // Group sequential items of the same series to preserve reading order
-  const groupedItems = useMemo(() => {
-      const activeList = activeDetail;
-      if (!activeList) return [];
-      
-      const chunks: { id: string, seriesName: string, items: any[], startIndex: number }[] = [];
-      let currentChunk: any[] = [];
-      let currentSeriesName: string | null = null;
-      let startIndex = 0;
-
-      activeList.items.forEach((item: any, idx: number) => {
-          if (hideRead && item.progress?.isCompleted) return;
-          const seriesName = seriesOfItem(item);
-          
-          if (seriesName !== currentSeriesName) {
-              if (currentChunk.length > 0) {
-                  chunks.push({ id: `chunk-${chunks.length}`, seriesName: currentSeriesName || "Unknown", items: currentChunk, startIndex });
-              }
-              currentChunk = [item];
-              currentSeriesName = seriesName;
-              startIndex = idx;
-          } else {
-              currentChunk.push(item);
-          }
-      });
-
-      if (currentChunk.length > 0) {
-          chunks.push({ id: `chunk-${chunks.length}`, seriesName: currentSeriesName || "Unknown", items: currentChunk, startIndex });
-      }
-
-      return chunks;
-  }, [activeDetail, hideRead]);
-
-  const toggleChunk = (chunkId: string) => {
-      setExpandedChunks(prev => {
-          const next = new Set(prev);
-          if (next.has(chunkId)) next.delete(chunkId);
-          else next.add(chunkId);
-          return next;
-      });
-  };
+  // Fork: compact table in reading order (default) or the drag & drop list for reordering
+  const [viewMode, setViewMode] = useState<'table' | 'flat'>('table')
 
   useEffect(() => {
     setIsMounted(true)
@@ -859,11 +817,11 @@ function ReadingListsContent() {
                                   )}
                                   {/* --- VIEW MODE TOGGLE --- */}
                                   <div className="flex items-center gap-1 bg-muted p-1 rounded-md border border-border shadow-inner">
-                                      <Button variant={viewMode === 'grouped' ? 'default' : 'ghost'} size="sm" onClick={() => setViewMode('grouped')} className={`h-8 px-3 text-xs ${viewMode === 'grouped' ? 'shadow-sm bg-background text-foreground' : 'text-muted-foreground'}`}>
-                                          <LayoutList className="w-3.5 h-3.5 mr-1.5" /> Grouped
+                                      <Button variant={viewMode === 'table' ? 'default' : 'ghost'} size="sm" onClick={() => setViewMode('table')} className={`h-8 px-3 text-xs ${viewMode === 'table' ? 'shadow-sm bg-background text-foreground' : 'text-muted-foreground'}`}>
+                                          <LayoutList className="w-3.5 h-3.5 mr-1.5" /> Table
                                       </Button>
                                       <Button variant={viewMode === 'flat' ? 'default' : 'ghost'} size="sm" onClick={() => setViewMode('flat')} className={`h-8 px-3 text-xs ${viewMode === 'flat' ? 'shadow-sm bg-background text-foreground' : 'text-muted-foreground'}`}>
-                                          <List className="w-3.5 h-3.5 mr-1.5" /> Flat (Reorder)
+                                          <List className="w-3.5 h-3.5 mr-1.5" /> Reorder
                                       </Button>
                                   </div>
                                   <Button
@@ -920,7 +878,7 @@ function ReadingListsContent() {
                               <span className="text-xs font-bold text-primary shrink-0">
                                   {readCount} / {activeList.items.length} read · {activeList.items.length - missingItems.length} owned
                               </span>
-                              {viewMode === 'grouped' && (
+                              {viewMode === 'table' && (
                                   <Button size="sm" variant="ghost" className="h-7 px-2 text-xs shrink-0" onClick={() => setHideRead(h => !h)}>
                                       {hideRead ? "Show read" : "Hide read"}
                                   </Button>
@@ -950,7 +908,7 @@ function ReadingListsContent() {
                                   const owned = ownedOf(items);
                                   return (
                                       <div key={name} className="flex items-center gap-3 py-1">
-                                          <span className="text-sm font-medium truncate flex-1 min-w-0" title={name}>{name}</span>
+                                          <span className="text-sm font-medium truncate flex-1 min-w-0" title={name}><SeriesLink series={items.find((i: any) => i.issue?.series)?.issue?.series}>{name}</SeriesLink></span>
                                           <div className="hidden sm:block h-1.5 w-28 rounded-full bg-muted overflow-hidden shrink-0"><div className={`h-full ${owned === items.length ? 'bg-emerald-500' : owned === 0 ? 'bg-red-500' : 'bg-amber-500'}`} style={{ width: `${Math.max(4, Math.round(100 * owned / items.length))}%` }} /></div>
                                           <OwnedState items={items} />
                                           {owned < items.length ? (
@@ -977,98 +935,56 @@ function ReadingListsContent() {
                         <h3 className="text-lg font-bold text-foreground">This list is empty</h3>
                         <p className="text-sm text-muted-foreground mt-1">Navigate to any series and use the "Add to List" button on an issue.</p>
                     </div>
-                  ) : viewMode === 'grouped' ? (
-                        /* --- NEW GROUPED COLLAPSIBLE VIEW --- */
-                        <div className="space-y-4 pb-20">
-                            {groupedItems.map(chunk => {
-                                const isExpanded = expandedChunks.has(chunk.id);
-                                return (
-                                    <div key={chunk.id} className="border border-border rounded-xl bg-background shadow-sm overflow-hidden transition-all">
-                                        <div 
-                                            className="p-4 bg-muted/30 flex items-center justify-between cursor-pointer hover:bg-muted/60 transition-colors"
-                                            onClick={() => toggleChunk(chunk.id)}
-                                        >
-                                            <div className="flex items-center gap-3">
-                                                <FolderOpen className="w-5 h-5 text-primary" />
-                                                <span className="font-bold text-foreground text-sm sm:text-base">{chunk.seriesName}</span>
-                                                <OwnedState items={chunk.items} />
-                                                {chunk.items.every((i: any) => i.progress?.isCompleted) ? (
-                                                    <Badge variant="secondary" className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800"><Check className="w-3 h-3 mr-1" />Read</Badge>
-                                                ) : chunk.items.some((i: any) => i.progress?.isCompleted) && (
-                                                    <span className="text-[10px] font-bold text-muted-foreground">{chunk.items.filter((i: any) => i.progress?.isCompleted).length} read</span>
-                                                )}
-                                            </div>
-                                            <div className="flex items-center gap-2">
-                                            {ownedOf(chunk.items) < chunk.items.length && (
-                                                <Button size="sm" variant="outline" className="h-7 px-2 text-[10px] font-bold uppercase border-primary/30 text-primary bg-primary/5 hover:bg-primary/10" disabled={isBulkDownloading}
-                                                    onClick={e => { e.stopPropagation(); handleDownloadAllMissing(chunk.items.filter((i: any) => !i.issue?.filePath)); }}>
-                                                    <CloudDownload className="w-3.5 h-3.5 mr-1" /> Request {chunk.items.length - ownedOf(chunk.items)}
-                                                </Button>
-                                            )}
-                                            <div className="bg-background rounded-full p-1 shadow-sm border border-border">
-                                                {isExpanded ? <ChevronUp className="w-4 h-4 text-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
-                                            </div>
-                                            </div>
-                                        </div>
-
-                                        {isExpanded && (
-                                            <div className="p-3 space-y-2 border-t border-border bg-muted/10">
-                                                {chunk.items.map((item, localIdx) => {
-                                                    const index = chunk.startIndex + localIdx;
-                                                    const issue = item.issue;
-                                                    const series = issue?.series;
-                                                    const coverUrl = activeList.coverUrl || issue?.coverUrl || (series?.folderPath ? `/api/library/cover?path=${encodeURIComponent(series.folderPath)}` : '/api/library/cover?path=missing');
-
-                                                return (
-                                                    <div key={item.id} className={`flex items-center gap-4 p-3 bg-background border border-border rounded-xl shadow-sm hover:border-primary/50 transition-all ${item.progress?.isCompleted ? 'opacity-60' : ''}`}>
-                                                        <span className="w-8 text-center font-mono text-xs font-bold text-muted-foreground">{index + 1}</span>
-                                                        <div className="w-10 h-14 shrink-0 rounded overflow-hidden bg-muted border border-border">
-                                                            <img src={coverUrl} className="w-full h-full object-cover" alt="" />
-                                                    </div>
-                                                    <div className="flex-1 min-w-0">
-                                                        {issue?.filePath ? (
-                                                            <>
-                                                                <h4 className="font-bold text-sm truncate text-foreground">{series.name}</h4>
-                                                                <p className="text-xs text-muted-foreground truncate">Issue #{issue.number} • {issue.name || "Untitled"}</p>
-                                                                <ReadState progress={item.progress} />
-                                                            </>
-                                                        ) : (
-                                                                <h4 className="font-bold text-sm truncate text-muted-foreground">{item.title} (Missing File)</h4>
-                                                        )}
-                                                    </div>
-                                                    <div className="flex items-center gap-2 pr-2 shrink-0">
-                                                        {!issue?.filePath && (
-                                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-primary" title="Re-check this item against the library" onClick={() => handleRefreshItem(item.id)} disabled={refreshingItemIds.has(item.id)}>
-                                                                {refreshingItemIds.has(item.id) ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                                                            </Button>
-                                                        )}
-                                                        {issue && isAdmin && (
-                                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-primary hidden sm:flex" title={`Resync metadata for ${series.name}`} onClick={() => handleResyncSeries(series)} disabled={resyncingSeriesIds.has(series.id)}>
-                                                                {resyncingSeriesIds.has(series.id) ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                                                            </Button>
-                                                        )}
-                                                        {issue?.filePath && (
-                                                            <Button size="sm" asChild className="h-8 shadow-sm font-bold bg-primary hover:bg-primary/90 text-primary-foreground">
-                                                                <Link href={readerHref(issue)}>
-                                                                    <BookOpen className="w-3.5 h-3.5 sm:mr-2" /> <span className="hidden sm:inline">Read</span>
-                                                                </Link>
-                                                            </Button>
-                                                        )}
-                                                        {(isAdmin || activeList.userId === session?.user?.id) && (
-                                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:text-red-700 hover:bg-red-50 hidden sm:flex" onClick={() => handleRemoveItem(item.id)}>
-                                                                <Minus className="w-4 h-4" />
-                                                            </Button>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                )}
-                            </div>
-                        )
-                    })}
-                </div>
+                  ) : viewMode === 'table' ? (
+                      /* Fork: one compact row per entry, in reading order */
+                      <div className="rounded-xl border border-border bg-background/80 overflow-hidden mb-20">
+                          <table className="w-full table-fixed">
+                              <tbody>
+                                  {activeList.items.map((item: any, index: number) => {
+                                      if (hideRead && item.progress?.isCompleted) return null;
+                                      const issue = item.issue;
+                                      const owned = !!issue?.filePath;
+                                      const seriesName = seriesOfItem(item);
+                                      const number = issue?.number ?? (item.title.match(/#\s*([^\s#]+)\s*$/)?.[1] || '');
+                                      const isRequesting = requestingIds.has(item.id);
+                                      const isAlreadyRequested = requestedIds.has(item.id);
+                                      return (
+                                          <tr key={item.id} className={`border-b border-border text-sm hover:bg-muted/40 ${item.progress?.isCompleted ? 'opacity-55' : ''} ${item === nextUp ? 'bg-primary/10' : ''}`}>
+                                              <td className="w-12 pl-3 py-1.5 font-mono text-xs text-muted-foreground">{index + 1}</td>
+                                              <td className="px-2 py-1.5 truncate">
+                                                  <SeriesLink series={issue?.series} className={`font-medium ${owned ? 'text-foreground' : 'text-muted-foreground'}`}>{seriesName}</SeriesLink>
+                                                  <span className="ml-2 font-bold">#{number}</span>
+                                                  {issue?.name && <span className="hidden md:inline ml-2 text-xs text-muted-foreground">{issue.name}</span>}
+                                              </td>
+                                              <td className="w-36 px-2 py-1.5 hidden sm:table-cell">
+                                                  {item.progress?.isCompleted ? <span className="text-[10px] font-bold uppercase text-emerald-500 flex items-center gap-1"><Check className="w-3 h-3" /> Read</span>
+                                                      : owned ? (item.progress?.currentPage > 0 ? <ReadState progress={item.progress} /> : <span className="text-[10px] font-bold uppercase text-muted-foreground">Owned</span>)
+                                                      : <span className="text-[10px] font-bold uppercase text-orange-500">Not in library</span>}
+                                              </td>
+                                              <td className="w-32 pr-2 py-1 text-right whitespace-nowrap">
+                                                  {owned ? (
+                                                      <Button size="sm" asChild className="h-7 px-2 font-bold bg-primary hover:bg-primary/90 text-primary-foreground">
+                                                          <Link href={readerHref(issue)}><BookOpen className="w-3.5 h-3.5 sm:mr-1" /><span className="hidden sm:inline">Read</span></Link>
+                                                      </Button>
+                                                  ) : isAlreadyRequested ? (
+                                                      <span className="text-[10px] font-bold uppercase text-emerald-500 px-2">Requested</span>
+                                                  ) : (
+                                                      <Button size="sm" variant="outline" className="h-7 px-2 text-[10px] font-bold uppercase border-primary/30 text-primary" onClick={() => handleRequestMissing(item)} disabled={isRequesting}>
+                                                          {isRequesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CloudDownload className="w-3.5 h-3.5" />}<span className="hidden sm:inline ml-1">Request</span>
+                                                      </Button>
+                                                  )}
+                                                  {(isAdmin || activeList.userId === session?.user?.id) && (
+                                                      <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500 hover:text-red-700 ml-1 hidden sm:inline-flex" title="Remove from list" onClick={() => handleRemoveItem(item.id)}>
+                                                          <Minus className="w-3.5 h-3.5" />
+                                                      </Button>
+                                                  )}
+                                              </td>
+                                          </tr>
+                                      );
+                                  })}
+                              </tbody>
+                          </table>
+                      </div>
             ) : (
                       <DragDropContext onDragEnd={onDragEnd}>
                           <Droppable droppableId="reading-list">
@@ -1146,7 +1062,7 @@ function ReadingListsContent() {
                                                           <div className="flex-1 min-w-0">
                                                               <div className="flex items-center gap-2 mb-1">
                                                                   <Badge variant="secondary" className="shrink-0 text-[10px] font-mono h-5 bg-primary/20 text-primary border-primary/30">Part {index + 1}</Badge>
-                                                                  <h4 className="font-bold text-sm truncate text-foreground">{series.name}</h4>
+                                                                  <h4 className="font-bold text-sm truncate text-foreground"><SeriesLink series={series}>{series.name}</SeriesLink></h4>
                                                               </div>
                                                               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                                                   <span className="font-bold text-foreground shrink-0">Issue #{issue.number}</span>

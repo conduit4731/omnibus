@@ -16,6 +16,7 @@ import {
 } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { COMIC_EXT_REGEX } from "@/lib/utils/formats"
+import { SeriesLink } from "@/components/series-link"
 import {
   Select,
   SelectContent,
@@ -90,7 +91,7 @@ function RequestRow({ req, getStatusColor, onCancel, isSelectionMode, isSelected
         onClick={() => { if (isSelectionMode && cancellable) onToggleSelect(req.id); }}>
       {isSelectionMode && <td className="pl-3 w-8">{cancellable ? (isSelected ? <CheckSquare className="w-4 h-4 text-primary" /> : <Square className="w-4 h-4 text-muted-foreground" />) : null}</td>}
       <td className="px-3 py-2 w-32"><Badge variant="outline" className={`${getStatusColor(req.status)} text-[10px] font-bold uppercase tracking-wider whitespace-nowrap`}>{statusLabel(req.status)}</Badge></td>
-      <td className="px-3 py-2 max-w-0 w-full"><p className="truncate font-medium" title={name}>{name}</p></td>
+      <td className="px-3 py-2 max-w-0 w-full"><p className="truncate font-medium" title={name}><SeriesLink folderPath={req.seriesPath}>{name}</SeriesLink></p></td>
       <td className="px-3 py-2 hidden md:table-cell text-xs text-muted-foreground whitespace-nowrap max-w-48 truncate">{providerOf(req)}</td>
       <td className="px-3 py-2 hidden sm:table-cell text-xs text-muted-foreground whitespace-nowrap">{new Date(req.createdAt).toLocaleDateString()}</td>
       <td className="px-3 py-2 w-14 text-xs font-mono text-primary">{req.status === 'DOWNLOADING' ? `${req.progress}%` : ''}</td>
