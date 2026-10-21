@@ -25,7 +25,7 @@ describe('GET /api/calendar/global from/to (fork)', () => {
         m.find.mockResolvedValue({ value: JSON.stringify({ fetchedAt: '2020-01-01', releases: [{ id: 1 }] }) });
         const body = await (await GET(req('from=2020-01-06&to=2020-02-09'))).json();
         expect(body.releases).toEqual([{ id: 1 }]);
-        expect(m.find).toHaveBeenCalledWith({ where: { key: 'calendar_global_v17_2020-01-06_2020-02-09' } });
+        expect(m.find).toHaveBeenCalledWith({ where: { key: 'calendar_global_v18_2020-01-06_2020-02-09' } });
         expect(m.metronGet).not.toHaveBeenCalled();
     });
 

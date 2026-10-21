@@ -50,7 +50,7 @@ export async function GET(request: Request) {
         // Fork: cached per date range. A range that ended before today no longer changes and is kept; a
         // current or future one is refetched once a day. (Was: one key per day and week offset, so every
         // week was fetched again each day and the old keys piled up.)
-        const cacheKey = `calendar_global_v17_${startDateStr}_${endDateStr}`;
+        const cacheKey = `calendar_global_v18_${startDateStr}_${endDateStr}`;
         const cache = await prisma.systemSetting.findUnique({ where: { key: cacheKey } });
         if (cache?.value) {
             const cached = JSON.parse(cache.value);
@@ -110,7 +110,7 @@ export async function GET(request: Request) {
         }
 
         const localSeries = await prisma.series.findMany({
-            select: { id: true, name: true, year: true, publisher: true, metadataId: true, metadataSource: true, monitored: true }
+            select: { id: true, name: true, year: true, publisher: true, metadataId: true, metadataSource: true, monitored: true, folderPath: true }
         });
         
         const nameToPubMap = new Map<string, string>();
@@ -149,7 +149,8 @@ export async function GET(request: Request) {
                 description: issue.desc || issue.description || null,
                 year: issue.series?.year_began?.toString() || startDateStr.split('-')[0],
                 monitored: localMatch?.monitored || false,
-                inLibrary: !!localMatch
+                inLibrary: !!localMatch,
+                seriesPath: localMatch?.folderPath || undefined // fork: the calendar opens owned series
             };
             releaseMatches.set(release, localMatch);
             return release;
@@ -195,7 +196,7 @@ export async function GET(request: Request) {
 
         // Older cache generations (v15, v16 and the fork's v16p day keys)
         await prisma.systemSetting.deleteMany({
-            where: { OR: ['calendar_global_v15_', 'calendar_global_v16_', 'calendar_global_v16p_'].map(p => ({ key: { startsWith: p } })) }
+            where: { OR: ['calendar_global_v15_', 'calendar_global_v16_', 'calendar_global_v16p_', 'calendar_global_v17_'].map(p => ({ key: { startsWith: p } })) }
         }).catch(()=>{});
 
         return NextResponse.json({ startDate: startDateStr, endDate: endDateStr, releases: formattedReleases });

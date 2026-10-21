@@ -3,19 +3,21 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { ChevronLeft, ChevronRight, ImageIcon, Loader2 } from "lucide-react"
+import { ChevronLeft, ChevronRight, ExternalLink, ImageIcon, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import { useToast } from "@/components/ui/use-toast"
 import { Chip } from "@/components/list-cards"
 import { normalizePublisher } from "@/lib/reading-list-groups"
-import { type CalendarView, chunks, daysBetween, iso, parseDay, rangeFor, shift } from "@/lib/calendar-range"
+import { type CalendarView, chunks, daysBetween, iso, monthGrid, parseDay, rangeFor, shift } from "@/lib/calendar-range"
 
 export type Release = {
     id: string | number, seriesName: string, issueNumber: string, publisher: string, releaseDate: string,
     coverUrl: string | null, seriesPath?: string, libraryState?: string, inLibrary?: boolean,
+    volumeId?: string | number | null, metadataSource?: string, year?: string,  // global pull list: the provider series
 }
 type Source = 'followed' | 'tracked' | 'global'
 
-const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 const pub = (r: Release) => normalizePublisher(r.publisher) || 'Other'
 const isFirst = (r: Release) => /^0*1$/.test(r.issueNumber || '')
@@ -37,7 +39,14 @@ async function load(source: Source, from: string, to: string): Promise<Release[]
     return [...seen.values()].filter(r => r.releaseDate >= from && r.releaseDate <= to)
 }
 
-function Cover({ r, size }: { r: Release, size: 'sm' | 'md' | 'lg' }) {
+// A release of a series in the library opens it; any other opens the request dialog (onPick)
+function Opener({ r, onPick, children }: { r: Release, onPick?: (r: Release) => void, children: React.ReactNode }) {
+    if (r.seriesPath) return <Link href={`/library/series?path=${encodeURIComponent(r.seriesPath)}`} onClick={e => e.stopPropagation()}>{children}</Link>
+    if (onPick) return <button type="button" className="block w-full text-left" onClick={e => { e.stopPropagation(); onPick(r) }}>{children}</button>
+    return <>{children}</>
+}
+
+function Cover({ r, size, onPick }: { r: Release, size: 'sm' | 'md' | 'lg', onPick?: (r: Release) => void }) {
     const body = (
         <div className="relative w-full aspect-[2/3] rounded-md overflow-hidden bg-muted border border-border" title={`${r.seriesName} #${r.issueNumber}`}>
             {r.coverUrl ? <img src={r.coverUrl} alt="" loading="lazy" className="w-full h-full object-cover" /> : <ImageIcon className="w-4 h-4 m-auto h-full text-muted-foreground/40" />}
@@ -47,24 +56,80 @@ function Cover({ r, size }: { r: Release, size: 'sm' | 'md' | 'lg' }) {
             {size !== 'sm' && owned(r) && <span className="absolute top-1 right-1 text-[9px] font-bold px-1 rounded bg-emerald-500 text-white">OWNED</span>}
         </div>
     )
-    return r.seriesPath ? <Link href={`/library/series?path=${encodeURIComponent(r.seriesPath)}`}>{body}</Link> : body
+    return <Opener r={r} onPick={onPick}>{body}</Opener>
 }
 
 /** One compact line "Series #N" for week and month cells: many more fit than covers. */
-function Line({ r }: { r: Release }) {
+function Line({ r, onPick }: { r: Release, onPick?: (r: Release) => void }) {
     const text = (
         <span className={`block truncate text-[11px] leading-snug px-1 rounded ${owned(r) ? 'text-emerald-500' : 'text-foreground'} hover:bg-muted`} title={`${r.seriesName} #${r.issueNumber} (${pub(r)})`}>
             {isFirst(r) && <span className="mr-1 text-[9px] font-black px-1 rounded bg-pink-600 text-white">#1</span>}
             {r.seriesName} <span className="text-muted-foreground">#{r.issueNumber}</span>
         </span>
     )
-    return r.seriesPath ? <Link href={`/library/series?path=${encodeURIComponent(r.seriesPath)}`} onClick={e => e.stopPropagation()}>{text}</Link> : text
+    return <Opener r={r} onPick={onPick}>{text}</Opener>
+}
+
+/** A release whose series isn't in the library: subscribe to the series (then open it and request its
+ *  issues there) or request just this issue. */
+function ReleaseDialog({ r, onClose }: { r: Release | null, onClose: () => void }) {
+    const { toast } = useToast()
+    const [busy, setBusy] = useState<'series' | 'issue' | null>(null)
+    const [subscribed, setSubscribed] = useState(false)
+    useEffect(() => { setSubscribed(false) }, [r])
+    if (!r) return null
+    const request = async (type: 'volume' | 'issue') => {
+        setBusy(type === 'volume' ? 'series' : 'issue')
+        const res = await fetch('/api/request', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(type === 'volume'
+                ? { cvId: r.volumeId, name: r.seriesName, year: r.year, publisher: r.publisher, image: r.coverUrl, type, monitored: true, monitorOnly: true, metadataSource: r.metadataSource || 'METRON' }
+                : { cvId: r.volumeId, name: `${r.seriesName} #${r.issueNumber}`, year: r.year, publisher: r.publisher, image: r.coverUrl, type, issueNumber: r.issueNumber, metadataSource: r.metadataSource || 'METRON', releaseDate: r.releaseDate }),
+        }).catch(() => null)
+        const data = res ? await res.json().catch(() => ({})) : {}
+        setBusy(null)
+        if (!res?.ok) { toast({ title: "Request failed", description: data.error || "The server returned an error.", variant: "destructive" }); return }
+        toast({ title: type === 'volume' ? "Subscribed" : "Requested", description: data.message })
+        if (type === 'volume') setSubscribed(true); else onClose()
+    }
+    return (
+        <Dialog open onOpenChange={o => !o && onClose()}>
+            <DialogContent className="sm:max-w-md w-[95%] bg-background border-border rounded-xl">
+                <DialogHeader>
+                    <DialogTitle>{r.seriesName} #{r.issueNumber}</DialogTitle>
+                    <DialogDescription>{r.publisher} · {r.releaseDate}{r.year ? ` · series started ${r.year}` : ''} · not in your library yet</DialogDescription>
+                </DialogHeader>
+                <div className="flex gap-4">
+                    <div className="w-28 shrink-0 aspect-[2/3] rounded-md overflow-hidden bg-muted border border-border">
+                        {r.coverUrl && <img src={r.coverUrl} alt="" className="w-full h-full object-cover" />}
+                    </div>
+                    <div className="flex flex-col gap-2 flex-1">
+                        {subscribed ? (
+                            <Button asChild className="font-bold"><Link href={`/library?q=${encodeURIComponent(r.seriesName)}`}>Open series</Link></Button>
+                        ) : (
+                            <Button className="font-bold" disabled={busy !== null || !r.volumeId} onClick={() => request('volume')}>
+                                {busy === 'series' && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Subscribe to series
+                            </Button>
+                        )}
+                        <Button variant="outline" className="font-bold" disabled={busy !== null || !r.volumeId} onClick={() => request('issue')}>
+                            {busy === 'issue' && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Request this issue
+                        </Button>
+                        {typeof r.id === 'number' && (
+                            <Button variant="ghost" asChild className="text-muted-foreground"><a href={`https://metron.cloud/issue/${r.id}/`} target="_blank" rel="noreferrer"><ExternalLink className="w-4 h-4 mr-2" />Details on Metron</a></Button>
+                        )}
+                        <p className="text-xs text-muted-foreground">Subscribing adds the series to your library and watches new issues; open it to request the earlier ones.</p>
+                    </div>
+                </div>
+            </DialogContent>
+        </Dialog>
+    )
 }
 
 export function ReleaseCalendar({ source, view, onViewChange }: { source: Source, view: CalendarView, onViewChange: (v: CalendarView) => void }) {
     const [anchor, setAnchor] = useState(() => parseDay(iso(new Date())))
     const [releases, setReleases] = useState<Release[] | null>(null)
     const [error, setError] = useState<string | null>(null)
+    const [picked, setPicked] = useState<Release | null>(null)
     const [publisher, setPublisher] = useState('All')
     const range = useMemo(() => rangeFor(view, anchor), [view, anchor])
     const yearBlocked = source === 'global' && view === 'year'
@@ -92,14 +157,14 @@ export function ReleaseCalendar({ source, view, onViewChange }: { source: Source
         return m
     }, [shown])
 
-    const title = view === 'day' ? anchor.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
-        : view === 'week' ? `${parseDay(range.from).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })} – ${parseDay(range.to).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}`
-        : view === 'month' ? `${MONTHS[anchor.getUTCMonth()]} ${anchor.getUTCFullYear()}` : String(anchor.getUTCFullYear())
+    const title = view === 'year' ? String(anchor.getUTCFullYear())
+        : `Releases ${parseDay(range.from).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })} – ${parseDay(range.to).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}`
     const open = (day: string, v: CalendarView) => { setAnchor(parseDay(day)); onViewChange(v) }
     const today = iso(new Date())
 
     return (
         <div className="space-y-5">
+            <ReleaseDialog r={picked} onClose={() => setPicked(null)} />
             <div className="flex flex-wrap items-center gap-2 bg-muted/50 p-3 rounded-xl border border-border">
                 <Button variant="outline" size="icon" className="h-9 w-9" onClick={() => setAnchor(a => shift(view, a, -1))}><ChevronLeft className="w-4 h-4" /></Button>
                 <Button variant="outline" size="icon" className="h-9 w-9" onClick={() => setAnchor(a => shift(view, a, 1))}><ChevronRight className="w-4 h-4" /></Button>
@@ -107,7 +172,7 @@ export function ReleaseCalendar({ source, view, onViewChange }: { source: Source
                 <h2 className="text-lg font-black ml-1">{title}</h2>
                 <div className="flex-1" />
                 <div className="flex gap-1 bg-background p-1 rounded-md border border-border">
-                    {(['day', 'week', 'month', 'year'] as CalendarView[]).map(v => (
+                    {(['covers', 'compact', 'year'] as CalendarView[]).map(v => (
                         <Button key={v} size="sm" variant={view === v ? 'default' : 'ghost'} className="h-7 px-3 text-xs font-bold capitalize" onClick={() => onViewChange(v)}>{v}</Button>
                     ))}
                 </div>
@@ -130,11 +195,11 @@ export function ReleaseCalendar({ source, view, onViewChange }: { source: Source
             {error ? (
                 <div className="py-16 text-center text-sm text-muted-foreground">{error}</div>
             ) : yearBlocked ? (
-                <p className="text-center text-muted-foreground py-16">The year view needs ~50 Metron requests for the global list. Use it on <b>My Pull List</b> or <b>Tracked Series</b>, or switch to month.</p>
+                <p className="text-center text-muted-foreground py-16">The year view needs ~50 Metron requests for the global list. Use it on <b>My Pull List</b> or <b>Tracked Series</b>, or use Covers / Compact.</p>
             ) : releases === null ? (
                 <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
-            ) : view === 'day' ? (
-                shown.length === 0 ? <p className="text-center text-muted-foreground italic py-16">No releases on this day.</p> : (
+            ) : view === 'covers' ? (
+                shown.length === 0 ? <p className="text-center text-muted-foreground italic py-16">No releases this week.</p> : (
                     <div className="space-y-8">
                         {(publisher === 'All' ? counts.map(c => c[0]) : [publisher]).map(p => {
                             const list = shown.filter(r => pub(r) === p)
@@ -143,55 +208,38 @@ export function ReleaseCalendar({ source, view, onViewChange }: { source: Source
                                 <section key={p} className="space-y-3">
                                     <h3 className="text-xl font-black">{p} <span className="text-muted-foreground font-bold text-base">— {list.length} new issue{list.length > 1 ? 's' : ''}</span></h3>
                                     <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3">
-                                        {list.map(r => <div key={r.id} className="space-y-1"><Cover r={r} size="lg" /><p className="text-[11px] font-bold leading-tight line-clamp-2">{r.seriesName}</p></div>)}
+                                        {list.map(r => <div key={r.id} className="space-y-1"><Cover r={r} size="lg" onPick={setPicked} /><p className="text-[11px] font-bold leading-tight line-clamp-2">{r.seriesName}</p></div>)}
                                     </div>
                                 </section>
                             )
                         })}
                     </div>
                 )
-            ) : view === 'week' ? (
-                <div className="grid grid-cols-1 md:grid-cols-7 gap-2">
-                    {daysBetween(range.from, range.to).map((day, i) => {
-                        const list = byDay.get(day) || []
-                        return (
-                            <div key={day} className={`rounded-lg border p-2 min-h-32 ${day === today ? 'border-primary bg-primary/5' : 'border-border bg-card/40'}`}>
-                                <button onClick={() => open(day, 'day')} className="w-full flex items-baseline justify-between mb-2 hover:text-primary">
-                                    <span className="text-xs font-black uppercase">{WEEKDAYS[i]}</span>
-                                    <span className="text-xs text-muted-foreground">{parseDay(day).getUTCDate()}. {list.length > 0 && `· ${list.length}`}</span>
-                                </button>
-                                <div className="space-y-0.5">{list.map(r => <Line key={r.id} r={r} />)}</div>
-                            </div>
-                        )
-                    })}
-                </div>
-            ) : view === 'month' ? (
-                <div className="grid grid-cols-7 gap-1">
-                    {WEEKDAYS.map(w => <div key={w} className="text-[11px] font-black uppercase text-muted-foreground text-center py-1">{w}</div>)}
-                    {daysBetween(range.from, range.to).map(day => {
-                        const list = byDay.get(day) || []
-                        const inMonth = parseDay(day).getUTCMonth() === anchor.getUTCMonth()
-                        return (
-                            <button key={day} onClick={() => open(day, 'day')}
-                                className={`text-left rounded-md border p-1.5 min-h-24 sm:min-h-28 align-top hover:border-primary/60 ${day === today ? 'border-primary' : 'border-border'} ${inMonth ? 'bg-card/40' : 'opacity-40'}`}>
-                                <div className="flex justify-between text-[11px] font-bold"><span>{parseDay(day).getUTCDate()}</span>{list.length > 0 && <span className="text-primary">{list.length}</span>}</div>
-                                <div className="mt-1 space-y-0">
-                                    {list.slice(0, 8).map(r => <Line key={r.id} r={{ ...r, seriesPath: undefined }} />)}
-                                    {list.length > 8 && <span className="text-[10px] text-primary font-bold px-1">+{list.length - 8} more</span>}
+            ) : view === 'compact' ? (
+                // Nearly everything ships on Wednesday: columns per publisher, not per weekday
+                shown.length === 0 ? <p className="text-center text-muted-foreground italic py-16">No releases this week.</p> : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                        {(publisher === 'All' ? counts.map(c => c[0]) : [publisher]).map(p => {
+                            const list = shown.filter(r => pub(r) === p).sort((x, y) => x.seriesName.localeCompare(y.seriesName))
+                            if (!list.length) return null
+                            return (
+                                <div key={p} className="rounded-lg border border-border bg-card/40 p-2">
+                                    <div className="flex items-baseline justify-between mb-2 px-1"><span className="text-xs font-black uppercase">{p}</span><span className="text-xs text-muted-foreground">{list.length}</span></div>
+                                    <div className="space-y-0.5">{list.map(r => <Line key={r.id} r={r} onPick={setPicked} />)}</div>
                                 </div>
-                            </button>
-                        )
-                    })}
-                </div>
+                            )
+                        })}
+                    </div>
+                )
             ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                     {MONTHS.map((m, mi) => {
                         const month = new Date(Date.UTC(anchor.getUTCFullYear(), mi, 1))
-                        const r = rangeFor('month', month)
+                        const r = monthGrid(month)
                         const total = daysBetween(`${iso(month).slice(0, 7)}-01`, iso(new Date(Date.UTC(anchor.getUTCFullYear(), mi + 1, 0)))).reduce((n, d) => n + (byDay.get(d)?.length || 0), 0)
                         return (
                             <div key={m} className="rounded-lg border border-border bg-card/40 p-3">
-                                <button onClick={() => open(iso(month), 'month')} className="w-full flex justify-between items-baseline mb-2 hover:text-primary">
+                                <button onClick={() => open(iso(month), 'covers')} className="w-full flex justify-between items-baseline mb-2 hover:text-primary">
                                     <span className="font-black">{m}</span><span className="text-xs text-muted-foreground">{total} releases</span>
                                 </button>
                                 <div className="grid grid-cols-7 gap-0.5">
@@ -199,7 +247,7 @@ export function ReleaseCalendar({ source, view, onViewChange }: { source: Source
                                         const n = byDay.get(day)?.length || 0
                                         const inMonth = parseDay(day).getUTCMonth() === mi
                                         const shade = !inMonth ? 'bg-transparent' : n === 0 ? 'bg-muted' : n < 3 ? 'bg-primary/30' : n < 8 ? 'bg-primary/60' : 'bg-primary'
-                                        return <button key={day} disabled={!inMonth} title={inMonth ? `${day}: ${n}` : undefined} onClick={() => open(day, 'day')} className={`aspect-square rounded-sm ${shade} ${day === today ? 'ring-1 ring-foreground' : ''}`} />
+                                        return <button key={day} disabled={!inMonth} title={inMonth ? `${day}: ${n}` : undefined} onClick={() => open(day, 'covers')} className={`aspect-square rounded-sm ${shade} ${day === today ? 'ring-1 ring-foreground' : ''}`} />
                                     })}
                                 </div>
                             </div>

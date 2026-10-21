@@ -46,7 +46,7 @@ export default function CalendarPage() {
     // tab values is a load-bearing change we don't need).
     const [activeTab, setActiveTab] = useState("personal-pulls");
     // Fork: real calendar (day / week / month / year) or the original weekly list
-    const [calView, setCalView] = useState<CalendarView | "list">("month");
+    const [calView, setCalView] = useState<CalendarView | "list">("covers");
     const [metronConfigured, setMetronConfigured] = useState<boolean | null>(null);
     
     // Local Tracked State
@@ -370,7 +370,7 @@ export default function CalendarPage() {
                 </TabsList>
                 <div className="flex gap-1 bg-muted p-1 rounded-md border border-border">
                     <Button size="sm" variant={calView === "list" ? "default" : "ghost"} className="h-8 px-3 font-bold" onClick={() => setCalView("list")}>List</Button>
-                    <Button size="sm" variant={calView !== "list" ? "default" : "ghost"} className="h-8 px-3 font-bold" onClick={() => calView === "list" && setCalView("month")}>Calendar</Button>
+                    <Button size="sm" variant={calView !== "list" ? "default" : "ghost"} className="h-8 px-3 font-bold" onClick={() => calView === "list" && setCalView("covers")}>Calendar</Button>
                 </div>
                 </div>
 
