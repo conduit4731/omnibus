@@ -43,7 +43,8 @@ export async function GET(request: Request) {
     })).sort((a, b) => b.issueCount - a.issueCount || a.name.localeCompare(b.name));
 
     const byIssue: Record<string, { id: string, name: string }[]> = {};
-    for (const l of result) {
+    // Events first on the chips (the specific story), then the long reading orders
+    for (const l of [...result].sort((a, b) => Number(b.category === 'Events') - Number(a.category === 'Events'))) {
         if (!ISSUE_CHIP_CATEGORIES.has(l.category)) continue;
         for (const issueId of l.issueIds) (byIssue[issueId] ||= []).push({ id: l.id, name: l.name });
     }
