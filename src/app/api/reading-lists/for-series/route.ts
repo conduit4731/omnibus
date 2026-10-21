@@ -29,9 +29,10 @@ export async function GET(request: Request) {
         select: { listId: true, issueId: true, cvIssueId: true, list: { select: { id: true, name: true, description: true, updatedAt: true } } },
     });
 
+    const ownIds = new Set(issues.map(i => i.id));
     const lists = new Map<string, { id: string, name: string, description: string | null, updatedAt: Date, issues: Set<string> }>();
     for (const it of items) {
-        const issueId = it.issueId && issues.some(i => i.id === it.issueId) ? it.issueId : (it.cvIssueId ? byCv.get(it.cvIssueId) : undefined);
+        const issueId = it.issueId && ownIds.has(it.issueId) ? it.issueId : (it.cvIssueId ? byCv.get(it.cvIssueId) : undefined);
         if (!issueId) continue;
         const l = lists.get(it.listId) || { ...it.list, issues: new Set<string>() };
         l.issues.add(issueId);
