@@ -543,7 +543,7 @@ export default function RequestsPage() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="w-full flex flex-wrap justify-start gap-1 h-auto p-1 bg-muted border border-border [&>*]:flex-none">{/* fork: wraps instead of overflowing on both sides */}
+        <TabsList className="w-full flex flex-wrap justify-start gap-1 h-auto! p-1 bg-muted border border-border [&>*]:flex-none">{/* fork: wraps instead of overflowing on both sides */}
             <TabsTrigger value="ALL" className="px-4 py-2">All <span className="ml-1.5 text-xs opacity-60">{requests.length}</span></TabsTrigger>
             <TabsTrigger value="NEEDS_ACTION" className="px-4 py-2 text-amber-500 data-[state=active]:text-amber-500">Needs action <span className="ml-1.5 text-xs opacity-80">{requests.filter(needsAction).length}</span></TabsTrigger>
             {STATUS_GROUPS.map(g => (
