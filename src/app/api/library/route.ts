@@ -240,7 +240,9 @@ export async function GET(request: Request) {
     const pageSeriesIds = dbSeries.map(s => s.id);
     const progressUserId = userId || 'none';
 
-    const [downloadedGroups, completedGroups] = pageSeriesIds.length === 0 ? [[], []] : await Promise.all([
+    // Fork: released issues (release date today or earlier, or unknown) for "12/13" and the Complete badge
+    const today = new Date().toISOString().slice(0, 10);
+    const [downloadedGroups, completedGroups, releasedGroups] = pageSeriesIds.length === 0 ? [[], [], []] : await Promise.all([
         prisma.issue.groupBy({
             by: ['seriesId'],
             where: { seriesId: { in: pageSeriesIds }, filePath: { not: null } },
@@ -254,8 +256,15 @@ export async function GET(request: Request) {
                 readProgresses: { some: { userId: progressUserId, isCompleted: true } }
             },
             _count: { _all: true }
+        }),
+        prisma.issue.groupBy({
+            by: ['seriesId'],
+            where: { seriesId: { in: pageSeriesIds }, OR: [{ releaseDate: null }, { releaseDate: { lte: today } }] },
+            _count: { _all: true }
         })
     ]);
+    const releasedCountBySeries = new Map<string, number>();
+    for (const g of releasedGroups) releasedCountBySeries.set(g.seriesId, g._count._all);
 
     const downloadedCountBySeries = new Map<string, number>();
     for (const g of downloadedGroups) downloadedCountBySeries.set(g.seriesId, g._count._all);
@@ -332,7 +341,10 @@ export async function GET(request: Request) {
             monitored: s.monitored,
             isManga: s.isManga,
             isPendingReq: downloadedCount === 0,
-            status: s.status
+            status: s.status,
+            released: releasedCountBySeries.get(s.id) || 0,
+            // Only a ComicVine/Metron-matched series knows all its issues; a scanned folder only knows its files
+            complete: /^\d+$/.test(s.metadataId || '') && downloadedCount > 0 && downloadedCount >= (releasedCountBySeries.get(s.id) || 0)
         }
     });
 

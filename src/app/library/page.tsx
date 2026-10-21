@@ -72,6 +72,20 @@ interface LibrarySeries {
   matchState?: string;
   isPendingReq?: boolean;
   status?: string | null;
+  released?: number;   // fork: issues out so far
+  complete?: boolean;  // fork: every released issue downloaded
+}
+
+// Fork: "12/13" when issues are missing, plus Complete and Ongoing/Ended
+const issuesLabel = (item: LibrarySeries) => item.released && item.released > item.count ? `${item.count}/${item.released}` : `${item.count}`
+function SeriesStateBadges({ item }: { item: LibrarySeries }) {
+  const ended = item.status && /ended|completed|cancel/i.test(item.status)
+  return (
+    <>
+      {item.complete && <Badge className="text-[9px] px-1.5 h-4 bg-violet-600 hover:bg-violet-600 border-0 text-white font-black uppercase tracking-wider shadow-sm" title="Every released issue is in your library">Complete</Badge>}
+      {item.status && <Badge className={cn("text-[9px] px-1.5 h-4 border-0 font-bold uppercase tracking-wider shadow-sm", ended ? "bg-zinc-600 hover:bg-zinc-600 text-white" : "bg-sky-600 hover:bg-sky-600 text-white")}>{ended ? 'Ended' : 'Ongoing'}</Badge>}
+    </>
+  )
 }
 
 // Context handed to the virtualized table's row component so it can stay module-scoped (stable identity →
@@ -1230,7 +1244,8 @@ function LibraryContent() {
                                           ) : unread > 0 ? (
                                               <Badge className="text-[9px] px-1.5 h-4 bg-primary hover:bg-primary/90 border-0 text-primary-foreground font-bold shadow-sm uppercase tracking-wider">{unread === item.count ? 'Unread' : `${unread} Left`}</Badge>
                                           ) : null}
-                                          <Badge className="text-[9px] px-1.5 h-4 bg-black/70 hover:bg-black/70 border-0 text-white font-mono shadow-sm backdrop-blur-sm" title={`${item.count} total issues in this series`}>{item.count} {item.count === 1 ? 'Issue' : 'Issues'}</Badge>
+                                          <Badge className="text-[9px] px-1.5 h-4 bg-black/70 hover:bg-black/70 border-0 text-white font-mono shadow-sm backdrop-blur-sm" title={`${item.count} of ${item.released ?? item.count} released issues in your library`}>{issuesLabel(item)} {item.count === 1 ? 'Issue' : 'Issues'}</Badge>
+                                          <SeriesStateBadges item={item} />
                                       </>
                                   )}
                               </div>
@@ -1402,8 +1417,9 @@ function LibraryContent() {
                             ) : item.matchState === 'UNMATCHED' ? (
                                 <Badge className="bg-orange-500 hover:bg-orange-600 text-white border-0 text-[9px] px-1.5 h-4 uppercase tracking-wider">Unmatched</Badge>
                             ) : (
-                                <div className="flex items-center justify-center gap-2">
-                                    <Badge variant="secondary" className="font-mono bg-muted border-border" title={`${item.count} total issues in this series`}>{item.count}</Badge>
+                                <div className="flex flex-wrap items-center justify-center gap-1.5">
+                                    <Badge variant="secondary" className="font-mono bg-muted border-border" title={`${item.count} of ${item.released ?? item.count} released issues in your library`}>{issuesLabel(item)}</Badge>
+                                    <SeriesStateBadges item={item} />
                                     {unread > 0 && !isCompleted && (
                                         <Badge className="bg-primary/20 text-primary border-0 font-bold uppercase tracking-wider text-[10px]">{unread === item.count ? 'Unread' : `${unread} Left`}</Badge>
                                     )}

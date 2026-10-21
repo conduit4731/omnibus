@@ -2109,7 +2109,7 @@ function SeriesContent() {
                                       <div key={issue.id} onClick={() => setActiveIssue(issue)} className="flex gap-4 p-4 bg-muted/30 border border-border/50 rounded-xl shadow-sm opacity-80 hover:opacity-100 transition-all cursor-pointer">
                                         <div className="w-20 h-28 shrink-0 rounded-md overflow-hidden bg-muted border border-border grayscale">{issue.coverUrl || seriesInfo.cover ? <img src={issue.coverUrl || seriesInfo.cover} onError={coverImgError(seriesInfo.cover)} className="w-full h-full object-cover" alt="" /> : <ImageIcon className="w-8 h-8 m-auto mt-10 text-muted-foreground/50" />}</div>
                                         <div className="flex flex-col justify-between flex-1 py-1 min-w-0">
-                                            <div><h5 className="font-bold text-base line-clamp-2 text-foreground leading-tight">{issue.name}</h5><span className="text-[10px] mt-1 font-black text-muted-foreground uppercase tracking-widest">{laneLabel(issue)} #{issue.parsedNum}</span><ListChips lists={seriesLists.byIssue[issue.id]} /></div>
+                                            <div><h5 className="font-bold text-base line-clamp-2 text-foreground leading-tight">{issue.name}</h5><span className="text-[10px] mt-1 font-black text-muted-foreground uppercase tracking-widest">{laneLabel(issue)} #{issue.parsedNum}</span><ReleaseInfo date={issue.releaseDate} /><ListChips lists={seriesLists.byIssue[issue.id]} /></div>
                                             <div className="flex flex-wrap items-center gap-2 mt-3">{isAlreadyRequested ? <Button size="sm" variant="secondary" disabled className="flex-1 h-9 bg-green-50 text-green-700 dark:bg-green-900/20 border-green-200 opacity-100 cursor-not-allowed"><Check className="w-4 h-4 mr-2"/> Queued</Button> : <Button size="sm" variant="outline" className="flex-1 h-9 font-black text-[10px] border-border hover:bg-muted uppercase tracking-wider min-w-[80px]" onClick={(e) => { e.stopPropagation(); handleRequestMissing(issue); }} disabled={isRequesting}>{isRequesting ? <Loader2 className="w-4 h-4 animate-spin mr-2"/> : <CloudDownload className="w-4 h-4 mr-2"/>}Request</Button>}</div>
                                         </div>
                                       </div>
@@ -2141,6 +2141,7 @@ function SeriesContent() {
                                                       <td className="px-4 py-3 font-bold">
                                                           <div className="line-clamp-2 leading-tight text-foreground">{issue.name}</div><ListChips lists={seriesLists.byIssue[issue.id]} />
                                                           {issue.parsedNum !== null && <div className="text-[10px] mt-1 font-black text-muted-foreground uppercase tracking-widest">{laneLabel(issue)} #{issue.parsedNum}</div>}
+                                                          <ReleaseInfo date={issue.releaseDate} />
                                                       </td>
                                                       <td className="px-4 py-3 text-right">
                                                           {isAlreadyRequested ? (
@@ -2712,6 +2713,15 @@ function SeriesContent() {
       </Dialog>
     </div>
   )
+}
+
+// Fork: when a missing issue came out or comes out ("YYYY-MM-DD" from the metadata provider)
+function ReleaseInfo({ date }: { date?: string | null }) {
+  const d = date ? new Date(`${date.slice(0, 10)}T12:00:00`) : null
+  if (!d || isNaN(d.getTime())) return <div className="text-[10px] mt-1 text-muted-foreground">Release date unknown</div>
+  const upcoming = date!.slice(0, 10) > new Date().toISOString().slice(0, 10)
+  const text = d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+  return <div className={cn("text-[10px] mt-1", upcoming ? "font-bold text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>{upcoming ? `Releases ${text}` : `Released ${text}`}</div>
 }
 
 // Fork: Batcave-style chips on an issue: its era ("New 52", to the events of that era) and its events (to the list)

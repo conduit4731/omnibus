@@ -69,6 +69,23 @@ describe('API Route: Library Advanced Search', () => {
         expect(series.isPendingReq).toBe(false);
     });
 
+    it('fork: released count and Complete only for matched series with every released issue', async () => {
+        mocks.findManySeries.mockResolvedValue([
+            { id: 's1', name: 'Voodoo', metadataId: '43021', folderPath: '/a', favorites: [] },   // 13/13
+            { id: 's2', name: 'Batgirl', metadataId: '42604', folderPath: '/b', favorites: [] },  // 49/52
+            { id: 's3', name: 'Scan', metadataId: 'unmatched_x', folderPath: '/c', favorites: [] },  // knows only its files
+        ]);
+        mocks.groupByIssue
+            .mockResolvedValueOnce([{ seriesId: 's1', _count: { _all: 13 } }, { seriesId: 's2', _count: { _all: 49 } }, { seriesId: 's3', _count: { _all: 2 } }])
+            .mockResolvedValueOnce([])
+            .mockResolvedValueOnce([{ seriesId: 's1', _count: { _all: 13 } }, { seriesId: 's2', _count: { _all: 52 } }, { seriesId: 's3', _count: { _all: 2 } }]);
+
+        const body = await (await GET(createReq(''))).json();
+        expect(body.series.map((s: any) => [s.id, s.released, s.complete])).toEqual([['s1', 13, true], ['s2', 52, false], ['s3', 2, false]]);
+        // the released count leaves out future issues
+        expect(mocks.groupByIssue.mock.calls[2][0].where.OR).toEqual([{ releaseDate: null }, { releaseDate: { lte: new Date().toISOString().slice(0, 10) } }]);
+    });
+
     it('filters by series status for mass-monitor workflows (discussion #177)', async () => {
         // Filter Ongoing series, select all, bulk-monitor — previously status had no filter at all.
         await GET(new Request('http://localhost/api/library?path=/library&status=Ongoing'));
