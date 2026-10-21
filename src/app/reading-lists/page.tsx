@@ -29,6 +29,21 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ReadingListPicker } from "@/components/reading-list-picker"
 import { nextInList } from "@/lib/reading-list-next"
 
+// Fork: series an entry belongs to, also when the issue is not in the library ("Catwoman (2011) #47" -> "Catwoman (2011)")
+const seriesOfItem = (item: any): string => item.issue?.series
+    ? `${item.issue.series.name}${item.issue.series.year ? ` (${item.issue.series.year})` : ''}`
+    : (item.title || '').replace(/\s*#\s*[^#]*$/, '').trim() || 'Unknown series'
+const ownedOf = (items: any[]) => items.filter((i: any) => i.issue?.filePath).length
+
+/** Green "all owned", amber "x of y", red "missing" for a group of entries. */
+function OwnedState({ items }: { items: any[] }) {
+  const owned = ownedOf(items)
+  const cls = owned === items.length ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800'
+    : owned === 0 ? 'bg-red-50 text-red-600 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800'
+    : 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800'
+  return <Badge variant="secondary" className={`text-[10px] ${cls}`}>{owned === items.length ? 'all owned' : owned === 0 ? `missing (${items.length})` : `${owned} of ${items.length} owned`}</Badge>
+}
+
 // Read / in progress marker for a list entry; nothing for unread
 function ReadState({ progress }: { progress: { currentPage: number, totalPages: number, isCompleted: boolean } | null }) {
   if (progress?.isCompleted) {
@@ -60,6 +75,7 @@ function ReadingListsContent() {
   const [detailNonce, setDetailNonce] = useState(0)
   const [hideRead, setHideRead] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [showAllSeries, setShowAllSeries] = useState(false)
   const [skipNoticeOpen, setSkipNoticeOpen] = useState(false)
   const [mainListId, setMainListId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -181,7 +197,7 @@ function ReadingListsContent() {
 
       activeList.items.forEach((item: any, idx: number) => {
           if (hideRead && item.progress?.isCompleted) return;
-          const seriesName = item.issue?.series?.name || "Missing/Unlinked Issue";
+          const seriesName = seriesOfItem(item);
           
           if (seriesName !== currentSeriesName) {
               if (currentChunk.length > 0) {
@@ -620,7 +636,11 @@ function ReadingListsContent() {
           // FIX: Natively pull the provider from the list item
           const provider = item.metadataSource || item.issue?.metadataSource || 'COMICVINE';
           
-          if (item.cvIssueId) {
+          if (item.issue?.series?.metadataId && provider === (item.issue.series.metadataSource || 'COMICVINE')) {
+              // Fork: series already in Omnibus (issue WANTED) - no ComicVine lookup needed
+              volumeId = Number(item.issue.series.metadataId) || 0;
+              if (item.issue.series.year) year = String(item.issue.series.year);
+          } else if (item.cvIssueId) {
               try {
                   // FIX: Pass provider to lookup-volume API
                   const lookupRes = await fetch(`/api/reading-lists/lookup-volume?issueId=${item.cvIssueId}&provider=${provider}`);
@@ -750,6 +770,13 @@ function ReadingListsContent() {
   const missingItems = activeList ? activeList.items.filter((i: any) => !i.issue?.filePath) : [];
   const readCount = activeList ? activeList.items.filter((i: any) => i.progress?.isCompleted).length : 0;
   const { item: nextUp, skipped: skippedMissing } = nextInList<any>(activeList?.items || []);
+  // Fork: every series of the list with owned / total, missing entirely first, then partial, then complete
+  const seriesSummary = (() => {
+      const m = new Map<string, any[]>();
+      for (const item of activeList?.items || []) m.set(seriesOfItem(item), [...(m.get(seriesOfItem(item)) || []), item]);
+      const rank = (items: any[]) => ownedOf(items) === 0 ? 0 : ownedOf(items) < items.length ? 1 : 2;
+      return [...m].map(([name, items]) => ({ name, items })).sort((a, b) => rank(a.items) - rank(b.items) || b.items.length - a.items.length);
+  })();
   const readerHref = (issue: any) => `/reader?path=${encodeURIComponent(issue.filePath)}&series=${encodeURIComponent(issue.series.folderPath)}`;
 
   return (
@@ -908,6 +935,42 @@ function ReadingListsContent() {
                       </CardHeader>
                   </Card>
 
+                  {seriesSummary.length > 1 && (
+                      <Card className="border-border bg-background/80">
+                          <CardHeader className="pb-2">
+                              <CardTitle className="text-base flex items-center justify-between gap-2">
+                                  <span>Series in this list <span className="text-muted-foreground font-bold text-sm">({seriesSummary.length})</span></span>
+                                  <span className="text-xs font-bold text-muted-foreground">
+                                      {seriesSummary.filter(x => ownedOf(x.items) === x.items.length).length} complete · {seriesSummary.filter(x => ownedOf(x.items) > 0 && ownedOf(x.items) < x.items.length).length} partial · {seriesSummary.filter(x => ownedOf(x.items) === 0).length} missing
+                                  </span>
+                              </CardTitle>
+                          </CardHeader>
+                          <CardContent className="space-y-1">
+                              {(showAllSeries ? seriesSummary : seriesSummary.slice(0, 8)).map(({ name, items }) => {
+                                  const owned = ownedOf(items);
+                                  return (
+                                      <div key={name} className="flex items-center gap-3 py-1">
+                                          <span className="text-sm font-medium truncate flex-1 min-w-0" title={name}>{name}</span>
+                                          <div className="hidden sm:block h-1.5 w-28 rounded-full bg-muted overflow-hidden shrink-0"><div className={`h-full ${owned === items.length ? 'bg-emerald-500' : owned === 0 ? 'bg-red-500' : 'bg-amber-500'}`} style={{ width: `${Math.max(4, Math.round(100 * owned / items.length))}%` }} /></div>
+                                          <OwnedState items={items} />
+                                          {owned < items.length ? (
+                                              <Button size="sm" variant="ghost" className="h-7 px-2 text-[10px] font-bold uppercase text-primary hover:bg-primary/10 shrink-0" disabled={isBulkDownloading}
+                                                  onClick={() => handleDownloadAllMissing(items.filter((i: any) => !i.issue?.filePath))}>
+                                                  <CloudDownload className="w-3.5 h-3.5 mr-1" /> Request {items.length - owned}
+                                              </Button>
+                                          ) : <span className="w-[86px] shrink-0" />}
+                                      </div>
+                                  );
+                              })}
+                              {seriesSummary.length > 8 && (
+                                  <Button variant="ghost" size="sm" className="w-full text-xs font-bold" onClick={() => setShowAllSeries(v => !v)}>
+                                      {showAllSeries ? 'Show less' : `Show all ${seriesSummary.length} series`}
+                                  </Button>
+                              )}
+                          </CardContent>
+                      </Card>
+                  )}
+
                   {activeList.items.length === 0 ? (
                     <div className="text-center py-20 border-2 border-dashed rounded-xl border-border bg-muted/30">
                         <BookOpen className="w-12 h-12 mx-auto text-muted-foreground/50 mb-3" />
@@ -928,20 +991,23 @@ function ReadingListsContent() {
                                             <div className="flex items-center gap-3">
                                                 <FolderOpen className="w-5 h-5 text-primary" />
                                                 <span className="font-bold text-foreground text-sm sm:text-base">{chunk.seriesName}</span>
-                                                <Badge variant="secondary" className="text-[10px] bg-primary/10 text-primary border-primary/20">
-                                                    {chunk.items.length} Issues
-                                                </Badge>
-                                                {chunk.items.some((i: any) => !i.issue?.filePath) && (
-                                                    <Badge variant="secondary" className="text-[10px] bg-orange-50 text-orange-600 border-orange-200 dark:bg-orange-900/20 dark:text-orange-400 dark:border-orange-800">{chunk.items.filter((i: any) => !i.issue?.filePath).length} missing</Badge>
-                                                )}
+                                                <OwnedState items={chunk.items} />
                                                 {chunk.items.every((i: any) => i.progress?.isCompleted) ? (
                                                     <Badge variant="secondary" className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800"><Check className="w-3 h-3 mr-1" />Read</Badge>
                                                 ) : chunk.items.some((i: any) => i.progress?.isCompleted) && (
                                                     <span className="text-[10px] font-bold text-muted-foreground">{chunk.items.filter((i: any) => i.progress?.isCompleted).length} read</span>
                                                 )}
                                             </div>
+                                            <div className="flex items-center gap-2">
+                                            {ownedOf(chunk.items) < chunk.items.length && (
+                                                <Button size="sm" variant="outline" className="h-7 px-2 text-[10px] font-bold uppercase border-primary/30 text-primary bg-primary/5 hover:bg-primary/10" disabled={isBulkDownloading}
+                                                    onClick={e => { e.stopPropagation(); handleDownloadAllMissing(chunk.items.filter((i: any) => !i.issue?.filePath)); }}>
+                                                    <CloudDownload className="w-3.5 h-3.5 mr-1" /> Request {chunk.items.length - ownedOf(chunk.items)}
+                                                </Button>
+                                            )}
                                             <div className="bg-background rounded-full p-1 shadow-sm border border-border">
                                                 {isExpanded ? <ChevronUp className="w-4 h-4 text-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+                                            </div>
                                             </div>
                                         </div>
 
