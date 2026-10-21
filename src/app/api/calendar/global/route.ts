@@ -9,6 +9,8 @@ import { getErrorMessage } from '@/lib/utils/error';
 import { findLocalSeriesMatch } from '@/lib/utils/series-match';
 import { getMetronAuth, metronGet, MetronHttpError, MetronRateLimitError } from '@/lib/metron/client';
 
+const TAGGED_PUBLISHERS = ['DC Comics', 'Marvel', 'Image', 'Dark Horse Comics', 'IDW Publishing', 'BOOM! Studios', 'Dynamite Entertainment', 'Titan Comics', 'Rebellion'];
+
 export async function GET(request: Request) {
     try {
         const authOptions = await getAuthOptions();
@@ -33,7 +35,7 @@ export async function GET(request: Request) {
         const todayStr = today.toISOString().split('T')[0];
         
         // --- BUMP CACHE TO v16: year-aware library/monitored matching (recompute stale v15 entries) ---
-        const cacheKey = `calendar_global_v16_${todayStr}_offset_${weekOffset}`;
+        const cacheKey = `calendar_global_v16p_${todayStr}_offset_${weekOffset}`; // fork: + publisher tags
         
         const cache = await prisma.systemSetting.findUnique({ where: { key: cacheKey } });
 
@@ -74,6 +76,27 @@ export async function GET(request: Request) {
             return NextResponse.json({ error: message }, { status: 503 });
         }
 
+        // Fork: Metron's issue list carries no publisher (the calendar's publisher filter showed almost
+        // everything as Unknown). One filtered query per big publisher tags its issues; failures only
+        // leave issues untagged. A filter Metron ignored would return every issue, so that is discarded.
+        const publisherOf = new Map<number, string>();
+        for (const name of TAGGED_PUBLISHERS) {
+            try {
+                let url: string | null = `https://metron.cloud/api/issue/?store_date_range_after=${startDateStr}&store_date_range_before=${endDateStr}&publisher_name=${encodeURIComponent(name)}`;
+                const ids: number[] = [];
+                while (url && ids.length < 1000) {
+                    const res = await metronGet(url, { auth: metronAuth, pace: 'interactive', cache: false });
+                    if (res.status !== 200) break;
+                    const data: any = res.data || {};
+                    if (Array.isArray(data.results)) ids.push(...data.results.map((i: any) => i.id));
+                    url = data.next || null;
+                }
+                if (ids.length < allIssues.length) for (const id of ids) if (!publisherOf.has(id)) publisherOf.set(id, name);
+            } catch {
+                break; // rate limited: keep what we have
+            }
+        }
+
         const localSeries = await prisma.series.findMany({
             select: { id: true, name: true, year: true, publisher: true, metadataId: true, metadataSource: true, monitored: true }
         });
@@ -100,7 +123,7 @@ export async function GET(request: Request) {
             const localMatch = findLocalSeriesMatch(localSeries, seriesName, releaseYear);
             const volumeId = localMatch ? localMatch.metadataId : (typeof issue.series === 'object' ? issue.series?.id : null);
             const metadataSource = localMatch ? localMatch.metadataSource : 'METRON';
-            const publisher = nameToPubMap.get(normalizedName) || localMatch?.publisher || "Unknown";
+            const publisher = nameToPubMap.get(normalizedName) || localMatch?.publisher || publisherOf.get(issue.id) || "Unknown";
 
             const release = {
                 id: issue.id,
