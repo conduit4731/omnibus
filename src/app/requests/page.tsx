@@ -35,6 +35,15 @@ const STATUS_GROUPS: { tab: string, label: string, statuses: string[], color: st
   { tab: "FAILED", label: "Failed", statuses: ['FAILED', 'STALLED', 'ERROR'], color: '#ef4444' },
   { tab: "CANCELLED", label: "Cancelled", statuses: ['CANCELLED'], color: '#64748b' },
 ];
+// Requests that wait for you: a GetComics link behind Cloudflare, or an admin approval
+const needsAction = (r: any) => r.status === 'MANUAL_DDL' || r.status === 'PENDING_APPROVAL';
+const SORTS: Record<string, { label: string, cmp: (a: any, b: any) => number }> = {
+  action: { label: "Needs action first", cmp: (a, b) => Number(needsAction(b)) - Number(needsAction(a)) || +new Date(b.createdAt) - +new Date(a.createdAt) },
+  newest: { label: "Newest", cmp: (a, b) => +new Date(b.createdAt) - +new Date(a.createdAt) },
+  oldest: { label: "Oldest", cmp: (a, b) => +new Date(a.createdAt) - +new Date(b.createdAt) },
+  name: { label: "Name", cmp: (a, b) => (a.seriesName || '').localeCompare(b.seriesName || '', undefined, { numeric: true }) },
+  status: { label: "Status", cmp: (a, b) => (a.status || '').localeCompare(b.status || '') },
+};
 const CANCELLABLE = ['PENDING_APPROVAL', 'PENDING', 'DOWNLOADING', 'MANUAL_DDL', 'UNRELEASED', 'AWAITING_RELEASE'];
 const statusLabel = (status: string) => status === 'PENDING_APPROVAL' ? 'Needs Approval' : status === 'MANUAL_DDL' ? 'GETCOMICS' : status === 'AWAITING_RELEASE' ? 'Awaiting' : status;
 
@@ -71,7 +80,11 @@ function StatusRing({ requests, active, onSelect }: { requests: any[], active: s
               <span className="font-mono font-bold">{c.n}</span>
             </button>
           ))}
-          {manual > 0 && <p className="col-span-2 text-xs text-muted-foreground px-2">{manual} of the active ones need a manual GetComics download.</p>}
+          {manual > 0 && (
+            <button onClick={() => onSelect("NEEDS_ACTION")} className="col-span-2 text-left text-xs font-bold text-amber-500 hover:underline px-2">
+              {manual} need a manual GetComics download — show them →
+            </button>
+          )}
         </div>
       </CardContent>
     </Card>
@@ -79,23 +92,39 @@ function StatusRing({ requests, active, onSelect }: { requests: any[], active: s
 }
 
 // Fork: compact one-line request (table view)
-function RequestRow({ req, getStatusColor, onCancel, isSelectionMode, isSelected, onToggleSelect }: {
-  req: any, getStatusColor: (status: string) => string, onCancel: (id: string) => void,
+function RequestRow({ req, getStatusColor, onCancel, onRetry, isAdmin, isSelectionMode, isSelected, onToggleSelect }: {
+  req: any, getStatusColor: (status: string) => string, onCancel: (id: string) => void, onRetry: (id: string) => void, isAdmin: boolean,
   isSelectionMode: boolean, isSelected: boolean, onToggleSelect: (id: string) => void
 }) {
   const [isCancelling, setIsCancelling] = useState(false);
   const cancellable = CANCELLABLE.includes(req.status);
   const name = (req.seriesName || "Unknown Request").replace(COMIC_EXT_REGEX, '');
   return (
-    <tr className={`border-b border-border text-sm ${isSelected && isSelectionMode ? 'bg-primary/10' : 'hover:bg-muted/40'} ${isSelectionMode && cancellable ? 'cursor-pointer' : ''}`}
+    <tr className={`border-b border-border text-sm ${isSelected && isSelectionMode ? 'bg-primary/10' : needsAction(req) ? 'bg-amber-500/10 hover:bg-amber-500/15' : 'hover:bg-muted/40'} ${isSelectionMode && cancellable ? 'cursor-pointer' : ''}`}
         onClick={() => { if (isSelectionMode && cancellable) onToggleSelect(req.id); }}>
       {isSelectionMode && <td className="pl-3 w-8">{cancellable ? (isSelected ? <CheckSquare className="w-4 h-4 text-primary" /> : <Square className="w-4 h-4 text-muted-foreground" />) : null}</td>}
-      <td className="px-3 py-2 w-32"><Badge variant="outline" className={`${getStatusColor(req.status)} text-[10px] font-bold uppercase tracking-wider whitespace-nowrap`}>{statusLabel(req.status)}</Badge></td>
+      <td className={`px-3 py-2 w-32 ${needsAction(req) ? 'border-l-4 border-amber-500' : ''}`}>
+        <Badge variant="outline" className={`${getStatusColor(req.status)} text-[10px] font-bold uppercase tracking-wider whitespace-nowrap`}>{statusLabel(req.status)}</Badge>
+        {needsAction(req) && <p className="text-[9px] font-black uppercase text-amber-500 mt-0.5">Action needed</p>}
+      </td>
       <td className="px-3 py-2 max-w-0 w-full"><p className="truncate font-medium" title={name}><SeriesLink folderPath={req.seriesPath}>{name}</SeriesLink></p></td>
       <td className="px-3 py-2 hidden md:table-cell text-xs text-muted-foreground whitespace-nowrap max-w-48 truncate">{providerOf(req)}</td>
       <td className="px-3 py-2 hidden sm:table-cell text-xs text-muted-foreground whitespace-nowrap">{new Date(req.createdAt).toLocaleDateString()}</td>
       <td className="px-3 py-2 w-14 text-xs font-mono text-primary">{req.status === 'DOWNLOADING' ? `${req.progress}%` : ''}</td>
       <td className="px-2 py-1 whitespace-nowrap text-right" onClick={e => e.stopPropagation()}>
+        {req.status === 'MANUAL_DDL' && req.downloadLink?.startsWith('http') && (
+          <Button size="sm" variant="outline" asChild className="h-7 px-2 text-[10px] font-bold uppercase border-amber-500/60 text-amber-500 mr-1" title="Open the GetComics link to pass the Cloudflare check and download the file; upload it in the admin queue">
+            <a href={req.downloadLink} target="_blank" rel="noopener noreferrer"><ExternalLink className="w-3.5 h-3.5 mr-1" />Download</a>
+          </Button>
+        )}
+        {req.status === 'MANUAL_DDL' && (
+          <Button size="icon" variant="ghost" className="h-7 w-7" title="Retry GetComics automatically" onClick={() => onRetry(req.id)}><RefreshCw className="w-3.5 h-3.5" /></Button>
+        )}
+        {needsAction(req) && isAdmin && (
+          <Button size="icon" variant="ghost" asChild className="h-7 w-7" title="Admin queue: upload the downloaded file, interactive search, approve">
+            <Link href="/admin"><Server className="w-3.5 h-3.5" /></Link>
+          </Button>
+        )}
         {req.seriesPath && <Button size="icon" variant="ghost" asChild className="h-7 w-7" title="Go to series"><Link href={`/library/series?path=${encodeURIComponent(req.seriesPath)}`}><Library className="w-3.5 h-3.5" /></Link></Button>}
         {req.volumeId && req.volumeId !== "0" && (
           <Button size="icon" variant="ghost" asChild className="h-7 w-7" title={`View on ${req.metadataSource === 'METRON' ? 'Metron' : 'ComicVine'}`}>
@@ -338,6 +367,7 @@ export default function RequestsPage() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState("50")
   const [viewMode, setViewMode] = useState<"table" | "cards">("table")
+  const [sortMode, setSortMode] = useState("action")
   
   // Selection / Bulk Actions
   const [isSelectionMode, setIsSelectionMode] = useState(false)
@@ -426,11 +456,19 @@ export default function RequestsPage() {
           if (!matchesSearch) return false;
 
           if (activeTab === "ALL") return true;
+          if (activeTab === "NEEDS_ACTION") return needsAction(req);
           return STATUS_GROUPS.find(g => g.tab === activeTab)?.statuses.includes(req.status) ?? true;
-      });
-  }, [requests, activeTab, searchQuery]);
+      }).sort(SORTS[sortMode]?.cmp || SORTS.action.cmp);
+  }, [requests, activeTab, searchQuery, sortMode]);
 
-  useEffect(() => { setPage(1) }, [activeTab, pageSize, searchQuery]);
+  useEffect(() => { setPage(1) }, [activeTab, pageSize, searchQuery, sortMode]);
+
+  const handleRetry = async (id: string) => {
+      const res = await fetch('/api/request/retry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }).catch(() => null);
+      toast(res?.ok ? { title: "Retrying", description: "GetComics is tried again." } : { title: "Retry failed", variant: "destructive" });
+      if (res?.ok) fetchRequests();
+  };
+  const isAdmin = (session?.user as any)?.role === 'ADMIN';
 
   const limit = parseInt(pageSize);
   const totalPages = Math.ceil(filteredRequests.length / limit) || 1;
@@ -474,6 +512,7 @@ export default function RequestsPage() {
 
       {requests.length > 0 && <StatusRing requests={requests} active={activeTab} onSelect={setActiveTab} />}
 
+      <div className="flex gap-2">
       <div className="relative w-full">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
           <Input 
@@ -483,10 +522,18 @@ export default function RequestsPage() {
               className="pl-10 h-12 bg-background border-border text-base"
           />
       </div>
+      <Select value={sortMode} onValueChange={setSortMode}>
+          <SelectTrigger className="w-[190px] h-12 bg-background border-border shrink-0"><SelectValue /></SelectTrigger>
+          <SelectContent className="bg-popover border-border">
+              {Object.entries(SORTS).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}
+          </SelectContent>
+      </Select>
+      </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="w-full flex overflow-x-auto justify-start sm:justify-center [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] h-auto p-1 bg-muted border border-border">
             <TabsTrigger value="ALL" className="px-4 py-2">All <span className="ml-1.5 text-xs opacity-60">{requests.length}</span></TabsTrigger>
+            <TabsTrigger value="NEEDS_ACTION" className="px-4 py-2 text-amber-500 data-[state=active]:text-amber-500">Needs action <span className="ml-1.5 text-xs opacity-80">{requests.filter(needsAction).length}</span></TabsTrigger>
             {STATUS_GROUPS.map(g => (
               <TabsTrigger key={g.tab} value={g.tab} className="px-4 py-2">{g.label} <span className="ml-1.5 text-xs opacity-60">{requests.filter(r => g.statuses.includes(r.status)).length}</span></TabsTrigger>
             ))}
@@ -498,7 +545,7 @@ export default function RequestsPage() {
               <table className="w-full table-fixed sm:table-auto">
                   <tbody>
                       {paginatedRequests.map(req => (
-                          <RequestRow key={req.id} req={req} getStatusColor={getStatusColor} onCancel={handleCancelRequest}
+                          <RequestRow key={req.id} req={req} getStatusColor={getStatusColor} onCancel={handleCancelRequest} onRetry={handleRetry} isAdmin={isAdmin}
                               isSelectionMode={isSelectionMode} isSelected={selectedRequests.has(req.id)} onToggleSelect={toggleRequestSelection} />
                       ))}
                   </tbody>
