@@ -1816,9 +1816,10 @@ function SeriesContent() {
 
               {/* --- DOWNLOADED ISSUES SECTION --- */}
               <div className="space-y-6">
-                  <div className="flex items-center justify-between border-b-2 border-border pb-4">
+                  {/* Fork: wraps on narrow screens (iPad mini portrait = 744 px) instead of running off the edge */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b-2 border-border pb-4">
                       <h4 className="font-black flex items-center gap-2 text-xl text-foreground tracking-tight"><Layers className="w-6 h-6 text-primary"/> Downloaded Issues ({downloadedIssues.length})</h4>
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex flex-wrap items-center gap-2">
                       <IssueSortControl value={sortMode} onChange={changeSortMode} />
                       {canDownload && downloadedIssues.some(i => i.fullPath) && (
                           <Button
