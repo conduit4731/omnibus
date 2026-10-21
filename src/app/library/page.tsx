@@ -1,6 +1,7 @@
 // src/app/library/page.tsx
 "use client"
 
+import { LibraryInsights } from "@/components/library-insights"
 import { useState, useEffect, useCallback, useMemo, useRef, forwardRef, Suspense } from "react"
 import { TableVirtuoso, type TableComponents } from "react-virtuoso"
 import { AlphaJumpBar } from "@/components/alpha-jump-bar"
@@ -983,6 +984,9 @@ function LibraryContent() {
             </div>
         </div>
       </div>
+
+      {/* Fork: collapsible charts over the whole library */}
+      <LibraryInsights />
 
       <div className="flex flex-col gap-4 mb-8 bg-muted/50 p-4 rounded-lg border border-border transition-colors duration-300" role="group" aria-label="Advanced Search and Filtering">
           
