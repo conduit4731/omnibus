@@ -63,7 +63,11 @@ export async function GET(request: Request) {
                 items: {
                     where: itemAccessWhere,
                     orderBy: { order: 'asc' },
-                    include: { issue: { include: { series: true } } }
+                    // Only what the list page uses: full Series rows made a 688-entry list 5.5 MB (fork)
+                    include: { issue: { select: {
+                        id: true, number: true, name: true, filePath: true, coverUrl: true, isAnnual: true, seriesId: true,
+                        series: { select: { id: true, name: true, folderPath: true, metadataId: true, metadataSource: true, year: true, publisher: true } },
+                    } } }
                 }
             }
         });

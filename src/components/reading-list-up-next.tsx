@@ -45,8 +45,9 @@ export function ReadingListUpNext({ onLoaded }: { onLoaded?: (filePaths: Set<str
 
     return (
         <div className="rounded-2xl border border-border bg-card/60 backdrop-blur-sm p-5 sm:p-6 flex flex-col sm:flex-row items-center gap-6 sm:gap-10">
-            <button className="group w-56 sm:w-64 shrink-0" onClick={() => next && open(next)} title={next ? `Read ${label(next)}` : undefined}>
-                <FannedCovers covers={stack.map(cover)} className="h-64 sm:h-72" />
+            {/* Fanned stack spans ~1.8 cover widths: h-56 -> 150 px covers -> ~270 px, so the box is w-72 */}
+            <button className="group w-72 shrink-0 py-2" onClick={() => next && open(next)} title={next ? `Read ${label(next)}` : undefined}>
+                <FannedCovers covers={stack.map(cover)} className="h-56" />
             </button>
             <div className="min-w-0 flex-1 space-y-3 text-center sm:text-left">
                 <div className="flex items-center gap-2 justify-center sm:justify-start">
