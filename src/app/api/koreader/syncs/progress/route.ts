@@ -55,7 +55,7 @@ export async function PUT(request: Request) {
                 const oldProgress = await prisma.readProgress.findUnique({
                     where: { userId_issueId: { userId: user.id, issueId: matchedIssue.id } }
                 });
-                await recordDailyReading(user.id, matchedIssue.id, pagesReadSince(oldProgress, position));
+                await recordDailyReading(user.id, matchedIssue.id, pagesReadSince(oldProgress, position), oldProgress?.updatedAt);
             } catch (statError) {
                 Logger.log(`[KOReader Sync API] Failed to record heatmap stats: ${getErrorMessage(statError)}`, 'warn');
             }

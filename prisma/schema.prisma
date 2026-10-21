@@ -777,6 +777,7 @@ model DailyIssueRead {
   issueId   String
   date      DateTime
   pagesRead Int      @default(0)
+  secondsRead Int    @default(0) // fork: reading time (gaps between progress saves, see reading-stats.ts)
 
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   issue     Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)

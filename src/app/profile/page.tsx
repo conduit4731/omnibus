@@ -1,6 +1,7 @@
 // src/app/profile/page.tsx
 "use client"
 
+import { ReadingTimeCard } from "@/components/reading-time-card"
 import React, { useState, useEffect, useRef } from "react"
 import { useSession } from "next-auth/react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -919,6 +920,9 @@ export default function ProfilePage() {
                         </CardContent>
                     </Card>
                 </div>
+
+                {/* Fork: reading time per series / reading order */}
+                <ReadingTimeCard />
 
                 {/* Wrapped Stats */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

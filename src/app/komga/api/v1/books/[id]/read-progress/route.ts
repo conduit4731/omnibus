@@ -46,7 +46,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
         // The daily heatmap counts pages moved forward, never backward (the reader's rule).
         const delta = existing ? Math.max(0, currentPage - existing.currentPage) : currentPage;
-        await recordDailyReading(userId, issue.id, delta);
+        await recordDailyReading(userId, issue.id, delta, existing?.updatedAt);
 
         await prisma.readProgress.upsert({
             where: { userId_issueId: { userId, issueId: issue.id } },

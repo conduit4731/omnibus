@@ -309,7 +309,7 @@ describe('Komga facade: PATCH /books/{id}/read-progress', () => {
         const res = await patch('iss_1', { page: 1, completed: true });
 
         expect(res.status).toBe(204);
-        expect(mocks.recordDailyReading).toHaveBeenCalledWith('user_1', 'iss_1', 14);
+        expect(mocks.recordDailyReading).toHaveBeenCalledWith('user_1', 'iss_1', 14, undefined);
         const upsert = mocks.prisma.readProgress.upsert.mock.calls[0][0];
         expect(upsert.where).toEqual({ userId_issueId: { userId: 'user_1', issueId: 'iss_1' } });
         expect(upsert.update).toEqual(expect.objectContaining({ currentPage: 24, totalPages: 24, isCompleted: true }));
@@ -320,14 +320,14 @@ describe('Komga facade: PATCH /books/{id}/read-progress', () => {
     it('a bare page update sets that page and keeps the book unfinished', async () => {
         const res = await patch('iss_1', { page: 5 });
         expect(res.status).toBe(204);
-        expect(mocks.recordDailyReading).toHaveBeenCalledWith('user_1', 'iss_1', 5); // first open: the whole delta
+        expect(mocks.recordDailyReading).toHaveBeenCalledWith('user_1', 'iss_1', 5, undefined); // first open: the whole delta
         expect(mocks.prisma.readProgress.upsert.mock.calls[0][0].update).toEqual(expect.objectContaining({ currentPage: 5, isCompleted: false }));
     });
 
     it('never records a negative delta when the client reports an earlier page', async () => {
         mocks.prisma.readProgress.findUnique.mockResolvedValue({ currentPage: 20, totalPages: 24, isCompleted: false });
         await patch('iss_1', { page: 3 });
-        expect(mocks.recordDailyReading).toHaveBeenCalledWith('user_1', 'iss_1', 0);
+        expect(mocks.recordDailyReading).toHaveBeenCalledWith('user_1', 'iss_1', 0, undefined);
     });
 
     it('logs who reported which book, so a finished chapter that never syncs is visible', async () => {

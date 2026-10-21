@@ -116,7 +116,7 @@ export async function POST(request: Request) {
         }
 
         // Log the delta to today's heatmap stats (daily total + which issue) if they read something
-        await recordDailyReading(userId, issue.id, pagesReadDelta);
+        await recordDailyReading(userId, issue.id, pagesReadDelta, oldProgress?.updatedAt);
         // ---------------------------------------
 
         await prisma.readProgress.upsert({
