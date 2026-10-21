@@ -49,6 +49,17 @@ function Cover({ r, size }: { r: Release, size: 'sm' | 'md' | 'lg' }) {
     return r.seriesPath ? <Link href={`/library/series?path=${encodeURIComponent(r.seriesPath)}`}>{body}</Link> : body
 }
 
+/** One compact line "Series #N" for week and month cells: many more fit than covers. */
+function Line({ r }: { r: Release }) {
+    const text = (
+        <span className={`block truncate text-[11px] leading-snug px-1 rounded ${owned(r) ? 'text-emerald-500' : 'text-foreground'} hover:bg-muted`} title={`${r.seriesName} #${r.issueNumber} (${pub(r)})`}>
+            {isFirst(r) && <span className="mr-1 text-[9px] font-black px-1 rounded bg-pink-600 text-white">#1</span>}
+            {r.seriesName} <span className="text-muted-foreground">#{r.issueNumber}</span>
+        </span>
+    )
+    return r.seriesPath ? <Link href={`/library/series?path=${encodeURIComponent(r.seriesPath)}`} onClick={e => e.stopPropagation()}>{text}</Link> : text
+}
+
 export function ReleaseCalendar({ source, view, onViewChange }: { source: Source, view: CalendarView, onViewChange: (v: CalendarView) => void }) {
     const [anchor, setAnchor] = useState(() => parseDay(iso(new Date())))
     const [releases, setReleases] = useState<Release[] | null>(null)
@@ -143,7 +154,7 @@ export function ReleaseCalendar({ source, view, onViewChange }: { source: Source
                                     <span className="text-xs font-black uppercase">{WEEKDAYS[i]}</span>
                                     <span className="text-xs text-muted-foreground">{parseDay(day).getUTCDate()}. {list.length > 0 && `· ${list.length}`}</span>
                                 </button>
-                                <div className="grid grid-cols-3 md:grid-cols-2 gap-1.5">{list.map(r => <Cover key={r.id} r={r} size="md" />)}</div>
+                                <div className="space-y-0.5">{list.map(r => <Line key={r.id} r={r} />)}</div>
                             </div>
                         )
                     })}
@@ -158,9 +169,9 @@ export function ReleaseCalendar({ source, view, onViewChange }: { source: Source
                             <button key={day} onClick={() => open(day, 'day')}
                                 className={`text-left rounded-md border p-1.5 min-h-24 sm:min-h-28 align-top hover:border-primary/60 ${day === today ? 'border-primary' : 'border-border'} ${inMonth ? 'bg-card/40' : 'opacity-40'}`}>
                                 <div className="flex justify-between text-[11px] font-bold"><span>{parseDay(day).getUTCDate()}</span>{list.length > 0 && <span className="text-primary">{list.length}</span>}</div>
-                                <div className="flex flex-wrap gap-0.5 mt-1">
-                                    {list.slice(0, 6).map(r => <div key={r.id} className="w-[30%]"><Cover r={{ ...r, seriesPath: undefined }} size="sm" /></div>)}
-                                    {list.length > 6 && <span className="text-[10px] text-muted-foreground font-bold self-end">+{list.length - 6}</span>}
+                                <div className="mt-1 space-y-0">
+                                    {list.slice(0, 8).map(r => <Line key={r.id} r={{ ...r, seriesPath: undefined }} />)}
+                                    {list.length > 8 && <span className="text-[10px] text-primary font-bold px-1">+{list.length - 8} more</span>}
                                 </div>
                             </button>
                         )

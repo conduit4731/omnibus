@@ -24,6 +24,136 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 
+// Fork: one table for tabs, filter and the status ring (label, statuses, ring colour)
+const STATUS_GROUPS: { tab: string, label: string, statuses: string[], color: string }[] = [
+  { tab: "ACTIVE", label: "Active / DL", statuses: ['DOWNLOADING', 'PENDING', 'MANUAL_DDL'], color: '#3b82f6' },
+  { tab: "PENDING_APPROVAL", label: "Pending", statuses: ['PENDING_APPROVAL'], color: '#f97316' },
+  { tab: "UNRELEASED", label: "Unreleased", statuses: ['UNRELEASED'], color: '#a855f7' },
+  { tab: "AWAITING", label: "Awaiting", statuses: ['AWAITING_RELEASE'], color: '#0ea5e9' },
+  { tab: "COMPLETED", label: "Completed", statuses: ['IMPORTED', 'COMPLETED'], color: '#22c55e' },
+  { tab: "FAILED", label: "Failed", statuses: ['FAILED', 'STALLED', 'ERROR'], color: '#ef4444' },
+  { tab: "CANCELLED", label: "Cancelled", statuses: ['CANCELLED'], color: '#64748b' },
+];
+const CANCELLABLE = ['PENDING_APPROVAL', 'PENDING', 'DOWNLOADING', 'MANUAL_DDL', 'UNRELEASED', 'AWAITING_RELEASE'];
+const statusLabel = (status: string) => status === 'PENDING_APPROVAL' ? 'Needs Approval' : status === 'MANUAL_DDL' ? 'GETCOMICS' : status === 'AWAITING_RELEASE' ? 'Awaiting' : status;
+
+// Fork: ring of all requests by status group; a click filters to that group
+function StatusRing({ requests, active, onSelect }: { requests: any[], active: string, onSelect: (tab: string) => void }) {
+  const counts = STATUS_GROUPS.map(g => ({ ...g, n: requests.filter(r => g.statuses.includes(r.status)).length }));
+  const total = counts.reduce((a, c) => a + c.n, 0);
+  const manual = requests.filter(r => r.status === 'MANUAL_DDL').length;
+  const R = 70, C = 2 * Math.PI * R;
+  let offset = 0;
+  return (
+    <Card className="border-border bg-background/80">
+      <CardContent className="p-5 flex flex-col sm:flex-row items-center gap-8">
+        <svg viewBox="0 0 180 180" className="w-44 h-44 shrink-0 -rotate-90">
+          <circle cx="90" cy="90" r={R} fill="none" stroke="currentColor" strokeWidth="22" className="text-muted" />
+          {total > 0 && counts.filter(c => c.n > 0).map(c => {
+            const len = (c.n / total) * C;
+            const seg = (
+              <circle key={c.tab} cx="90" cy="90" r={R} fill="none" stroke={c.color} strokeWidth={active === c.tab ? 28 : 22}
+                strokeDasharray={`${len} ${C - len}`} strokeDashoffset={-offset} className="cursor-pointer transition-all" onClick={() => onSelect(c.tab)}>
+                <title>{`${c.label}: ${c.n}`}</title>
+              </circle>
+            );
+            offset += len;
+            return seg;
+          })}
+          <text x="90" y="90" textAnchor="middle" dominantBaseline="central" transform="rotate(90 90 90)" className="fill-foreground font-black" fontSize="28">{total}</text>
+        </svg>
+        <div className="grid grid-cols-2 gap-x-8 gap-y-2 w-full">
+          {counts.map(c => (
+            <button key={c.tab} onClick={() => onSelect(active === c.tab ? "ALL" : c.tab)} className={`flex items-center gap-2 text-sm rounded-md px-2 py-1 text-left ${active === c.tab ? 'bg-muted font-bold' : 'hover:bg-muted/60'}`}>
+              <span className="w-3 h-3 rounded-sm shrink-0" style={{ background: c.color }} />
+              <span className="flex-1">{c.label}</span>
+              <span className="font-mono font-bold">{c.n}</span>
+            </button>
+          ))}
+          {manual > 0 && <p className="col-span-2 text-xs text-muted-foreground px-2">{manual} of the active ones need a manual GetComics download.</p>}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// Fork: compact one-line request (table view)
+function RequestRow({ req, getStatusColor, onCancel, isSelectionMode, isSelected, onToggleSelect }: {
+  req: any, getStatusColor: (status: string) => string, onCancel: (id: string) => void,
+  isSelectionMode: boolean, isSelected: boolean, onToggleSelect: (id: string) => void
+}) {
+  const [isCancelling, setIsCancelling] = useState(false);
+  const cancellable = CANCELLABLE.includes(req.status);
+  const name = (req.seriesName || "Unknown Request").replace(COMIC_EXT_REGEX, '');
+  return (
+    <tr className={`border-b border-border text-sm ${isSelected && isSelectionMode ? 'bg-primary/10' : 'hover:bg-muted/40'} ${isSelectionMode && cancellable ? 'cursor-pointer' : ''}`}
+        onClick={() => { if (isSelectionMode && cancellable) onToggleSelect(req.id); }}>
+      {isSelectionMode && <td className="pl-3 w-8">{cancellable ? (isSelected ? <CheckSquare className="w-4 h-4 text-primary" /> : <Square className="w-4 h-4 text-muted-foreground" />) : null}</td>}
+      <td className="px-3 py-2 w-32"><Badge variant="outline" className={`${getStatusColor(req.status)} text-[10px] font-bold uppercase tracking-wider whitespace-nowrap`}>{statusLabel(req.status)}</Badge></td>
+      <td className="px-3 py-2 max-w-0 w-full"><p className="truncate font-medium" title={name}>{name}</p></td>
+      <td className="px-3 py-2 hidden md:table-cell text-xs text-muted-foreground whitespace-nowrap max-w-48 truncate">{providerOf(req)}</td>
+      <td className="px-3 py-2 hidden sm:table-cell text-xs text-muted-foreground whitespace-nowrap">{new Date(req.createdAt).toLocaleDateString()}</td>
+      <td className="px-3 py-2 w-14 text-xs font-mono text-primary">{req.status === 'DOWNLOADING' ? `${req.progress}%` : ''}</td>
+      <td className="px-2 py-1 whitespace-nowrap text-right" onClick={e => e.stopPropagation()}>
+        {req.seriesPath && <Button size="icon" variant="ghost" asChild className="h-7 w-7" title="Go to series"><Link href={`/library/series?path=${encodeURIComponent(req.seriesPath)}`}><Library className="w-3.5 h-3.5" /></Link></Button>}
+        {req.volumeId && req.volumeId !== "0" && (
+          <Button size="icon" variant="ghost" asChild className="h-7 w-7" title={`View on ${req.metadataSource === 'METRON' ? 'Metron' : 'ComicVine'}`}>
+            <a href={req.metadataSource === 'METRON' ? `https://metron.cloud/series/${req.volumeId}/` : `https://comicvine.gamespot.com/volume/4050-${req.volumeId}/`} target="_blank" rel="noopener noreferrer"><ExternalLink className="w-3.5 h-3.5" /></a>
+          </Button>
+        )}
+        {cancellable && (
+          <Button size="icon" variant="ghost" className="h-7 w-7 text-red-500 hover:text-red-600" title="Cancel request" disabled={isCancelling || isSelectionMode}
+            onClick={async () => { setIsCancelling(true); await onCancel(req.id); setIsCancelling(false); }}>
+            {isCancelling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
+          </Button>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+// Where a request is (being) downloaded from, for cards and table rows
+function providerOf(req: any): string {
+  let provider = "Pending Search";
+  if (req.indexer) {
+      provider = req.indexer;
+  } else if (req.downloadLink === 'DIRECT_GETCOMICS') {
+      provider = "GetComics";
+  } else if (req.downloadLink?.startsWith('http')) {
+      try {
+          const url = new URL(req.downloadLink);
+          const hostname = url.hostname.replace('www.', '');
+          const parts = hostname.split('.');
+          let name = parts.length > 1 ? parts[parts.length - 2] : hostname;
+          name = name.charAt(0).toUpperCase() + name.slice(1);
+          
+          if (hostname.includes('mediafire')) name = 'MediaFire';
+          else if (hostname.includes('mega.nz') || hostname.includes('mega.co.nz')) name = 'Mega';
+          else if (hostname.includes('pixeldrain')) name = 'Pixeldrain';
+          else if (hostname.includes('terabox')) name = 'Terabox';
+          else if (hostname.includes('vikingfile')) name = 'VikingFile';
+          else if (hostname.includes('annas-archive')) name = "Anna's Archive";
+          else if (hostname.includes('rootz')) name = 'Rootz';
+          else if (hostname.includes('comicfiles') || hostname.includes('comic-files') || hostname.includes('getcomics')) name = 'GetComics';
+          
+          provider = `${name} (DDL)`;
+      } catch (e) {
+          provider = "Direct Download (DDL)";
+      }
+  } else if (req.downloadLink?.startsWith('magnet:')) {
+      provider = "Torrent Indexer";
+  } else if (req.downloadLink) {
+      provider = "Usenet / Torrent Indexer";
+  } else if (req.status === 'PENDING_APPROVAL') {
+      provider = "Awaiting Approval";
+  } else if (req.status === 'AWAITING_RELEASE') {
+      provider = "Not on any source yet — retrying automatically";
+  } else if (['FAILED', 'ERROR', 'CANCELLED', 'STALLED'].includes(req.status)) {
+      provider = "N/A";
+  }
+  return provider;
+}
+
 function RequestCard({ 
     req, 
     getStatusColor, 
@@ -45,7 +175,7 @@ function RequestCard({
   const [isCancelling, setIsCancelling] = useState(false)
 
   // Enforce the rule that users can only cancel pre-processed or active items
-  const isCancellable = ['PENDING_APPROVAL', 'PENDING', 'DOWNLOADING', 'MANUAL_DDL', 'UNRELEASED', 'AWAITING_RELEASE'].includes(req.status);
+  const isCancellable = CANCELLABLE.includes(req.status);
 
   const handleShowDesc = async () => {
     if (showDesc) {
@@ -92,44 +222,7 @@ function RequestCard({
   const displayName = (req.seriesName || "Unknown Request").replace(COMIC_EXT_REGEX, '');
   const isCompleted = ['IMPORTED', 'COMPLETED'].includes(req.status);
 
-  // Parse Provider
-  let provider = "Pending Search";
-  if (req.indexer) {
-      provider = req.indexer;
-  } else if (req.downloadLink === 'DIRECT_GETCOMICS') {
-      provider = "GetComics";
-  } else if (req.downloadLink?.startsWith('http')) {
-      try {
-          const url = new URL(req.downloadLink);
-          const hostname = url.hostname.replace('www.', '');
-          const parts = hostname.split('.');
-          let name = parts.length > 1 ? parts[parts.length - 2] : hostname;
-          name = name.charAt(0).toUpperCase() + name.slice(1);
-          
-          if (hostname.includes('mediafire')) name = 'MediaFire';
-          else if (hostname.includes('mega.nz') || hostname.includes('mega.co.nz')) name = 'Mega';
-          else if (hostname.includes('pixeldrain')) name = 'Pixeldrain';
-          else if (hostname.includes('terabox')) name = 'Terabox';
-          else if (hostname.includes('vikingfile')) name = 'VikingFile';
-          else if (hostname.includes('annas-archive')) name = "Anna's Archive";
-          else if (hostname.includes('rootz')) name = 'Rootz';
-          else if (hostname.includes('comicfiles') || hostname.includes('comic-files') || hostname.includes('getcomics')) name = 'GetComics';
-          
-          provider = `${name} (DDL)`;
-      } catch (e) {
-          provider = "Direct Download (DDL)";
-      }
-  } else if (req.downloadLink?.startsWith('magnet:')) {
-      provider = "Torrent Indexer";
-  } else if (req.downloadLink) {
-      provider = "Usenet / Torrent Indexer";
-  } else if (req.status === 'PENDING_APPROVAL') {
-      provider = "Awaiting Approval";
-  } else if (req.status === 'AWAITING_RELEASE') {
-      provider = "Not on any source yet — retrying automatically";
-  } else if (['FAILED', 'ERROR', 'CANCELLED', 'STALLED'].includes(req.status)) {
-      provider = "N/A";
-  }
+  const provider = providerOf(req);
 
   return (
     <Card 
@@ -157,7 +250,7 @@ function RequestCard({
                     <h3 className="font-bold text-lg sm:text-xl leading-tight line-clamp-1 text-foreground" title={displayName}>{displayName}</h3>
                     <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="outline" className={`${getStatusColor(req.status)} text-[10px] font-bold uppercase tracking-wider`}>
-                            {req.status === 'PENDING_APPROVAL' ? 'Needs Approval' : req.status === 'MANUAL_DDL' ? 'GETCOMICS' : req.status === 'AWAITING_RELEASE' ? 'Awaiting' : req.status}
+                            {statusLabel(req.status)}
                         </Badge>
                         {req.status === 'DOWNLOADING' && <span className="text-[11px] font-mono text-primary font-bold bg-primary/10 px-2 py-0.5 rounded">{req.progress}%</span>}
                         {isCompleted && <span className="text-[11px] text-green-700 dark:text-green-400 flex items-center gap-1 font-bold bg-green-50 dark:bg-green-900/20 px-2 py-0.5 rounded"><CheckCircle2 className="w-3 h-3"/> Ready in Library</span>}
@@ -242,7 +335,8 @@ export default function RequestsPage() {
   const [activeTab, setActiveTab] = useState("ALL")
   const [searchQuery, setSearchQuery] = useState("")
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState("5")
+  const [pageSize, setPageSize] = useState("50")
+  const [viewMode, setViewMode] = useState<"table" | "cards">("table")
   
   // Selection / Bulk Actions
   const [isSelectionMode, setIsSelectionMode] = useState(false)
@@ -331,14 +425,7 @@ export default function RequestsPage() {
           if (!matchesSearch) return false;
 
           if (activeTab === "ALL") return true;
-          if (activeTab === "ACTIVE") return ['DOWNLOADING', 'PENDING', 'MANUAL_DDL'].includes(req.status);
-          if (activeTab === "PENDING_APPROVAL") return req.status === 'PENDING_APPROVAL';
-          if (activeTab === "UNRELEASED") return req.status === 'UNRELEASED';
-          if (activeTab === "AWAITING") return req.status === 'AWAITING_RELEASE';
-          if (activeTab === "COMPLETED") return ['IMPORTED', 'COMPLETED'].includes(req.status);
-          if (activeTab === "FAILED") return ['FAILED', 'STALLED', 'ERROR'].includes(req.status);
-          if (activeTab === "CANCELLED") return req.status === 'CANCELLED';
-          return true;
+          return STATUS_GROUPS.find(g => g.tab === activeTab)?.statuses.includes(req.status) ?? true;
       });
   }, [requests, activeTab, searchQuery]);
 
@@ -349,7 +436,7 @@ export default function RequestsPage() {
   const paginatedRequests = filteredRequests.slice((page - 1) * limit, page * limit);
   
   // Calculate which of the currently visible requests are eligible for cancellation
-  const cancellableRequests = useMemo(() => paginatedRequests.filter(r => ['PENDING_APPROVAL', 'PENDING', 'DOWNLOADING', 'MANUAL_DDL', 'UNRELEASED', 'AWAITING_RELEASE'].includes(r.status)), [paginatedRequests]);
+  const cancellableRequests = useMemo(() => paginatedRequests.filter(r => CANCELLABLE.includes(r.status)), [paginatedRequests]);
 
   return (
     <div className="container mx-auto py-10 px-6 space-y-6 max-w-5xl transition-colors duration-300">
@@ -370,6 +457,10 @@ export default function RequestsPage() {
                 {isSelectionMode ? <Square className="w-4 h-4 mr-2" /> : <CheckSquare className="w-4 h-4 mr-2" />}
                 {isSelectionMode ? "Cancel Select" : "Select"}
             </Button>
+            <div className="flex gap-1 bg-muted p-1 rounded-md border border-border">
+                <Button size="sm" variant={viewMode === "table" ? "default" : "ghost"} className="h-8 px-3 font-bold" onClick={() => setViewMode("table")}>Table</Button>
+                <Button size="sm" variant={viewMode === "cards" ? "default" : "ghost"} className="h-8 px-3 font-bold" onClick={() => setViewMode("cards")}>Cards</Button>
+            </div>
             <Button variant="outline" onClick={fetchRequests} disabled={loading} className="h-10 border-border hover:bg-muted text-foreground">
                 {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RefreshCw className="w-4 h-4 mr-2" />}
                 Refresh
@@ -379,6 +470,8 @@ export default function RequestsPage() {
             </Button>
         </div>
       </div>
+
+      {requests.length > 0 && <StatusRing requests={requests} active={activeTab} onSelect={setActiveTab} />}
 
       <div className="relative w-full">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
@@ -392,19 +485,28 @@ export default function RequestsPage() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="w-full flex overflow-x-auto justify-start sm:justify-center [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] h-auto p-1 bg-muted border border-border">
-            <TabsTrigger value="ALL" className="px-4 py-2">All</TabsTrigger>
-            <TabsTrigger value="ACTIVE" className="px-4 py-2">Active / DL</TabsTrigger>
-            <TabsTrigger value="PENDING_APPROVAL" className="px-4 py-2">Pending</TabsTrigger>
-            <TabsTrigger value="UNRELEASED" className="px-4 py-2">Unreleased</TabsTrigger>
-            <TabsTrigger value="AWAITING" className="px-4 py-2">Awaiting</TabsTrigger>
-            <TabsTrigger value="COMPLETED" className="px-4 py-2">Completed</TabsTrigger>
-            <TabsTrigger value="FAILED" className="px-4 py-2">Failed</TabsTrigger>
-            <TabsTrigger value="CANCELLED" className="px-4 py-2">Cancelled</TabsTrigger>
+            <TabsTrigger value="ALL" className="px-4 py-2">All <span className="ml-1.5 text-xs opacity-60">{requests.length}</span></TabsTrigger>
+            {STATUS_GROUPS.map(g => (
+              <TabsTrigger key={g.tab} value={g.tab} className="px-4 py-2">{g.label} <span className="ml-1.5 text-xs opacity-60">{requests.filter(r => g.statuses.includes(r.status)).length}</span></TabsTrigger>
+            ))}
         </TabsList>
       </Tabs>
 
-      <div className="grid grid-cols-1 gap-6 min-h-[400px]">
-          {paginatedRequests.map((req) => (
+      {viewMode === "table" && paginatedRequests.length > 0 && (
+          <div className="rounded-xl border border-border bg-background/80 overflow-hidden">
+              <table className="w-full table-fixed sm:table-auto">
+                  <tbody>
+                      {paginatedRequests.map(req => (
+                          <RequestRow key={req.id} req={req} getStatusColor={getStatusColor} onCancel={handleCancelRequest}
+                              isSelectionMode={isSelectionMode} isSelected={selectedRequests.has(req.id)} onToggleSelect={toggleRequestSelection} />
+                      ))}
+                  </tbody>
+              </table>
+          </div>
+      )}
+
+      <div className={`grid grid-cols-1 gap-6 ${viewMode === "cards" ? 'min-h-[400px]' : ''}`}>
+          {viewMode === "cards" && paginatedRequests.map((req) => (
               <RequestCard 
                   key={req.id} 
                   req={req} 
