@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link"; 
 import { Logger } from "@/lib/logger";
 import { getErrorMessage } from "@/lib/utils/error";
+import { seriesHref } from "@/components/series-link";
 
 function DynamicCover({ metadataId, metadataSource, issueNumber, fallbackUrl, altName }: { metadataId: string | null, metadataSource: string, issueNumber: string, fallbackUrl: string, altName: string }) {
     const [cover, setCover] = useState<string | null>(fallbackUrl);
@@ -114,7 +115,12 @@ export function ContinueReading({ excludePaths }: { excludePaths?: Set<string> }
 
               <div className="absolute bottom-0 left-0 w-full p-3 bg-linear-to-t from-black/90 via-black/60 to-transparent z-10 group-hover:opacity-0 transition-opacity duration-200 pointer-events-none">
                   <div className="flex justify-between items-end mb-1.5">
-                      <p className="text-white font-bold text-xs truncate max-w-[70%] drop-shadow-md">{item.seriesName}</p>
+                      {/* Fork: the series name opens the series (also on touch, where the hover overlay is hidden) */}
+                      {item.seriesPath ? (
+                          <Link href={seriesHref(item.seriesPath)} onClick={e => e.stopPropagation()} className="pointer-events-auto text-white font-bold text-xs truncate max-w-[70%] drop-shadow-md hover:underline">{item.seriesName}</Link>
+                      ) : (
+                          <p className="text-white font-bold text-xs truncate max-w-[70%] drop-shadow-md">{item.seriesName}</p>
+                      )}
                       <p className="text-white/90 text-[10px] font-mono drop-shadow-md">{item.percentage}%</p>
                   </div>
                   <div className="w-full bg-white/30 h-1.5 rounded-full overflow-hidden backdrop-blur-xs">
@@ -126,7 +132,11 @@ export function ContinueReading({ excludePaths }: { excludePaths?: Set<string> }
               </div>
 
               <div className="absolute inset-0 bg-linear-to-t from-black/95 via-black/60 to-black/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300 hidden sm:flex flex-col justify-end p-4 text-center gap-2 z-20">
-                  <h3 className="text-white font-bold text-sm line-clamp-2 drop-shadow-md">{item.seriesName}</h3>
+                  {item.seriesPath ? (
+                      <Link href={seriesHref(item.seriesPath)} onClick={e => e.stopPropagation()} className="text-white font-bold text-sm line-clamp-2 drop-shadow-md hover:underline">{item.seriesName}</Link>
+                  ) : (
+                      <h3 className="text-white font-bold text-sm line-clamp-2 drop-shadow-md">{item.seriesName}</h3>
+                  )}
                   <p className="text-white/80 text-xs mb-1 drop-shadow-md">Issue #{item.issueNumber}</p>
                   
                   <Button 
