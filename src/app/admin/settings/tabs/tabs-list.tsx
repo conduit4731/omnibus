@@ -16,7 +16,7 @@ export function SettingsTabsList({ dirtyTabs }: { dirtyTabs: string[] }) {
     // max-sm:h-auto! outranks the ui/tabs base `group-data-[orientation=horizontal]/tabs:h-9`
     // (compound selector beats a plain utility), which otherwise pins the grid to one row.
     return (
-        <TabsList className="grid grid-cols-2 w-full h-auto max-sm:h-auto! bg-muted border border-border gap-1 p-1 sm:flex sm:overflow-x-auto sm:[&::-webkit-scrollbar]:hidden sm:[-ms-overflow-style:none] sm:[scrollbar-width:none] sm:justify-start lg:justify-center">
+        <TabsList className="grid grid-cols-2 w-full h-auto max-sm:h-auto! bg-muted border border-border gap-1 p-1 sm:flex sm:flex-wrap sm:justify-start">
             {SETTINGS_TABS.map(t => (
                 <TabsTrigger key={t.value} value={t.value} className={TRIGGER_CLS}>
                     {t.label}
