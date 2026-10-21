@@ -37,9 +37,8 @@ async function load(source: Source, from: string, to: string): Promise<Release[]
 }
 
 function Cover({ r, size }: { r: Release, size: 'sm' | 'md' | 'lg' }) {
-    const w = size === 'lg' ? 'w-full' : size === 'md' ? 'w-full' : 'w-7'
     const body = (
-        <div className={`relative ${w} aspect-[2/3] rounded-md overflow-hidden bg-muted border border-border ${owned(r) ? '' : ''}`} title={`${r.seriesName} #${r.issueNumber}`}>
+        <div className="relative w-full aspect-[2/3] rounded-md overflow-hidden bg-muted border border-border" title={`${r.seriesName} #${r.issueNumber}`}>
             {r.coverUrl ? <img src={r.coverUrl} alt="" loading="lazy" className="w-full h-full object-cover" /> : <ImageIcon className="w-4 h-4 m-auto h-full text-muted-foreground/40" />}
             {size !== 'sm' && (
                 <span className={`absolute bottom-1 left-1 text-[10px] font-black px-1.5 py-0.5 rounded ${isFirst(r) ? 'bg-pink-600 text-white' : 'bg-black/70 text-white'}`}>#{r.issueNumber}</span>
