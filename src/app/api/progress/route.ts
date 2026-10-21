@@ -91,7 +91,7 @@ export async function POST(request: Request) {
 
         if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-        const { filePath, currentPage, totalPages } = await request.json();
+        const { filePath, currentPage, totalPages, keepCompleted } = await request.json();
         const newPage = parseInt(currentPage);
         const total = parseInt(totalPages);
 
@@ -99,12 +99,16 @@ export async function POST(request: Request) {
 
         if (!issue) return NextResponse.json({ error: "Issue not found" }, { status: 404 });
 
-        const isCompleted = newPage >= total - 2;
+        let isCompleted = newPage >= total - 2;
 
         // --- NEW: CALCULATE PAGES READ TODAY ---
         const oldProgress = await prisma.readProgress.findUnique({
             where: { userId_issueId: { userId, issueId: issue.id } }
         });
+
+        // Fork: the reader's page sync sends keepCompleted, so leafing through a finished issue again keeps it
+        // read; only an explicit "mark unread" (which doesn't send it) reopens it.
+        if (keepCompleted && oldProgress?.isCompleted) isCompleted = true;
 
         let pagesReadDelta = 0;
         if (oldProgress) {

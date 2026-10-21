@@ -33,6 +33,8 @@ function ReaderContent() {
 
   const [pages, setPages] = useState<string[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const currentIndexRef = useRef(0);
+  currentIndexRef.current = currentIndex;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isMarkedRead, setIsMarkedRead] = useState(false);
@@ -329,7 +331,7 @@ function ReaderContent() {
         fetch('/api/progress', {
             method: 'POST',
             headers: getAuthHeaders(),
-            body: JSON.stringify({ filePath, currentPage: currentIndex, totalPages: pages.length })
+            body: JSON.stringify({ filePath, currentPage: currentIndex, totalPages: pages.length, keepCompleted: true })
         });
     }, 1500);
 
@@ -549,6 +551,38 @@ function ReaderContent() {
       toast({ title: newStatus ? "Marked as Read" : "Marked as Unread" });
   };
 
+  // Fork: webtoon mode never moved currentIndex, so nothing was saved (resume page, read status, reading
+  // time). The page reaching the top third of the screen is now the current page. On open, jump to the
+  // saved page first and only then start watching, or page 1 at the top would overwrite the progress.
+  const webtoonRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+      const root = webtoonRef.current;
+      if (settings.readingMode !== 'webtoon' || !root || loading || !isReadyToSync || pages.length === 0) return;
+      root.querySelector(`[data-page="${currentIndexRef.current}"]`)?.scrollIntoView({ block: 'start' });
+      let obs: IntersectionObserver | null = null;
+      const t = setTimeout(() => {
+          obs = new IntersectionObserver(entries => {
+              for (const e of entries) {
+                  // an image not loaded yet has no height: never count it (they all sit at the top)
+                  if (e.isIntersecting && e.boundingClientRect.height > 100) setCurrentIndex(Number((e.target as HTMLElement).dataset.page));
+              }
+          }, { root, rootMargin: '0px 0px -66% 0px' });
+          root.querySelectorAll('[data-page]').forEach(el => obs!.observe(el));
+      }, 400);
+      return () => { clearTimeout(t); obs?.disconnect(); };
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- once per opened issue / mode, not per page turn
+  }, [settings.readingMode, loading, isReadyToSync, pages]);
+
+  // Fork: end-of-issue buttons (webtoon): mark read, then the next issue or back to the series
+  const finishIssue = async (goNext: boolean) => {
+      if (!isMarkedRead) {
+          setIsMarkedRead(true);
+          await fetch('/api/progress', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ filePath, currentPage: pages.length, totalPages: pages.length }) });
+      }
+      if (goNext && nextIssue && seriesPath) router.replace(`/reader?path=${encodeURIComponent(nextIssue.path)}&series=${encodeURIComponent(seriesPath)}`);
+      else handleReaderClose();
+  };
+
   // NATIVE TOUCH GESTURE LOGIC
   const handleTouchStart = (e: React.TouchEvent) => {
       if (e.touches.length > 1) return; // multi-touch is a pinch (handled natively), not a swipe
@@ -707,7 +741,7 @@ function ReaderContent() {
 
       {/* TOP BAR */}
       <div 
-        className={`absolute top-0 left-0 w-full p-4 flex justify-between items-center bg-gradient-to-b from-black/90 to-transparent transition-all duration-300 z-50 ${uiVisible ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0'}`}
+        className={`absolute top-0 left-0 w-full p-4 flex justify-between items-center bg-gradient-to-b from-black/90 to-transparent transition-all duration-300 z-50 pointer-coarse:[&_button]:h-12 pointer-coarse:[&_button]:min-w-12 pointer-coarse:[&_svg]:size-6 ${uiVisible ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0'}`}
         onMouseEnter={() => setHoverTop(true)} 
         onMouseLeave={() => setHoverTop(false)}
       >
@@ -807,17 +841,34 @@ function ReaderContent() {
 
       {/* CANVAS */}
       {settings.readingMode === 'webtoon' ? (
-          <div className={`w-full h-full overflow-y-auto flex flex-col items-center z-10 ${hideCursor ? 'cursor-none' : ''}`} onClick={() => setShowUI(!showUI)}>
-              {pages.map(p => (
+          <div ref={webtoonRef} className={`w-full h-full overflow-y-auto flex flex-col items-center z-10 ${hideCursor ? 'cursor-none' : ''}`} onClick={() => setShowUI(!showUI)}>
+              {pages.map((p, i) => (
                   <img 
                       key={p} 
+                      data-page={i}
                       src={getPageUrl(p)} 
                       style={settings.brightness !== 100 || settings.contrast !== 100 ? { filter: `brightness(${settings.brightness}%) contrast(${settings.contrast}%)` } : undefined}
-                      className="w-full max-w-4xl h-auto block m-0 p-0" 
+                      className="w-full max-w-4xl h-auto block m-0 p-0 [aspect-ratio:auto_2/3]" 
                       loading="lazy" 
                       alt="Page" 
                   />
               ))}
+              {pages.length > 0 && (
+                  <div className="w-full max-w-4xl px-6 py-16 flex flex-col items-center gap-4 text-white" onClick={e => e.stopPropagation()}>
+                      <p className="text-sm uppercase tracking-widest text-white/60 font-bold">End of {issueName || 'issue'}</p>
+                      {nextIssue && seriesPath && (
+                          <Button className="w-full max-w-md h-14 text-base font-bold bg-primary hover:bg-primary/90 text-primary-foreground" onClick={() => finishIssue(true)}>
+                              <CheckCircle2 className="w-5 h-5 mr-2" /> Finished · Next: {nextIssue.name}
+                          </Button>
+                      )}
+                      <Button variant="secondary" className="w-full max-w-md h-14 text-base font-bold" onClick={() => finishIssue(false)}>
+                          {isMarkedRead ? 'Back to series' : 'Mark as read & back to series'}
+                      </Button>
+                      {isMarkedRead && (
+                          <Button variant="ghost" className="h-12 text-white/70 hover:bg-white/10 hover:text-white" onClick={toggleReadStatus}>Mark as unread</Button>
+                      )}
+                  </div>
+              )}
           </div>
       ) : (
           <div 
@@ -890,7 +941,7 @@ function ReaderContent() {
       {/* BOTTOM BAR / SCRUBBER */}
       {settings.readingMode !== 'webtoon' && (
           <div 
-            className={`absolute bottom-0 left-0 w-full p-4 flex flex-col bg-gradient-to-t from-black/90 to-transparent transition-all z-50 ${uiVisible ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0'}`}
+            className={`absolute bottom-0 left-0 w-full p-4 flex flex-col bg-gradient-to-t from-black/90 to-transparent transition-all z-50 pointer-coarse:[&_button]:h-12 pointer-coarse:[&_button]:min-w-12 ${uiVisible ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0'}`}
             onMouseEnter={() => setHoverBottom(true)} 
             onMouseLeave={() => setHoverBottom(false)}
           >

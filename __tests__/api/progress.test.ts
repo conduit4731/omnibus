@@ -67,6 +67,19 @@ describe('API Route: Reading Progress Tracker', () => {
         }));
     });
     
+    it('fork: leafing through a finished issue keeps it read; an explicit unmark (no keepCompleted) reopens it', async () => {
+        for (const [keepCompleted, expected] of [[true, true], [undefined, false]] as const) {
+            mocks.upsertProgress.mockClear();
+            mocks.getServerSession.mockResolvedValueOnce({ user: { id: 'user_1' } });
+            mocks.findFirstIssue.mockResolvedValueOnce({ id: 'issue_1' });
+            mocks.findUniqueProgress.mockResolvedValueOnce({ currentPage: 100, isCompleted: true });
+            await POST(createReq({ filePath: '/comics/batman.cbz', currentPage: 3, totalPages: 100, keepCompleted }));
+            expect(mocks.upsertProgress).toHaveBeenCalledWith(expect.objectContaining({
+                update: expect.objectContaining({ currentPage: 3, isCompleted: expected }),
+            }));
+        }
+    });
+
     it('should correctly calculate pages read today and update the heatmap stats', async () => {
         mocks.getServerSession.mockResolvedValueOnce({ user: { id: 'user_1' } });
         mocks.findFirstIssue.mockResolvedValueOnce({ id: 'issue_1' });
