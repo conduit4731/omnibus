@@ -173,9 +173,9 @@ async fn fetch_cv_volume(db: &Db, client: &Client, api_key: &str, metadata_id: &
         None => {
             let vol_resp = client.execute(vol_req).await?;
             crate::api_usage::log(&db.pool, "comicvine", &vol_url).await;
-            if vol_resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            if is_cv_rate_limited(vol_resp.status()) {
                 mark_flag(db, "cv_rate_limit_time").await;
-                anyhow::bail!("ComicVine rate limited (429) on volume fetch");
+                anyhow::bail!("ComicVine rate limited (429/420) on volume fetch");
             }
             let j: serde_json::Value = vol_resp.json().await?;
             crate::metadata_cache::put(db, "comicvine", &vol_full_url, &j).await;
@@ -529,8 +529,18 @@ async fn sync_metadata_attempt(db: Db, series_ids: Option<Vec<String>>, opts: Sy
         // Embed the (now-refreshed) DB values into the archives via the full-tag writer
         // (unified on metadata_writer::process_embed_job — no more duplicate 4-tag writer).
         let embed_payload = crate::metadata_writer::EmbedRequest { series_id: Some(series_id.clone()), issue_ids: None };
-        if let Err(e) = crate::metadata_writer::process_embed_job(db.clone(), embed_payload).await {
-            log::error!("[Metadata] Embed failed for {}: {:?}", series_name, e);
+        match crate::metadata_writer::process_embed_job(db.clone(), embed_payload).await {
+            // FIX (comicinfo-embed-logging): this call's (success, fail, json_count) result used to be
+            // discarded entirely on the Ok path -- only the outer Err (a hard query/DB failure) ever
+            // got logged, so a batch that ran fine but embedded 0 of N files (e.g. every file's path
+            // was stale) looked identical in the log to one that embedded all of them.
+            Ok((success, fail, _json_count)) if fail > 0 => {
+                log::warn!("[Metadata] Embed for {} completed with failures: {} succeeded, {} failed.", series_name, success, fail);
+            }
+            Ok(_) => {}
+            Err(e) => {
+                log::error!("[Metadata] Embed failed for {}: {:?}", series_name, e);
+            }
         }
 
         if let Err(e) = sqlx::query(&format!(
@@ -643,7 +653,7 @@ async fn fetch_comicvine(
     if let Some(arr) = vol_data["concepts"].as_array() {
         for c in arr {
             if let Some(n) = c["name"].as_str() {
-                if !n.is_empty() && !vol_genres.contains(&n.to_string()) {
+                if !n.is_empty() && !is_genre_noise(n) && !vol_genres.contains(&n.to_string()) {
                     vol_genres.push(n.to_string());
                 }
             }
@@ -652,25 +662,36 @@ async fn fetch_comicvine(
     let vol_genres_json = if vol_genres.is_empty() { None } else { serde_json::to_string(&vol_genres).ok() };
 
     // ComicVine has no format field, so book type is a conservative guess (beta.032): explicit
-    // format hints in the volume name, or a finished single-issue volume = one-shot.
-    let guessed_book_type: Option<&str> = {
-        static RE_GN: OnceLock<Regex> = OnceLock::new();
-        static RE_TPB: OnceLock<Regex> = OnceLock::new();
-        let re_gn = RE_GN.get_or_init(|| Regex::new(r"(?i)graphic novel|\bOGN\b").unwrap());
-        let re_tpb = RE_TPB.get_or_init(|| Regex::new(r"(?i)\bTPB\b|trade paperback|\bHC\b|hardcover").unwrap());
-        let vol_name = vol_data["name"].as_str().unwrap_or("");
-        if re_gn.is_match(vol_name) {
-            Some("GN")
-        } else if re_tpb.is_match(vol_name) {
-            Some("TPB")
-        } else if vol_data["count_of_issues"].as_i64() == Some(1) && cv_is_ended(&vol_data["end_year"]) {
-            Some("OneShot")
-        } else {
-            None
-        }
-    };
+    // format hints in the volume name, or a single-issue volume at least two calendar years old.
+    // NOTE: this function's own `current_year` parameter is actually the series' prior/fallback
+    // year (see its use above), not today's date -- the age gate needs the real wall-clock year.
+    let today_year: i32 = chrono::Utc::now().format("%Y").to_string().parse().unwrap_or(0);
+    let guessed_book_type: Option<&'static str> = guess_book_type_from_cv_volume(vol_data, today_year);
 
     let final_cover = resolve_cover(client, image_url.as_deref(), folder_path, current_cover, has_custom_cover, cover_source).await;
+
+    // Genre noise an earlier sync stored stays forever otherwise: the writes below only fill a blank
+    // (or skip an empty list). Removing noise only ever takes junk out, so it applies in every mode
+    // and to a locked series too. Done first, so a list that was all noise refills from the
+    // filtered volume list in this same sync.
+    let stored_genres: Option<String> = sqlx::query_scalar(r#"SELECT genres FROM "Series" WHERE id = $1"#)
+        .bind(series_id)
+        .fetch_optional(&db.pool)
+        .await
+        .ok()
+        .flatten()
+        .flatten();
+    let cleaned_genres = strip_genre_noise_json(stored_genres.clone());
+    if cleaned_genres != stored_genres {
+        if let Err(e) = sqlx::query(r#"UPDATE "Series" SET genres = $1 WHERE id = $2"#)
+            .bind(&cleaned_genres)
+            .bind(series_id)
+            .execute(&db.pool)
+            .await
+        {
+            log::warn!("[Metadata] Failed to strip genre noise from series {}: {:?}", series_name, e);
+        }
+    }
 
     // remoteCoverUrl keeps the original provider URL for external consumers (series.json) —
     // coverUrl becomes a local path. The bookType heuristic only fills a blank (never clobbers
@@ -801,9 +822,9 @@ async fn fetch_comicvine(
             None => {
                 let issue_resp = client.execute(issue_req).await?;
                 crate::api_usage::log(&db.pool, "comicvine", "https://comicvine.gamespot.com/api/issues/").await;
-                if issue_resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                if is_cv_rate_limited(issue_resp.status()) {
                     mark_flag(db, "cv_rate_limit_time").await;
-                    anyhow::bail!("ComicVine rate limited (429) on issues fetch");
+                    anyhow::bail!("ComicVine rate limited (429/420) on issues fetch");
                 }
                 let j: serde_json::Value = issue_resp.json().await?;
                 crate::metadata_cache::put(db, "comicvine", &issue_full_url, &j).await;
@@ -950,7 +971,9 @@ async fn fetch_comicvine(
             let desc_val = prefer_existing(existing_desc, cv_desc.clone(), is_locked, file_priority);
             // A custom issue cover (set in the Smart Matcher) survives every sync; else the provider's wins.
             let cover_val = if has_custom_cover { existing_cover } else { cv_cover.clone() };
-            // When locked keep existing genres; otherwise only (re)write when the volume has them and the issue doesn't yet.
+            // When locked keep existing genres; otherwise strip stored noise, then only (re)write when
+            // the volume has them and the issue doesn't (a list that was all noise counts as blank).
+            let existing_genres = if is_locked { existing_genres } else { strip_genre_noise_json(existing_genres) };
             let genres_val = if is_locked {
                 existing_genres
             } else if vol_genres_json.is_some() && existing_genres.is_none() {
@@ -1919,6 +1942,37 @@ pub(crate) fn resolve_pair_target(
     PairTarget::Insert
 }
 
+/// ComicVine signals its velocity/burst block with HTTP 420 (not 429) -- a separate throttle from
+/// the documented 200/hr quota that can trip even well under it. Treating only 429 as a rate limit
+/// let a 420 fall through to a JSON-parse error at every one of these call sites, counted as a
+/// plain per-request failure instead of the rate-limit halt it actually is, and kept hammering the
+/// just-blocked API instead of backing off.
+pub(crate) fn is_cv_rate_limited(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.as_u16() == 420
+}
+
+/// ComicVine "concepts" mix real genres and useful non-genre concepts (Time Travel, Martial Arts)
+/// with cover/variant tags ("Variant Cover: Action Figure", "Variant Theme: Civil War", "Homage
+/// Covers", "Marvel 25th Anniversary Frame Covers") that have no business in <Genre>. Those
+/// families are dropped; every other concept is kept. EXACT twin: src/lib/utils.ts isGenreNoise.
+pub(crate) fn is_genre_noise(name: &str) -> bool {
+    let n = name.trim().to_ascii_lowercase();
+    n.starts_with("variant ") || n.ends_with(" cover") || n.ends_with(" covers")
+}
+
+/// A stored genres JSON array with the noise entries removed; None when nothing else is left. A
+/// value that isn't a JSON string array, or holds no noise, comes back unchanged.
+/// EXACT twin: src/lib/utils.ts stripGenreNoise.
+pub(crate) fn strip_genre_noise_json(stored: Option<String>) -> Option<String> {
+    let s = stored?;
+    let Ok(list) = serde_json::from_str::<Vec<String>>(&s) else { return Some(s) };
+    if !list.iter().any(|g| is_genre_noise(g)) {
+        return Some(s);
+    }
+    let kept: Vec<String> = list.into_iter().filter(|g| !is_genre_noise(g)).collect();
+    if kept.is_empty() { None } else { serde_json::to_string(&kept).ok() }
+}
+
 /// Match-state a sync upsert should write: an issue the view-time lazy enrichment already deep-
 /// fetched keeps DEEP_SYNCED (so it is never redundantly re-fetched); everything else lands on
 /// MATCHED as before (issue #179).
@@ -1926,6 +1980,36 @@ pub(crate) fn next_match_state(existing: Option<String>) -> &'static str {
     if existing.as_deref() == Some("DEEP_SYNCED") { "DEEP_SYNCED" } else { "MATCHED" }
 }
 
+/// ComicVine has no format field, so the Mylar-spec bookType (Print/OneShot/TPB/GN -- what the
+/// admin UI's book-type filter queries) is a conservative guess from the volume itself: an
+/// explicit format word in its title, or ComicVine's own count_of_issues == 1 claiming it's a
+/// one-shot. NOT gated on end_year being set: checked every cached volume response from the
+/// 2026-09 deep sync (4,764 of them) and end_year was null on all of them, so a prior version of
+/// this guess that additionally required an "ended" signal from end_year could never produce
+/// OneShot at all -- ComicVine simply doesn't populate that field for this library's volumes.
+/// Review of #233: count_of_issues == 1 alone isn't enough either -- a series that just launched
+/// has one issue because #2 hasn't been solicited yet, not because it's a one-shot, and since
+/// bookType is fill-blank-only that guess is permanent. `current_year` gates it to a volume whose
+/// start_year is at least two calendar years back: one year would pass a volume that launched in
+/// December and syncs in January. Leaving it unset costs nothing, since every later sync re-checks
+/// a blank.
+pub(crate) fn guess_book_type_from_cv_volume(vol_data: &serde_json::Value, current_year: i32) -> Option<&'static str> {
+    static RE_GN: OnceLock<Regex> = OnceLock::new();
+    static RE_TPB: OnceLock<Regex> = OnceLock::new();
+    let re_gn = RE_GN.get_or_init(|| Regex::new(r"(?i)graphic novel|\bOGN\b").unwrap());
+    let re_tpb = RE_TPB.get_or_init(|| Regex::new(r"(?i)\bTPB\b|trade paperback|\bHC\b|hardcover").unwrap());
+    let vol_name = vol_data["name"].as_str().unwrap_or("");
+    if re_gn.is_match(vol_name) {
+        Some("GN")
+    } else if re_tpb.is_match(vol_name) {
+        Some("TPB")
+    } else if vol_data["count_of_issues"].as_i64() == Some(1) {
+        let start_year = vol_data["start_year"].as_str().and_then(|s| s.trim().parse::<i32>().ok()).unwrap_or(0);
+        if start_year > 0 && start_year <= current_year - 2 { Some("OneShot") } else { None }
+    } else {
+        None
+    }
+}
 /// Column-write policy for provider credit syncs (issue #179): a locked (hasCustomMetadata) issue
 /// keeps its value; an unlocked issue takes the provider's list only when the provider actually
 /// supplied one. An empty fetch NEVER overwrites existing data — the literal-'[]' writes this
@@ -2141,6 +2225,42 @@ pub(crate) fn is_same_issue(a: &str, b: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cv_velocity_block_420_counts_as_rate_limited() {
+        assert!(is_cv_rate_limited(reqwest::StatusCode::from_u16(420).unwrap()));
+        assert!(is_cv_rate_limited(reqwest::StatusCode::TOO_MANY_REQUESTS));
+        assert!(!is_cv_rate_limited(reqwest::StatusCode::OK));
+    }
+
+    #[test]
+    fn genre_noise_is_the_cover_and_variant_families_only() {
+        assert!(is_genre_noise("Variant Cover: Action Figure"));
+        assert!(is_genre_noise("Variant Theme: Civil War"));
+        assert!(is_genre_noise("Variant Exclusive: Marvel Unlimited"));
+        assert!(is_genre_noise(" variant artist: x "));
+        assert!(is_genre_noise("Homage Cover"));
+        assert!(is_genre_noise("Homage Covers"));
+        assert!(is_genre_noise("Marvel 25th Anniversary Frame Covers"));
+        // Real genres and useful non-genre concepts stay.
+        for keep in ["Superhero", "Science Fiction", "Time Travel", "Alternate Reality", "Martial Arts", "Variants", "Undercover", ""] {
+            assert!(!is_genre_noise(keep), "{keep}");
+        }
+    }
+
+    #[test]
+    fn strip_genre_noise_json_cleans_stored_lists() {
+        assert_eq!(
+            strip_genre_noise_json(Some(r#"["Superhero","Variant Cover: Photo","Time Travel","Homage Covers"]"#.to_string())),
+            Some(r#"["Superhero","Time Travel"]"#.to_string())
+        );
+        // All noise: nothing real left, so it reads as blank and the fill takes the filtered list.
+        assert_eq!(strip_genre_noise_json(Some(r#"["Variant Theme: Civil War"]"#.to_string())), None);
+        // No noise, or not a JSON list: untouched, byte for byte.
+        assert_eq!(strip_genre_noise_json(Some(r#"["Horror", "Crime"]"#.to_string())), Some(r#"["Horror", "Crime"]"#.to_string()));
+        assert_eq!(strip_genre_noise_json(Some("Horror, Crime".to_string())), Some("Horror, Crime".to_string()));
+        assert_eq!(strip_genre_noise_json(None), None);
+    }
 
     // ==== Issue #194: two concurrent syncs of the same series interleave non-idempotent issue
     // upserts and can cross-pair rows — the in-flight claim makes the later trigger skip. ====
@@ -2597,6 +2717,38 @@ mod tests {
         assert_eq!(next_match_state(Some("MATCHED".to_string())), "MATCHED");
         assert_eq!(next_match_state(Some("UNMATCHED".to_string())), "MATCHED");
         assert_eq!(next_match_state(None), "MATCHED");
+    }
+
+    #[test]
+    fn guesses_one_shot_from_count_of_issues_and_an_age_gate() {
+        // This is the real cached-response shape in this library (see the doc comment on
+        // guess_book_type_from_cv_volume) -- end_year null, count_of_issues 1. start_year 2017,
+        // evaluated as of 2026, clears the age gate.
+        let vol = serde_json::json!({"name": "Winter Soldier: Winter Kills", "count_of_issues": 1, "start_year": "2017", "end_year": null});
+        assert_eq!(guess_book_type_from_cv_volume(&vol, 2026), Some("OneShot"));
+    }
+
+    #[test]
+    fn a_recently_launched_single_issue_volume_is_not_yet_a_one_shot() {
+        // Review of #233: a series that launched THIS year has one issue because #2 hasn't been
+        // solicited yet, not because it's a one-shot -- and since bookType only ever fills a
+        // blank, a wrong guess here is permanent.
+        let vol = serde_json::json!({"name": "Brand New Series", "count_of_issues": 1, "start_year": "2026"});
+        assert_eq!(guess_book_type_from_cv_volume(&vol, 2026), None);
+        // Last calendar year is still too recent: a December launch synced in January.
+        let vol2 = serde_json::json!({"name": "Brand New Series", "count_of_issues": 1, "start_year": "2025"});
+        assert_eq!(guess_book_type_from_cv_volume(&vol2, 2026), None);
+        // Two calendar years back clears the gate.
+        let vol3 = serde_json::json!({"name": "Brand New Series", "count_of_issues": 1, "start_year": "2024"});
+        assert_eq!(guess_book_type_from_cv_volume(&vol3, 2026), Some("OneShot"));
+    }
+
+    #[test]
+    fn guesses_title_hints_before_falling_back_to_issue_count() {
+        assert_eq!(guess_book_type_from_cv_volume(&serde_json::json!({"name": "Batman: Graphic Novel", "count_of_issues": 1}), 2026), Some("GN"));
+        assert_eq!(guess_book_type_from_cv_volume(&serde_json::json!({"name": "Batman TPB", "count_of_issues": 12}), 2026), Some("TPB"));
+        assert_eq!(guess_book_type_from_cv_volume(&serde_json::json!({"name": "Batman", "count_of_issues": 700}), 2026), None);
+        assert_eq!(guess_book_type_from_cv_volume(&serde_json::json!({"name": "Batman"}), 2026), None, "missing count_of_issues must not be mistaken for 1");
     }
 
     #[test]

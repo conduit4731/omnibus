@@ -17,6 +17,7 @@ import {
 import { useToast } from "@/components/ui/use-toast"
 import { COMIC_EXT_REGEX } from "@/lib/utils/formats"
 import { SeriesLink } from "@/components/series-link"
+import { runBulk } from "@/lib/utils/bulk"
 import {
   Select,
   SelectContent,
@@ -27,7 +28,7 @@ import {
 
 // Fork: one table for tabs, filter and the status ring (label, statuses, ring colour)
 const STATUS_GROUPS: { tab: string, label: string, statuses: string[], color: string }[] = [
-  { tab: "ACTIVE", label: "Active / DL", statuses: ['DOWNLOADING', 'PENDING', 'MANUAL_DDL'], color: '#3b82f6' },
+  { tab: "ACTIVE", label: "Active / DL", statuses: ['DOWNLOADING', 'PENDING', 'MANUAL_DDL', 'IMPORTING'], color: '#3b82f6' }, // IMPORTING: upstream #240
   { tab: "PENDING_APPROVAL", label: "Pending", statuses: ['PENDING_APPROVAL'], color: '#f97316' },
   { tab: "UNRELEASED", label: "Unreleased", statuses: ['UNRELEASED'], color: '#a855f7' },
   { tab: "AWAITING", label: "Awaiting", statuses: ['AWAITING_RELEASE'], color: '#0ea5e9' },
@@ -45,7 +46,7 @@ const SORTS: Record<string, { label: string, cmp: (a: any, b: any) => number }> 
   status: { label: "Status", cmp: (a, b) => (a.status || '').localeCompare(b.status || '') },
 };
 const CANCELLABLE = ['PENDING_APPROVAL', 'PENDING', 'DOWNLOADING', 'MANUAL_DDL', 'UNRELEASED', 'AWAITING_RELEASE'];
-const statusLabel = (status: string) => status === 'PENDING_APPROVAL' ? 'Needs Approval' : status === 'MANUAL_DDL' ? 'GETCOMICS' : status === 'AWAITING_RELEASE' ? 'Awaiting' : status;
+const statusLabel = (status: string) => status === 'PENDING_APPROVAL' ? 'Needs Approval' : status === 'MANUAL_DDL' ? 'GETCOMICS' : status === 'AWAITING_RELEASE' ? 'Awaiting' : status === 'IMPORTING' ? 'Importing…' : status;
 
 // Fork: ring of all requests by status group; a click filters to that group
 function StatusRing({ requests, active, onSelect }: { requests: any[], active: string, onSelect: (tab: string) => void }) {
@@ -415,14 +416,21 @@ export default function RequestsPage() {
   const handleBulkCancel = async () => {
       setIsBulkCancelling(true);
       try {
-          const promises = Array.from(selectedRequests).map(id =>
-              fetch(`/api/request?id=${id}`, { method: 'DELETE' })
+          const ids = Array.from(selectedRequests);
+          const { succeeded, failed, firstError } = await runBulk(ids, id =>
+              fetch(`/api/request?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
           );
-          await Promise.all(promises);
-          toast({ title: "Requests Cancelled", description: `Successfully cancelled ${selectedRequests.size} requests.` });
-          setRequests(prev => prev.map(r => selectedRequests.has(r.id) ? { ...r, status: 'CANCELLED' } : r));
-          setSelectedRequests(new Set());
-          setIsSelectionMode(false);
+          // Only what the server accepted changes on screen; refused ones stay as they were, selected.
+          const cancelled = new Set(succeeded);
+          setRequests(prev => prev.map(r => cancelled.has(r.id) ? { ...r, status: 'CANCELLED' } : r));
+          if (failed.length === 0) {
+              toast({ title: "Requests Cancelled", description: `Cancelled ${succeeded.length} request${succeeded.length === 1 ? '' : 's'}.` });
+              setSelectedRequests(new Set());
+              setIsSelectionMode(false);
+          } else {
+              toast({ title: `${failed.length} of ${ids.length} cancellations failed`, description: firstError ?? undefined, variant: "destructive" });
+              setSelectedRequests(new Set(failed));
+          }
       } catch (e) {
           toast({ title: "Error cancelling requests", variant: "destructive" });
       } finally {
@@ -447,6 +455,12 @@ export default function RequestsPage() {
       case 'FAILED': case 'STALLED': case 'ERROR': return "bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800"
       case 'UNRELEASED': return "bg-purple-100 text-purple-800 border-purple-200 dark:bg-purple-900/30 dark:text-purple-400 dark:border-purple-800"
       case 'AWAITING_RELEASE': return "bg-sky-100 text-sky-800 border-sky-200 dark:bg-sky-900/30 dark:text-sky-400 dark:border-sky-800"
+      // #240 PR B: the pack is in the watched folder and the sweep has not reported back yet —
+      // still active work, and deliberately not an arrival.
+      case 'IMPORTING': return "bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-800"
+      // #240: the pack this issue came in was already consumed but the issue never reached the
+      // library — a person has to look at it, so it reads as "attention", not as a failure.
+      case 'NEEDS_REVIEW': return "bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400 dark:border-yellow-800"
       default: return "bg-muted text-foreground border-border"
     }
   }

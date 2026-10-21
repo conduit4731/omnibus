@@ -4,7 +4,7 @@ import { prisma } from '@/lib/db';
 import fs from 'fs-extra';
 import path from 'path';
 import { Logger } from './logger';
-import { parseComicVineCredits } from '@/lib/utils';
+import { parseComicVineCredits, stripGenreNoise } from '@/lib/utils';
 import { getErrorMessage } from './utils/error';
 import { MetronProvider } from './metadata/providers/metron';
 import { omnibusQueue } from './queue';
@@ -18,6 +18,13 @@ import { resolveSyncedName, detailNameWrite } from '@/lib/utils/synced-name';
 import { findLocalCoverBasename, providerCoverBlocked } from '@/lib/utils/cover-plan';
 import { CV_VOLUME_CREDIT_FIELDS, parseVolumeCredits, persistSeriesCredits } from '@/lib/utils/volume-credits';
 
+// ComicVine signals its velocity/burst block with HTTP 420 (not 429) -- a separate throttle from
+// the documented 200/hr quota that can trip even well under it. Engine parity: metadata.rs
+// is_cv_rate_limited.
+export function isCvRateLimited(status: number | undefined): boolean {
+    return status === 429 || status === 420;
+}
+
 // Providers rarely report when a series ends, so Omnibus guesses: no new issue
 // within the admin-configured window (months) = Ended. Returns null when the
 // guess is disabled (window of 0 / "Never").
@@ -27,6 +34,28 @@ async function getSeriesEndedCutoff(): Promise<{ cutoffMs: number, months: numbe
     const months = isNaN(parsed) ? 18 : parsed;
     if (months <= 0) return null;
     return { cutoffMs: Date.now() - Math.round(months * 30.44 * 24 * 60 * 60 * 1000), months };
+}
+
+/**
+ * ComicVine has no format field, so book type is a conservative guess: an explicit format word in
+ * the volume name, or a single-issue volume = one-shot. ComicVine leaves end_year null on nearly
+ * every volume, so it can't be the "finished" signal; instead the volume must have started at
+ * least two calendar years back, since a series that just launched also has one issue until #2
+ * ships (one year would pass a December launch synced in January), and bookType is only ever
+ * filled when blank. Engine twin: guess_book_type_from_cv_volume.
+ */
+export function guessBookTypeFromCvVolume(
+    volData: { name?: string | null; count_of_issues?: number | null; start_year?: string | number | null },
+    currentYear: number,
+): string | null {
+    const volName = volData.name || '';
+    if (/graphic novel|\bOGN\b/i.test(volName)) return 'GN';
+    if (/\bTPB\b|trade paperback|\bHC\b|hardcover/i.test(volName)) return 'TPB';
+    if (volData.count_of_issues === 1) {
+        const startYear = parseInt(String(volData.start_year ?? ''), 10);
+        return startYear > 0 && startYear <= currentYear - 2 ? 'OneShot' : null;
+    }
+    return null;
 }
 
 export async function syncSeriesMetadata(metadataId: string, folderPath: string, metadataSource: string = 'COMICVINE') {
@@ -329,7 +358,7 @@ export async function syncSeriesMetadata(metadataId: string, folderPath: string,
             timeout: 15000
         });
     } catch (e: any) {
-        if (e.response?.status === 429) await markSystemFlag('cv_rate_limit_time');
+        if (isCvRateLimited(e.response?.status)) await markSystemFlag('cv_rate_limit_time');
         throw e;
     }
 
@@ -380,13 +409,7 @@ export async function syncSeriesMetadata(metadataId: string, folderPath: string,
         }
     }
 
-    // ComicVine has no format field, so book type is a conservative guess: explicit
-    // format hints in the volume name, or a finished single-issue volume = one-shot
-    let guessedBookType: string | null = null;
-    const volName = volData.name || '';
-    if (/graphic novel|\bOGN\b/i.test(volName)) guessedBookType = 'GN';
-    else if (/\bTPB\b|trade paperback|\bHC\b|hardcover/i.test(volName)) guessedBookType = 'TPB';
-    else if (volData.count_of_issues === 1 && volData.end_year) guessedBookType = 'OneShot';
+    const guessedBookType = guessBookTypeFromCvVolume(volData, new Date().getFullYear());
 
     await prisma.series.update({
         where: { id: series.id },
@@ -402,6 +425,9 @@ export async function syncSeriesMetadata(metadataId: string, folderPath: string,
             ...(imageUrl ? { remoteCoverUrl: imageUrl } : {}),
             // Heuristic only fills a blank — never clobber a manual categorization
             ...(guessedBookType && !series.bookType ? { bookType: guessedBookType } : {}),
+            // Genre noise an earlier sync stored stays forever otherwise; removing it only takes
+            // junk out, so it applies to a locked series too (engine parity).
+            ...(stripGenreNoise(series.genres) !== (series.genres ?? null) ? { genres: stripGenreNoise(series.genres) } : {}),
             status: volData.end_year ? 'Ended' : 'Ongoing'
         }
     });
@@ -450,7 +476,7 @@ export async function syncSeriesMetadata(metadataId: string, folderPath: string,
             });
             issuesCallsMade++;
         } catch (e: any) {
-            if (e.response?.status === 429) await markSystemFlag('cv_rate_limit_time');
+            if (isCvRateLimited(e.response?.status)) await markSystemFlag('cv_rate_limit_time');
             throw e;
         }
 
@@ -512,7 +538,12 @@ export async function syncSeriesMetadata(metadataId: string, folderPath: string,
             };
 
             const dynamicPayload: any = { ...issueDataPayload };
-            if (volGenres.length > 0 && (!targetRecord || !(targetRecord as any).genres || healId)) {
+            // An unlocked issue sheds stored genre noise; a list that was all noise counts as blank
+            // and refills from the filtered volume list below (engine parity).
+            const storedGenres: string | null = (targetRecord as any)?.genres ?? null;
+            const keptGenres = isLocked ? storedGenres : stripGenreNoise(storedGenres);
+            if (keptGenres !== storedGenres) dynamicPayload.genres = keptGenres;
+            if (volGenres.length > 0 && (!targetRecord || !keptGenres || healId)) {
                 dynamicPayload.genres = JSON.stringify(volGenres);
             }
             // A healed row's enrichment-era fields belonged to the WRONG issue — reset the credit
