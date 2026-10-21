@@ -1354,7 +1354,7 @@ function LibraryContent() {
               context={{ isSelectionMode, selectedSeries, toggleSeriesSelection }}
               components={LIST_TABLE_COMPONENTS}
               fixedHeaderContent={() => (
-                <tr>{isSelectionMode && <th className="w-12 px-4 py-3 text-center">Select</th>}<th className="w-16 px-4 py-3 text-center">Cover</th><th className="px-4 py-3">Series Name</th><th className="px-4 py-3 hidden md:table-cell">Publisher</th><th className="px-4 py-3 hidden sm:table-cell text-center">Year</th><th className="px-4 py-3 text-center">Issues</th>{!isSelectionMode && <th className="px-4 py-3 text-right">Actions</th>}</tr>
+                <tr>{isSelectionMode && <th className="w-12 px-4 py-3 text-center">Select</th>}<th className="w-16 px-4 py-3 text-center">Cover</th><th className="px-4 py-3">Series Name</th><th className="px-4 py-3 hidden md:table-cell">Publisher</th><th className="px-4 py-3 hidden sm:table-cell text-center">Year</th><th className="px-4 py-3 text-center">Issues</th><th className="px-3 py-3 text-center">Read</th><th className="px-3 py-3 text-center hidden md:table-cell">Collection</th><th className="px-3 py-3 text-center hidden md:table-cell">Status</th><th className="px-3 py-3 text-center hidden lg:table-cell">Monitored</th>{!isSelectionMode && <th className="px-4 py-3 text-right">Actions</th>}</tr>
               )}
               itemContent={(_, item: LibrarySeries) => {
                   const unread = item.unreadCount !== undefined ? item.unreadCount : item.count;
@@ -1405,12 +1405,6 @@ function LibraryContent() {
                                     </button>
                                 )}
                                 {!isSelectionMode && (<button aria-label={item.isFavorite ? `Remove ${item.name} from favorites` : `Add ${item.name} to favorites`} onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleFavorite(item.id, item.isFavorite); }} className={cn("transition-colors focus:outline-none p-2 -m-2", item.isFavorite ? "text-primary" : "text-muted-foreground/50 hover:text-primary opacity-100 sm:opacity-0 sm:group-hover:opacity-100")}><Heart className={cn("w-4 h-4 sm:w-3.5 sm:h-3.5", item.isFavorite && "fill-current")} /></button>)}
-                                
-                                {item.monitored && (
-                                    <Badge className="shrink-0 bg-emerald-600 hover:bg-emerald-600 text-white border-0 text-[9px] px-1.5 h-4 uppercase tracking-wider flex items-center">
-                                        <Activity className="w-2.5 h-2.5 mr-1" /> Monitored
-                                    </Badge>
-                                )}
                             </div>
                         </td>
                         <td className="px-4 py-3 text-muted-foreground hidden md:table-cell" title={item.publisher || 'Unknown'}>{item.publisher || 'Unknown'}</td>
@@ -1421,14 +1415,26 @@ function LibraryContent() {
                             ) : item.matchState === 'UNMATCHED' ? (
                                 <Badge className="bg-orange-500 hover:bg-orange-600 text-white border-0 text-[9px] px-1.5 h-4 uppercase tracking-wider">Unmatched</Badge>
                             ) : (
-                                <div className="flex flex-wrap items-center justify-center gap-1.5">
-                                    <Badge variant="secondary" className="font-mono bg-muted border-border" title={`${item.count} of ${item.released ?? item.count} released issues in your library`}>{issuesLabel(item)}</Badge>
-                                    <SeriesStateBadges item={item} />
-                                    {unread > 0 && !isCompleted && (
-                                        <Badge className="bg-primary/20 text-primary border-0 font-bold uppercase tracking-wider text-[10px]">{unread === item.count ? 'Unread' : `${unread} Left`}</Badge>
-                                    )}
-                                </div>
+                                <Badge variant="secondary" className="font-mono bg-muted border-border" title={`${item.count} of ${item.released ?? item.count} released issues in your library`}>{issuesLabel(item)}</Badge>
                             )}
+                        </td>
+                        {/* Fork: one column per state instead of a pile of badges in "Issues" */}
+                        <td className="px-3 py-3 text-center">
+                            {isCompleted ? <Badge className="bg-green-600 hover:bg-green-600 text-white border-0 text-[10px] font-bold uppercase tracking-wider"><Check className="w-3 h-3 mr-1" />Read</Badge>
+                              : unread > 0 ? <Badge className="bg-primary/20 text-primary border-0 font-bold uppercase tracking-wider text-[10px]">{unread === item.count ? 'Unread' : `${unread} Left`}</Badge>
+                              : <span className="text-muted-foreground">–</span>}
+                        </td>
+                        <td className="px-3 py-3 text-center hidden md:table-cell">
+                            {item.complete ? <Badge className="bg-violet-600 hover:bg-violet-600 text-white border-0 text-[10px] font-bold uppercase tracking-wider">Complete</Badge>
+                              : /^\d+$/.test(item.metadataId || '') && (item.released || 0) > item.count ? <span className="text-xs font-bold text-orange-600 dark:text-orange-400">{(item.released || 0) - item.count} missing</span>
+                              : <span className="text-muted-foreground">–</span>}
+                        </td>
+                        <td className="px-3 py-3 text-center hidden md:table-cell">
+                            {item.status ? <Badge className={cn("border-0 text-[10px] font-bold uppercase tracking-wider text-white", /ended|completed|cancel/i.test(item.status) ? "bg-zinc-600 hover:bg-zinc-600" : "bg-sky-600 hover:bg-sky-600")}>{/ended|completed|cancel/i.test(item.status) ? 'Ended' : 'Ongoing'}</Badge>
+                              : <span className="text-muted-foreground">–</span>}
+                        </td>
+                        <td className="px-3 py-3 text-center hidden lg:table-cell">
+                            {item.monitored ? <Activity className="w-4 h-4 text-emerald-600 mx-auto" aria-label="Monitored" /> : <span className="text-muted-foreground">–</span>}
                         </td>
                         {!isSelectionMode && (
                             <td className="px-4 py-3 text-right">
