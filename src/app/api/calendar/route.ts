@@ -75,8 +75,15 @@ export async function GET(request: Request) {
         const end = new Date(start);
         end.setUTCDate(start.getUTCDate() + 6); 
 
-        const startDateStr = start.toISOString().split('T')[0];
-        const endDateStr = end.toISOString().split('T')[0];
+        let startDateStr = start.toISOString().split('T')[0];
+        let endDateStr = end.toISOString().split('T')[0];
+        // Fork: day / month / year calendar views ask for an explicit range (from/to, at most ~13 months)
+        const from = searchParams.get('from'), to = searchParams.get('to');
+        const isDate = (d: string | null): d is string => !!d && /^\d{4}-\d{2}-\d{2}$/.test(d);
+        if (isDate(from) && isDate(to) && from <= to && Date.parse(to) - Date.parse(from) <= 400 * 86400000) {
+            startDateStr = from;
+            endDateStr = to;
+        }
 
         const upcoming = await prisma.issue.findMany({
             where: {

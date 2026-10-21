@@ -14,6 +14,8 @@ import { useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
 import { FollowBell } from "@/components/follow-bell"
 import { hasMetronCredentials } from "@/lib/metron/credentials"
+import { ReleaseCalendar } from "@/components/release-calendar"
+import type { CalendarView } from "@/lib/calendar-range"
 
 interface UpcomingIssue {
     id: string | number;
@@ -43,6 +45,8 @@ export default function CalendarPage() {
     // tracked and global tabs keep their values ("my-pulls" predates the personal tab; renaming
     // tab values is a load-bearing change we don't need).
     const [activeTab, setActiveTab] = useState("personal-pulls");
+    // Fork: real calendar (day / week / month / year) or the original weekly list
+    const [calView, setCalView] = useState<CalendarView | "list">("month");
     const [metronConfigured, setMetronConfigured] = useState<boolean | null>(null);
     
     // Local Tracked State
@@ -358,14 +362,21 @@ export default function CalendarPage() {
             </div>
 
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                <TabsList className="bg-muted border border-border mb-6">
+                <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+                <TabsList className="bg-muted border border-border">
                     <TabsTrigger value="personal-pulls" className="font-bold">My Pull List</TabsTrigger>
                     <TabsTrigger value="my-pulls" className="font-bold">Omnibus Tracked Series</TabsTrigger>
                     <TabsTrigger value="global-pulls" className="font-bold">Global Pull List</TabsTrigger>
                 </TabsList>
+                <div className="flex gap-1 bg-muted p-1 rounded-md border border-border">
+                    <Button size="sm" variant={calView === "list" ? "default" : "ghost"} className="h-8 px-3 font-bold" onClick={() => setCalView("list")}>List</Button>
+                    <Button size="sm" variant={calView !== "list" ? "default" : "ghost"} className="h-8 px-3 font-bold" onClick={() => calView === "list" && setCalView("month")}>Calendar</Button>
+                </div>
+                </div>
 
                 {/* TAB 0: MY PULL LIST — releases in series the user follows */}
                 <TabsContent value="personal-pulls" className="space-y-6 animate-in fade-in duration-300">
+                    {calView !== "list" ? <ReleaseCalendar source="followed" view={calView} onViewChange={setCalView} /> : (<>
                     <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-muted/50 p-4 rounded-xl border border-border">
                         <div className="flex items-center gap-2">
                             <Button variant="outline" size="sm" onClick={() => setPersonalWeekOffset(w => w - 1)} disabled={loadingPersonal} className="border-border">
@@ -397,10 +408,12 @@ export default function CalendarPage() {
                     ) : (
                         renderReleaseGroups(groupedPersonalIssues)
                     )}
+                    </>)}
                 </TabsContent>
 
                 {/* TAB 1: MY TRACKED SERIES */}
                 <TabsContent value="my-pulls" className="space-y-6 animate-in fade-in duration-300">
+                    {calView !== "list" ? <ReleaseCalendar source="tracked" view={calView} onViewChange={setCalView} /> : (<>
                     <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-muted/50 p-4 rounded-xl border border-border">
                         <div className="flex items-center gap-2">
                             <Button variant="outline" size="sm" onClick={() => setLocalWeekOffset(w => w - 1)} disabled={loadingLocal} className="border-border">
@@ -432,10 +445,12 @@ export default function CalendarPage() {
                     ) : (
                         renderReleaseGroups(groupedLocalIssues)
                     )}
+                    </>)}
                 </TabsContent>
 
                 {/* TAB 2: GLOBAL PULL LIST */}
                 <TabsContent value="global-pulls" className="space-y-6 animate-in fade-in duration-300">
+                    {calView !== "list" ? <ReleaseCalendar source="global" view={calView} onViewChange={setCalView} /> : (<>
                     <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-muted/50 p-4 rounded-xl border border-border">
                         <div className="flex items-center gap-2">
                             <Button variant="outline" size="sm" onClick={() => setWeekOffset(w => w - 1)} disabled={loadingGlobal} className="border-border">
@@ -646,6 +661,7 @@ export default function CalendarPage() {
                             </div>
                         ))
                     )}
+                    </>)}
                 </TabsContent>
             </Tabs>
 
