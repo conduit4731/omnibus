@@ -308,8 +308,18 @@ function SeriesContent() {
       .then(r => r.ok ? r.json() : null).then(d => d && setSeriesLists(d)).catch(() => {})
   }, [seriesInfo.id])
 
-  const sortedDownloaded = useMemo(() => sortIssuesForDisplay(downloadedIssues, sortMode), [downloadedIssues, sortMode]);
-  const sortedMissing = useMemo(() => sortIssuesForDisplay(missingIssues, sortMode), [missingIssues, sortMode]);
+  // Fork: filter both issue lists to one era / event chip ("era:New 52", "event:Zero Year")
+  const [chipFilter, setChipFilter] = useState<string | null>(null);
+  const byChip = <T extends { id: string }>(list: T[]) => chipFilter ? list.filter(i => seriesLists.byIssue[i.id]?.some(c => chipKey(c) === chipFilter)) : list;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- byChip only reads chipFilter and seriesLists
+  const sortedDownloaded = useMemo(() => byChip(sortIssuesForDisplay(downloadedIssues, sortMode)), [downloadedIssues, sortMode, chipFilter, seriesLists]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- byChip only reads chipFilter and seriesLists
+  const sortedMissing = useMemo(() => byChip(sortIssuesForDisplay(missingIssues, sortMode)), [missingIssues, sortMode, chipFilter, seriesLists]);
+  const chipOptions = useMemo(() => {
+    const m = new Map<string, IssueChip>();
+    for (const cs of Object.values(seriesLists.byIssue)) for (const c of cs) m.set(chipKey(c), c);
+    return [...m.values()].sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));
+  }, [seriesLists]);
 
   useEffect(() => {
     if (!folderPath) return;
@@ -422,10 +432,6 @@ function SeriesContent() {
   const colorists = activeIssue?.colorists || [];
   const letterers = activeIssue?.letterers || [];
   const characters = activeIssue?.characters || [];
-  // Issue genres when the selected issue has them; otherwise fall back to the series-level genres
-  // (Metron series genres / CV volume concepts, issue #180) so the chips aren't blank for
-  // freshly-synced or Metron-sourced libraries.
-  const genres = (activeIssue?.genres?.length ? activeIssue.genres : seriesInfo.genres) || [];
   const storyArcs = activeIssue?.storyArcs || [];
   const teams = activeIssue?.teams || [];
   const locations = activeIssue?.locations || [];
@@ -566,7 +572,8 @@ function SeriesContent() {
     }
   };
 
-  const handleRequestMissing = async (issue: any) => {
+  // directSource 'getcomics' (fork button per missing issue): Omnibus' GetComics DDL path only, no indexers
+  const handleRequestMissing = async (issue: any, directSource?: 'getcomics') => {
         if (!canRequest) {
             toast({ title: "Requests not enabled", description: "Ask an admin to grant you the Request permission.", variant: "destructive" });
             return;
@@ -592,7 +599,8 @@ function SeriesContent() {
                   publisher: seriesInfo.publisher || "Unknown",
                   image: issue.coverUrl || seriesInfo.cover,
                   issueNumber: reqNum || undefined,
-                  metadataSource: seriesInfo.metadataSource
+                  metadataSource: seriesInfo.metadataSource,
+                  directSource
               })
           });
           if (res.ok) {
@@ -1546,18 +1554,7 @@ function SeriesContent() {
         </div>
     )}
 
-    {genres.length > 0 && (
-        <div className="space-y-2 mt-4 pt-4 border-t border-border">
-            <h4 className="font-semibold flex items-center gap-2 text-sm text-foreground"><Tags className="w-4 h-4 text-primary"/> Genres & Concepts</h4>
-            <div className="flex flex-wrap gap-1.5">
-                {genres.map((genre: string) => (
-                    <Link key={genre} href={`/library?q=${encodeURIComponent(`genre:"${genre}"`)}`}>
-                        <Badge variant="outline" className="font-medium text-[10px] bg-background text-muted-foreground border-border hover:bg-muted hover:text-foreground cursor-pointer">{genre}</Badge>
-                    </Link>
-                ))}
-            </div>
-        </div>
-    )}
+    {/* Fork: "Genres & Concepts" removed — dozens of ComicVine concepts on long series, nobody reads them */}
 
     {storyArcs.length > 0 && (
         <div className="space-y-2 mt-4 pt-4 border-t border-border">
@@ -1888,6 +1885,13 @@ function SeriesContent() {
                               </Button>
                           );
                       })()}
+                      {chipOptions.length > 0 && (
+                          <select value={chipFilter ?? ""} onChange={e => setChipFilter(e.target.value || null)} aria-label="Filter by era or event"
+                              className={cn("h-10 rounded-md border px-2 text-xs font-bold bg-background shadow-sm max-w-[200px]", chipFilter ? "border-primary text-primary" : "border-border")}>
+                              <option value="">All eras &amp; events</option>
+                              {chipOptions.map(c => <option key={chipKey(c)} value={chipKey(c)}>{c.kind === 'era' ? 'Era' : 'Event'}: {c.name}</option>)}
+                          </select>
+                      )}
                       <div className="flex items-center gap-1 border border-border rounded-md p-1 bg-background shadow-sm shrink-0">
                           <Button variant={isSelectionMode ? "secondary" : "ghost"} size="sm" className="h-8 px-2 text-xs font-bold" onClick={() => { setIsSelectionMode(!isSelectionMode); setSelectedIssues(new Set()); }}>
                               {isSelectionMode ? <Square className="w-4 h-4 sm:mr-1" /> : <CheckSquare className="w-4 h-4 sm:mr-1" />}
@@ -1973,6 +1977,8 @@ function SeriesContent() {
                                           {isSelectionMode && <th className="w-12 px-4 py-3 text-center">Select</th>}
                                           <th className="w-16 px-4 py-3 text-center">Cover</th>
                                           <th className="px-4 py-3">Issue</th>
+                                          <th className="px-3 py-3 hidden md:table-cell">Era</th>
+                                          <th className="px-3 py-3 hidden md:table-cell">Events</th>
                                           <th className="px-4 py-3 text-center">Progress</th>
                                           <th className="px-4 py-3 text-right">Actions</th>
                                       </tr>
@@ -2008,9 +2014,11 @@ function SeriesContent() {
                                                       </div>
                                                   </td>
                                                   <td className="px-4 py-3 font-bold">
-                                                      <div className={cn("line-clamp-2 leading-tight", isRead ? 'text-muted-foreground' : 'text-foreground')}>{issue.name}</div><ListChips lists={seriesLists.byIssue[issue.id]} />
+                                                      <div className={cn("line-clamp-2 leading-tight", isRead ? 'text-muted-foreground' : 'text-foreground')}>{issue.name}</div>
                                                       {issue.parsedNum !== null && <div className="text-[10px] mt-1 font-black text-muted-foreground uppercase tracking-widest">{laneLabel(issue)} #{issue.parsedNum}</div>}
                                                   </td>
+                                                  <ChipCell chips={seriesLists.byIssue[issue.id]} kind="era" active={chipFilter} onPick={setChipFilter} />
+                                                  <ChipCell chips={seriesLists.byIssue[issue.id]} kind="event" active={chipFilter} onPick={setChipFilter} />
                                                   <td className="px-4 py-3 text-center">
                                                       {isRead ? <Badge className="bg-green-600 border-0 text-[9px] px-1 h-4"><Check className="w-3 h-3 mr-1"/> Read</Badge> : issue.readProgress > 0 ? <Badge className="bg-primary border-0 text-primary-foreground text-[9px] px-1 h-4">{Math.round(issue.readProgress)}%</Badge> : <span className="text-muted-foreground text-xs">-</span>}
                                                   </td>
@@ -2089,7 +2097,14 @@ function SeriesContent() {
               {/* --- MISSING ISSUES SECTION --- */}
               {seriesInfo.cvId && (
                   <div className="space-y-6 pt-4 border-t-2 border-border">
-                      <h4 className="font-black flex items-center gap-2 text-xl text-muted-foreground opacity-80 tracking-tight"><CloudOff className="w-6 h-6"/> Missing Issues ({missingIssues.length})</h4>
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                          <h4 className="font-black flex items-center gap-2 text-xl text-muted-foreground opacity-80 tracking-tight"><CloudOff className="w-6 h-6"/> Missing Issues ({missingIssues.length})</h4>
+                          {canRequest && missingIssues.length > 0 && (
+                              <Button size="sm" className="font-bold" disabled={isBulkDownloading} onClick={handleDownloadAllMissing}>
+                                  {isBulkDownloading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <DownloadCloud className="w-4 h-4 mr-2" />} Request all ({missingIssues.length})
+                              </Button>
+                          )}
+                      </div>
                       
                       {missingIssues.length === 0 ? (
                           <div className="p-10 text-center border border-dashed border-green-200 bg-green-50/20 dark:border-green-900/30 dark:bg-green-900/10 rounded-2xl flex flex-col items-center justify-center transition-all hover:bg-green-50/30">
@@ -2110,7 +2125,7 @@ function SeriesContent() {
                                         <div className="w-20 h-28 shrink-0 rounded-md overflow-hidden bg-muted border border-border grayscale">{issue.coverUrl || seriesInfo.cover ? <img src={issue.coverUrl || seriesInfo.cover} onError={coverImgError(seriesInfo.cover)} className="w-full h-full object-cover" alt="" /> : <ImageIcon className="w-8 h-8 m-auto mt-10 text-muted-foreground/50" />}</div>
                                         <div className="flex flex-col justify-between flex-1 py-1 min-w-0">
                                             <div><h5 className="font-bold text-base line-clamp-2 text-foreground leading-tight">{issue.name}</h5><span className="text-[10px] mt-1 font-black text-muted-foreground uppercase tracking-widest">{laneLabel(issue)} #{issue.parsedNum}</span><ReleaseInfo date={issue.releaseDate} /><ListChips lists={seriesLists.byIssue[issue.id]} /></div>
-                                            <div className="flex flex-wrap items-center gap-2 mt-3">{isAlreadyRequested ? <Button size="sm" variant="secondary" disabled className="flex-1 h-9 bg-green-50 text-green-700 dark:bg-green-900/20 border-green-200 opacity-100 cursor-not-allowed"><Check className="w-4 h-4 mr-2"/> Queued</Button> : <Button size="sm" variant="outline" className="flex-1 h-9 font-black text-[10px] border-border hover:bg-muted uppercase tracking-wider min-w-[80px]" onClick={(e) => { e.stopPropagation(); handleRequestMissing(issue); }} disabled={isRequesting}>{isRequesting ? <Loader2 className="w-4 h-4 animate-spin mr-2"/> : <CloudDownload className="w-4 h-4 mr-2"/>}Request</Button>}</div>
+                                            <div className="flex flex-wrap items-center gap-2 mt-3">{isAlreadyRequested ? <Button size="sm" variant="secondary" disabled className="flex-1 h-9 bg-green-50 text-green-700 dark:bg-green-900/20 border-green-200 opacity-100 cursor-not-allowed"><Check className="w-4 h-4 mr-2"/> Queued</Button> : <Button size="sm" variant="outline" className="flex-1 h-9 font-black text-[10px] border-border hover:bg-muted uppercase tracking-wider min-w-[80px]" onClick={(e) => { e.stopPropagation(); handleRequestMissing(issue); }} disabled={isRequesting}>{isRequesting ? <Loader2 className="w-4 h-4 animate-spin mr-2"/> : <CloudDownload className="w-4 h-4 mr-2"/>}Request</Button>}<DirectSources onGetComics={() => handleRequestMissing(issue, 'getcomics')} disabled={isRequesting || isAlreadyRequested} seriesName={seriesInfo.name} /></div>
                                         </div>
                                       </div>
                                   );
@@ -2124,6 +2139,8 @@ function SeriesContent() {
                                           <tr>
                                               <th className="w-16 px-4 py-3 text-center">Cover</th>
                                               <th className="px-4 py-3">Issue</th>
+                                              <th className="px-3 py-3 hidden md:table-cell">Era</th>
+                                              <th className="px-3 py-3 hidden md:table-cell">Events</th>
                                               <th className="px-4 py-3 text-right">Actions</th>
                                           </tr>
                                       </thead>
@@ -2139,10 +2156,12 @@ function SeriesContent() {
                                                           </div>
                                                       </td>
                                                       <td className="px-4 py-3 font-bold">
-                                                          <div className="line-clamp-2 leading-tight text-foreground">{issue.name}</div><ListChips lists={seriesLists.byIssue[issue.id]} />
+                                                          <div className="line-clamp-2 leading-tight text-foreground">{issue.name}</div>
                                                           {issue.parsedNum !== null && <div className="text-[10px] mt-1 font-black text-muted-foreground uppercase tracking-widest">{laneLabel(issue)} #{issue.parsedNum}</div>}
                                                           <ReleaseInfo date={issue.releaseDate} />
                                                       </td>
+                                                      <ChipCell chips={seriesLists.byIssue[issue.id]} kind="era" active={chipFilter} onPick={setChipFilter} />
+                                                      <ChipCell chips={seriesLists.byIssue[issue.id]} kind="event" active={chipFilter} onPick={setChipFilter} />
                                                       <td className="px-4 py-3 text-right">
                                                           {isAlreadyRequested ? (
                                                               <Button size="sm" variant="secondary" disabled className="h-8 bg-green-50 text-green-700 dark:bg-green-900/20 border-green-200 opacity-100 cursor-not-allowed">
@@ -2153,6 +2172,7 @@ function SeriesContent() {
                                                                   {isRequesting ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1"/> : <CloudDownload className="w-3.5 h-3.5 mr-1"/>} Request
                                                               </Button>
                                                           )}
+                                                          <div className="inline-flex ml-1.5 align-middle"><DirectSources onGetComics={() => handleRequestMissing(issue, 'getcomics')} disabled={isRequesting || isAlreadyRequested} seriesName={seriesInfo.name} /></div>
                                                       </td>
                                                   </tr>
                                               )
@@ -2712,6 +2732,38 @@ function SeriesContent() {
           </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+// Fork: per missing issue — GetComics only (Omnibus' DDL path, no indexers) and a Batcave search to download
+// by hand into ~/batcave (the Mac sync + omnibus-match.sh file it). Batcave runs DataLife Engine: search by GET.
+function DirectSources({ onGetComics, disabled, seriesName }: { onGetComics: () => void, disabled: boolean, seriesName: string }) {
+  return (
+    <div className="flex gap-1.5">
+      <Button size="sm" variant="outline" className="h-8 px-2 font-bold text-[10px] uppercase tracking-wider border-border" title="Request from GetComics only"
+        disabled={disabled} onClick={e => { e.stopPropagation(); onGetComics() }}>GetComics</Button>
+      <Button size="sm" variant="outline" className="h-8 px-2 font-bold text-[10px] uppercase tracking-wider border-border" title="Find this series on Batcave and download it into ~/batcave" asChild>
+        <a href={`https://batcave.biz/index.php?do=search&subaction=search&story=${encodeURIComponent(seriesName)}`} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>Batcave</a>
+      </Button>
+    </div>
+  )
+}
+
+// Fork: era / events of an issue as table cells; a click filters the issue lists to that chip
+const chipKey = (c: IssueChip) => `${c.kind}:${c.name}`
+function ChipCell({ chips, kind, active, onPick }: { chips?: IssueChip[], kind: IssueChip['kind'], active: string | null, onPick: (key: string | null) => void }) {
+  const mine = (chips || []).filter(c => c.kind === kind)
+  return (
+    <td className="px-3 py-3 hidden md:table-cell">
+      <div className="flex flex-wrap gap-1">
+        {mine.map(c => (
+          <button key={c.href} title={active === chipKey(c) ? "Show all issues" : `Only issues in ${c.name}`}
+            onClick={e => { e.stopPropagation(); onPick(active === chipKey(c) ? null : chipKey(c)) }}
+            className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded truncate max-w-[160px]",
+              active === chipKey(c) ? "bg-primary text-primary-foreground" : kind === 'era' ? "bg-muted text-muted-foreground hover:text-foreground" : "bg-primary/10 text-primary hover:bg-primary/20")}>{c.name}</button>
+        ))}
+      </div>
+    </td>
   )
 }
 
