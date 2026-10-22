@@ -62,7 +62,8 @@ interface Issue {
 
 
 // variant "header": a search icon in the site header (fork) — same results dialog, the input in a small dialog
-export function RequestSearch({ variant = 'home' }: { variant?: 'home' | 'header' } = {}) {
+// variant "find": a small "Find" button that searches for `query` right away (reading list: series not in the library)
+export function RequestSearch({ variant = 'home', query }: { variant?: 'home' | 'header' | 'find', query?: string } = {}) {
   const router = useRouter()
   const [askOpen, setAskOpen] = useState(false)
   const { data: session } = useSession()
@@ -116,9 +117,10 @@ export function RequestSearch({ variant = 'home' }: { variant?: 'home' | 'header
       toast({ title: "Subscribed", description: "The series isn't in the library yet — it shows up there after the next scan." })
   }
 
-  const performSearch = async (e?: React.FormEvent, isLoadMore = false) => {
+  const performSearch = async (e?: React.FormEvent, isLoadMore = false, forQuery?: string) => {
     if (e) e.preventDefault();
-    if (homeQuery.trim().length < 2) return;
+    const q = forQuery ?? homeQuery;
+    if (q.trim().length < 2) return;
 
     const nextPage = isLoadMore ? searchPage + 1 : 1;
 
@@ -132,7 +134,7 @@ export function RequestSearch({ variant = 'home' }: { variant?: 'home' | 'header
     }
 
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(homeQuery)}&page=${nextPage}&_t=${Date.now()}`)
+      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&page=${nextPage}&_t=${Date.now()}`)
       const data = await res.json()
       
       if (isLoadMore) {
@@ -329,8 +331,13 @@ export function RequestSearch({ variant = 'home' }: { variant?: 'home' | 'header
  )
 
   return (
-    <div className={variant === 'header' ? "contents" : "w-full max-w-2xl mx-auto transition-colors duration-300"}>
-      {variant === 'header' ? (
+    <div className={variant !== 'home' ? "contents" : "w-full max-w-2xl mx-auto transition-colors duration-300"}>
+      {variant === 'find' ? (
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-[10px] font-bold uppercase text-primary hover:bg-primary/10 shrink-0"
+          onClick={() => { setHomeQuery(query || ''); performSearch(undefined, false, query || '') }}>
+          <Search className="w-3.5 h-3.5 mr-1" /> Find
+        </Button>
+      ) : variant === 'header' ? (
         <>
           <Button variant="ghost" size="icon" aria-label="Search comics" className="rounded-full" onClick={() => setAskOpen(true)}>
             <Search className="h-5 w-5 text-muted-foreground" />

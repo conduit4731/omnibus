@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
     progressFindMany: vi.fn(),
     issueFindMany: vi.fn(),
     itemGroupBy: vi.fn(),
+    issueGroupBy: vi.fn(),
 }));
 
 vi.mock('next-auth/next', () => ({ getServerSession: mocks.getServerSession }));
@@ -22,7 +23,7 @@ vi.mock('@/lib/db', () => ({
         readingList: { findMany: mocks.listFindMany, findFirst: mocks.listFindFirst },
         readingListItem: { findMany: mocks.itemFindMany, groupBy: mocks.itemGroupBy, update: vi.fn() },
         readProgress: { findMany: mocks.progressFindMany },
-        issue: { findMany: mocks.issueFindMany },
+        issue: { findMany: mocks.issueFindMany, groupBy: mocks.issueGroupBy },
         $transaction: vi.fn(),
     }
 }));
@@ -70,6 +71,20 @@ describe('GET /api/reading-lists (#252 / #253)', () => {
         expect(body.items.map((i: any) => i.progress)).toEqual([
             { issueId: 'i1', currentPage: 21, totalPages: 22, isCompleted: true }, null, null
         ]);
+    });
+
+    it('fork: per series of the list, issues on disk and released so far (like the library)', async () => {
+        mocks.listFindFirst.mockResolvedValue({ id: 'l1', items: [
+            { id: 'a', issueId: 'i1', cvIssueId: null, issue: { seriesId: 's1' } },
+            { id: 'b', issueId: 'i2', cvIssueId: null, issue: { seriesId: 's1' } },
+            { id: 'c', issueId: null, cvIssueId: null, issue: null },
+        ] });
+        mocks.progressFindMany.mockResolvedValue([]);
+        mocks.issueGroupBy.mockImplementation(async ({ where }: any) =>
+            where.filePath ? [{ seriesId: 's1', _count: { _all: 3 } }] : [{ seriesId: 's1', _count: { _all: 24 } }]);
+        const body = await (await GET(req('?id=l1'))).json();
+        expect(body.seriesStats).toEqual({ s1: { owned: 3, released: 24 } });
+        expect(mocks.issueGroupBy.mock.calls[1][0].where.OR).toEqual([{ releaseDate: null }, { releaseDate: { lte: new Date().toISOString().slice(0, 10) } }]);
     });
 
     it('404s a list the user cannot see', async () => {

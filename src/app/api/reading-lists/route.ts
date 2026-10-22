@@ -65,8 +65,8 @@ export async function GET(request: Request) {
                     orderBy: { order: 'asc' },
                     // Only what the list page uses: full Series rows made a 688-entry list 5.5 MB (fork)
                     include: { issue: { select: {
-                        id: true, number: true, name: true, filePath: true, coverUrl: true, isAnnual: true, seriesId: true,
-                        series: { select: { id: true, name: true, folderPath: true, metadataId: true, metadataSource: true, year: true, publisher: true } },
+                        id: true, number: true, name: true, filePath: true, coverUrl: true, isAnnual: true, seriesId: true, releaseDate: true,
+                        series: { select: { id: true, name: true, folderPath: true, metadataId: true, metadataSource: true, year: true, publisher: true, status: true } },
                     } } }
                 }
             }
@@ -106,9 +106,23 @@ export async function GET(request: Request) {
         });
         const progressByIssue = new Map(progress.map(p => [p.issueId, p]));
 
+        // Fork: per series of the list, like the library: issues on disk and issues released so far
+        const seriesIds = [...new Set(list.items.flatMap(i => i.issue?.seriesId ? [i.issue.seriesId] : []))];
+        const today = new Date().toISOString().slice(0, 10);
+        const [ownedBy, releasedBy] = seriesIds.length ? await Promise.all([
+            prisma.issue.groupBy({ by: ['seriesId'], where: { seriesId: { in: seriesIds }, filePath: { not: null } }, _count: { _all: true } }),
+            prisma.issue.groupBy({ by: ['seriesId'], where: { seriesId: { in: seriesIds }, OR: [{ releaseDate: null }, { releaseDate: { lte: today } }] }, _count: { _all: true } }),
+        ]) : [[], []];
+        const seriesStats: Record<string, { owned: number, released: number }> = {};
+        for (const id of seriesIds) seriesStats[id] = {
+            owned: ownedBy.find(g => g.seriesId === id)?._count._all || 0,
+            released: releasedBy.find(g => g.seriesId === id)?._count._all || 0,
+        };
+
         return NextResponse.json({
             ...list,
-            items: list.items.map(item => ({ ...item, progress: (item.issueId && progressByIssue.get(item.issueId)) || null }))
+            items: list.items.map(item => ({ ...item, progress: (item.issueId && progressByIssue.get(item.issueId)) || null })),
+            seriesStats
         });
     } catch (error: unknown) {
         Logger.log(`[Reading Lists API] Error: ${getErrorMessage(error)}`, 'error');

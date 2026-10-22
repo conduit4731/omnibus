@@ -1,6 +1,7 @@
 // src/app/reading-lists/page.tsx
 "use client"
 
+import { RequestSearch } from "@/components/request-search"
 import { useState, useEffect, Suspense } from "react"
 import { useSession } from "next-auth/react"
 import { useSearchParams } from "next/navigation"
@@ -43,6 +44,20 @@ function OwnedState({ items }: { items: any[] }) {
     : owned === 0 ? 'bg-red-50 text-red-600 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800'
     : 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800'
   return <Badge variant="secondary" className={`text-[10px] ${cls}`}>{owned === items.length ? 'all owned' : owned === 0 ? `missing (${items.length})` : `${owned} of ${items.length} owned`}</Badge>
+}
+
+// Fork: a missing entry — out already, coming, or unknown (release date of the linked issue, else the CBL's year)
+function MissingRelease({ item }: { item: any }) {
+  const date: string | null = item.issue?.releaseDate || null
+  const today = new Date().toISOString().slice(0, 10)
+  const upcoming = date ? date.slice(0, 10) > today : !!item.year && item.year > new Date().getFullYear()
+  const when = date ? new Date(`${date.slice(0, 10)}T12:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : item.year ? String(item.year) : null
+  return (
+    <div className="leading-tight">
+      <span className={`text-[10px] font-bold uppercase ${upcoming ? 'text-sky-500' : 'text-orange-500'}`}>{upcoming ? 'Not out yet' : item.issue ? 'Missing' : 'Not in library'}</span>
+      <div className={`text-[10px] ${upcoming ? 'text-sky-500 font-bold' : 'text-muted-foreground'}`}>{when ? `${upcoming ? 'Releases' : 'Released'} ${when}` : 'Release date unknown'}</div>
+    </div>
+  )
 }
 
 // Read / in progress marker for a list entry; nothing for unread
@@ -912,9 +927,18 @@ function ReadingListsContent() {
                               </p>
                               {(showAllSeries ? seriesSummary : seriesSummary.slice(0, 8)).map(({ name, items }) => {
                                   const owned = ownedOf(items);
+                                  // Fork: the series in the library — on disk / released so far and Ongoing / Ended, like the library table
+                                  const libSeries = items.find((i: any) => i.issue?.series)?.issue?.series;
+                                  const stats = libSeries ? activeList.seriesStats?.[libSeries.id] : null;
                                   return (
                                       <div key={name} className="flex items-center gap-3 py-1">
-                                          <span className="text-sm font-medium truncate flex-1 min-w-0" title={name}><SeriesLink series={items.find((i: any) => i.issue?.series)?.issue?.series}>{name}</SeriesLink></span>
+                                          <span className="text-sm font-medium truncate flex-1 min-w-0" title={name}><SeriesLink series={libSeries}>{name}</SeriesLink></span>
+                                          {libSeries ? (
+                                              <span className="hidden md:inline-flex items-center gap-1.5 shrink-0 text-[10px] text-muted-foreground" title="In your library: issues on disk / released so far">
+                                                  Library {stats ? `${stats.owned}/${stats.released}` : ''}
+                                                  {libSeries.status && <Badge className={`border-0 text-[9px] px-1 h-4 uppercase text-white ${/ended|completed|cancel/i.test(libSeries.status) ? 'bg-zinc-600' : 'bg-sky-600'}`}>{/ended|completed|cancel/i.test(libSeries.status) ? 'Ended' : 'Ongoing'}</Badge>}
+                                              </span>
+                                          ) : <RequestSearch variant="find" query={name} />}
                                           <div className="hidden sm:block h-1.5 w-28 rounded-full bg-muted overflow-hidden shrink-0"><div className={`h-full ${owned === items.length ? 'bg-emerald-500' : owned === 0 ? 'bg-red-500' : 'bg-amber-500'}`} style={{ width: `${Math.max(4, Math.round(100 * owned / items.length))}%` }} /></div>
                                           <OwnedState items={items} />
                                           {owned < items.length ? (
@@ -962,10 +986,10 @@ function ReadingListsContent() {
                                                   <span className="ml-2 font-bold">#{number}</span>
                                                   {issue?.name && <span className="hidden md:inline ml-2 text-xs text-muted-foreground">{issue.name}</span>}
                                               </td>
-                                              <td className="w-36 px-2 py-1.5 hidden sm:table-cell">
+                                              <td className="w-40 px-2 py-1.5 hidden sm:table-cell">
                                                   {item.progress?.isCompleted ? <span className="text-[10px] font-bold uppercase text-emerald-500 flex items-center gap-1"><Check className="w-3 h-3" /> Read</span>
                                                       : owned ? (item.progress?.currentPage > 0 ? <ReadState progress={item.progress} /> : <span className="text-[10px] font-bold uppercase text-muted-foreground">Owned</span>)
-                                                      : <span className="text-[10px] font-bold uppercase text-orange-500">Not in library</span>}
+                                                      : <MissingRelease item={item} />}
                                               </td>
                                               <td className="w-32 pr-2 py-1 text-right whitespace-nowrap">
                                                   {owned ? (
