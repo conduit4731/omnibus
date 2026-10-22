@@ -9,7 +9,6 @@ import { Search, Loader2, X, Plus, Calendar, Info, Layers, ChevronLeft, Download
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogHeader } from "@/components/ui/dialog"
-import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/components/ui/use-toast"
 import { useLibraryOwnership } from "@/hooks/use-library-ownership"
@@ -597,76 +596,60 @@ export function RequestSearch() {
                       <h4 className="font-semibold flex items-center gap-2 text-base sm:text-lg text-foreground"><Layers className="w-4 h-4 sm:w-5 h-5"/> More in this Series</h4>
                       <div className="w-full">
                           {volumeIssues.length > 0 ? (
-                              <ScrollArea className="w-full whitespace-nowrap pb-4">
-                                  <div className="flex w-max gap-4 px-1">
-                                      {volumeIssues.map(issue => {
-                                          const relIssueTargetName = issue.name;
-                                          const relIssueStatus = getIssueStatus(issue.id, selectedItem.volumeId, relIssueTargetName, issue.isReleased, issue.issueNumber, seriesBaseName);
-                                          
-                                          return (
-                                          <div 
-                                              key={issue.id} 
-                                              className="w-[110px] sm:w-[130px] shrink-0 group/issue cursor-pointer relative"
-                                              onClick={() => {
-                                                  setSelectedItem({
-                                                      ...issue,
-                                                      volumeId: selectedItem.volumeId,
-                                                      publisher: selectedItem.publisher,
-                                                      issueNumber: issue.issueNumber,
-                                                      description: undefined,
-                                                      writers: undefined,
-                                                      artists: undefined,
-                                                      characters: undefined,
-                                                      metadataSource: selectedItem.metadataSource || 'COMICVINE'
-                                                  });
-                                              }}
-                                            >
-                                              <div className="relative aspect-[2/3] rounded-md overflow-hidden bg-muted border border-border shadow-sm hover:ring-2 hover:ring-primary transition-all">
-                                                  {/* --- FIX: Image Fallbacks --- */}
-                                                  {issue.image ? (
-                                                      <img src={issue.image} className="absolute inset-0 w-full h-full object-contain" alt={issue.name} />
-                                                  ) : (
-                                                      <div className="absolute inset-0 w-full h-full flex flex-col items-center justify-center bg-muted text-muted-foreground/30">
-                                                          <ImageIcon className="w-6 h-6" />
-                                                      </div>
-                                                  )}
-                                                  <div className="absolute inset-0 bg-linear-to-t from-black/80 via-transparent to-transparent z-10 pointer-events-none" />
-                                                  
-                                                  <div className="absolute top-1 right-1 bg-black/80 text-white rounded-md px-1.5 py-0.5 text-[10px] font-bold z-20 shadow-sm border border-white/20">#{issue.issueNumber}</div>
-
-                                                  {!relIssueStatus && (
-                                                      <div className="absolute bottom-2 inset-x-2 z-30 opacity-100 sm:opacity-0 sm:group-hover/issue:opacity-100 transition-opacity flex justify-center items-center pointer-events-none">
-                                                          <Button
-                                                              size="icon"
-                                                              className="h-8 w-8 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg pointer-events-auto"
-                                                              disabled={requestingTarget === `iss-${relIssueTargetName}`}
-                                                              onClick={(e) => {
-                                                                e.preventDefault();
-                                                                e.stopPropagation();
-                                                                handleRequest(selectedItem.volumeId, issue.name, issue.image, issue.year, 'issue', selectedItem.publisher, false, issue.issueNumber, false, selectedItem.metadataSource || 'COMICVINE');
-                                                              }}
-                                                              title="Request Issue"
-                                                              tabIndex={-1}
-                                                          >
-                                                              {requestingTarget === `iss-${relIssueTargetName}` ? <Loader2 className="w-4 h-4 animate-spin"/> : <Download className="w-4 h-4"/>}
-                                                          </Button>
-                                                      </div>
-                                                  )}
-
-                                                  {/* --- FIX: Map the UNRELEASED badging to the sub-cards --- */}
-                                                  {relIssueStatus === 'REQUESTED' && (<div className="absolute top-1 left-1 bg-orange-500 text-white rounded-md px-1 py-0.5 text-[8px] font-bold z-20">REQUESTED</div>)}
-                                                  {relIssueStatus === 'PENDING_APPROVAL' && (<div className="absolute top-1 left-1 bg-yellow-500 text-white rounded-md px-1 py-0.5 text-[8px] font-bold z-20" title="Pending Admin Approval">PENDING</div>)}
-                                                  {relIssueStatus === 'ISSUE_OWNED' && (<div className="absolute top-1 left-1 bg-emerald-500 text-white rounded-md px-1 py-0.5 text-[8px] font-bold z-20">IN LIBRARY</div>)}
-                                                  {relIssueStatus === 'ISSUE_COVERED' && (<div className="absolute top-1 left-1 bg-emerald-700 text-white rounded-md px-1 py-0.5 text-[8px] font-bold z-20" title="In a collection you own">COVERED</div>)}
-                                                  {relIssueStatus === 'UNRELEASED' && (<div className="absolute top-1 left-1 bg-purple-500 text-white rounded-md px-1 py-0.5 text-[8px] font-bold z-20">UNRELEASED</div>)}
-                                                  {(!relIssueStatus && issue.isReleased === false) && (<div className="absolute top-1 left-1 bg-purple-500/80 text-white rounded-md px-1 py-0.5 text-[8px] font-bold z-20">UNRELEASED</div>)}
-                                              </div>
+                              // Fork: a list (cover, number, title, year, status) instead of a sideways strip of covers
+                              <div className="divide-y divide-border rounded-lg border border-border">
+                                  {volumeIssues.map(issue => {
+                                      const relIssueTargetName = issue.name;
+                                      const relIssueStatus = getIssueStatus(issue.id, selectedItem.volumeId, relIssueTargetName, issue.isReleased, issue.issueNumber, seriesBaseName);
+                                      const badge = relIssueStatus === 'REQUESTED' ? ['Requested', 'bg-orange-500'] : relIssueStatus === 'PENDING_APPROVAL' ? ['Pending', 'bg-yellow-500']
+                                          : relIssueStatus === 'ISSUE_OWNED' ? ['In library', 'bg-emerald-500'] : relIssueStatus === 'ISSUE_COVERED' ? ['Covered', 'bg-emerald-700']
+                                          : relIssueStatus === 'UNRELEASED' || (!relIssueStatus && issue.isReleased === false) ? ['Unreleased', 'bg-purple-500'] : null;
+                                      return (
+                                      <div
+                                          key={issue.id}
+                                          className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/50"
+                                          onClick={() => {
+                                              setSelectedItem({
+                                                  ...issue,
+                                                  volumeId: selectedItem.volumeId,
+                                                  publisher: selectedItem.publisher,
+                                                  issueNumber: issue.issueNumber,
+                                                  description: undefined,
+                                                  writers: undefined,
+                                                  artists: undefined,
+                                                  characters: undefined,
+                                                  metadataSource: selectedItem.metadataSource || 'COMICVINE'
+                                              });
+                                          }}
+                                      >
+                                          <div className="relative w-10 h-14 shrink-0 rounded overflow-hidden bg-muted border border-border">
+                                              {issue.image ? <img src={issue.image} className="absolute inset-0 w-full h-full object-cover" alt="" loading="lazy" />
+                                                  : <ImageIcon className="w-4 h-4 m-auto mt-5 text-muted-foreground/40" />}
                                           </div>
-                                      )})}
-                                  </div>
-                                  {/* Taller than the h-2.5 default: this row is the modal's main nav surface */}
-                                  <ScrollBar orientation="horizontal" className="h-4" />
-                              </ScrollArea>
+                                          <span className="w-12 shrink-0 text-xs font-black text-muted-foreground">#{issue.issueNumber}</span>
+                                          <div className="flex-1 min-w-0">
+                                              <p className="text-sm font-bold truncate text-foreground">{issue.name}</p>
+                                              <p className="text-[11px] text-muted-foreground">{issue.year || '????'}</p>
+                                          </div>
+                                          {badge && <span className={`shrink-0 text-[9px] font-black uppercase tracking-wider text-white px-1.5 py-0.5 rounded ${badge[1]}`}>{badge[0]}</span>}
+                                          {!relIssueStatus && (
+                                              <Button
+                                                  size="sm"
+                                                  variant="outline"
+                                                  className="shrink-0 h-8 font-bold text-[10px] uppercase tracking-wider border-border"
+                                                  disabled={requestingTarget === `iss-${relIssueTargetName}`}
+                                                  onClick={(e) => {
+                                                    e.preventDefault();
+                                                    e.stopPropagation();
+                                                    handleRequest(selectedItem.volumeId, issue.name, issue.image, issue.year, 'issue', selectedItem.publisher, false, issue.issueNumber, false, selectedItem.metadataSource || 'COMICVINE');
+                                                  }}
+                                              >
+                                                  {requestingTarget === `iss-${relIssueTargetName}` ? <Loader2 className="w-3.5 h-3.5 animate-spin"/> : <Download className="w-3.5 h-3.5 mr-1"/>} Request
+                                              </Button>
+                                          )}
+                                      </div>
+                                  )})}
+                              </div>
                           ) : (<p className="text-sm text-muted-foreground">No individual issues found.</p>)}
                       </div>
                   </div>
