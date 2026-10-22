@@ -21,10 +21,10 @@ describe('buildInsights (fork)', () => {
         ];
         const r = buildInsights(rows, '2026-10-21');
 
-        expect(r.kpis).toEqual({ series: 3, issues: 4, read: 1, complete: 1, ongoing: 1, missing: 2, upcoming: 1 });
-        expect(r.byPublisher).toEqual([{ publisher: 'DC', read: 1, unread: 2, missing: 2 }, { publisher: 'Image', read: 0, unread: 1, missing: 0 }]);
+        expect(r.kpis).toEqual({ series: 3, issues: 4, bytes: 0, read: 1, complete: 1, ongoing: 1, missing: 2, upcoming: 1 });
+        expect(r.byPublisher).toEqual([{ publisher: 'DC', read: 1, unread: 2, missing: 2, bytes: 0 }, { publisher: 'Image', read: 0, unread: 1, missing: 0, bytes: 0 }]);
         expect(r.byYear).toEqual([{ year: 2013, DC: 3 }, { year: 2024, Image: 1 }]);
-        expect(r.growth).toEqual([{ month: '2026-09', added: 3, total: 3 }, { month: '2026-10', added: 1, total: 4 }]);
+        expect(r.growth).toEqual([{ month: '2026-09-15', added: 3, total: 3 }, { month: '2026-10-02', added: 1, total: 4 }]);  // 2 months: by day
         expect(r.backlog.map(b => [b.id, b.unread])).toEqual([['s1', 1], ['s2', 1], ['s3', 1]]);
         expect(r.upcoming).toEqual([{ week: '2026-11-02', issues: 1 }]);
     });
@@ -34,5 +34,19 @@ describe('buildInsights (fork)', () => {
         const r = buildInsights(rows, '2026-10-21');
         expect(r.kpis.complete).toBe(7);
         expect(r.publishers).toEqual(['A', 'B', 'C', 'D', 'E', 'Other']);
+    });
+
+    it('sums file sizes per publisher and overall, owned files only', () => {
+        const dc = series('DC Comics');
+        const r = buildInsights([row('s1', dc, { bytes: 40e6 }), row('s1', dc, { bytes: 60e6 }), row('s1', dc, { filePath: null, bytes: 99e6 })], '2026-10-21');
+        expect(r.kpis.bytes).toBe(100e6);
+        expect(r.byPublisher[0].bytes).toBe(100e6);
+    });
+
+    it('issues without a publisher are "Unknown", not a second "Other"; long histories grow by month', () => {
+        const rows = [row('s1', series(null as any)), ...['2026-01-05', '2026-03-05', '2026-06-05'].map(d => row('s2', series('DC'), { fileAddedAt: new Date(d) }))];
+        const r = buildInsights(rows, '2026-10-21');
+        expect(r.publishers).toEqual(['DC', 'Unknown']);
+        expect(r.growth.map(g => g.month)).toEqual(['2026-01', '2026-03', '2026-06', '2026-09']);
     });
 });

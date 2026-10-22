@@ -4,6 +4,20 @@ import { prisma } from '@/lib/db';
 import { getServerSession } from 'next-auth/next';
 import { getAuthOptions } from '@/app/api/auth/[...nextauth]/options';
 import { buildInsights, type IssueRow } from '@/lib/library-insights';
+import { promises as fs } from 'fs';
+
+// Omnibus stores no file sizes: stat the files, and keep the answer for 10 minutes (a few thousand stats)
+const SIZE_TTL_MS = 10 * 60 * 1000;
+let sizeCache: { at: number, sizes: Map<string, number> } | null = null;
+async function fileSizes(paths: string[]): Promise<Map<string, number>> {
+    if (sizeCache && Date.now() - sizeCache.at < SIZE_TTL_MS && paths.every(p => sizeCache!.sizes.has(p))) return sizeCache.sizes;
+    const sizes = new Map<string, number>();
+    for (let i = 0; i < paths.length; i += 64) {
+        await Promise.all(paths.slice(i, i + 64).map(p => fs.stat(p).then(st => sizes.set(p, st.size), () => sizes.set(p, 0))));
+    }
+    sizeCache = { at: Date.now(), sizes };
+    return sizes;
+}
 
 export const dynamic = 'force-dynamic';
 
@@ -20,5 +34,6 @@ export async function GET() {
         prisma.readProgress.findMany({ where: { userId, isCompleted: true }, select: { issueId: true } }),
     ]);
     const readIds = new Set(done.map(d => d.issueId));
-    return NextResponse.json(buildInsights(issues.map(({ id, ...i }) => ({ ...i, read: readIds.has(id) })) as IssueRow[]));
+    const sizes = await fileSizes(issues.flatMap(i => i.filePath ? [i.filePath] : []));
+    return NextResponse.json(buildInsights(issues.map(({ id, ...i }) => ({ ...i, read: readIds.has(id), bytes: i.filePath ? sizes.get(i.filePath) : 0 })) as IssueRow[]));
 }

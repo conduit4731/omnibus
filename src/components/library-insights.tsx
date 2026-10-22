@@ -10,8 +10,8 @@ import { cn } from "@/lib/utils"
 
 type Insights = {
   publishers: string[]
-  kpis: { series: number, issues: number, read: number, complete: number, ongoing: number, missing: number, upcoming: number }
-  byPublisher: { publisher: string, read: number, unread: number, missing: number }[]
+  kpis: { series: number, issues: number, bytes: number, read: number, complete: number, ongoing: number, missing: number, upcoming: number }
+  byPublisher: { publisher: string, read: number, unread: number, missing: number, bytes: number }[]
   byYear: ({ year: number } & Record<string, number>)[]
   growth: { month: string, added: number, total: number }[]
   backlog: { id: string, name: string, year: number | null, path: string | null, unread: number, owned: number }[]
@@ -24,6 +24,7 @@ const colorOf = (p: string, i: number) => PUBLISHER_COLORS[p] || FALLBACK[i % FA
 const tooltip = { contentStyle: { backgroundColor: 'var(--popover)', borderColor: 'var(--border)', color: 'var(--foreground)', fontSize: 12 }, cursor: { fill: 'var(--muted)', opacity: 0.4 } }
 const axis = { axisLine: false, tickLine: false, fontSize: 10, tick: { fill: 'var(--muted-foreground)' } }
 const STORAGE_KEY = "omnibus-library-insights-open"
+export const formatBytes = (b: number) => b >= 1e12 ? `${(b / 1e12).toFixed(2)} TB` : b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.round(b / 1e6)} MB`
 
 function Kpi({ label, value, hint }: { label: string, value: string | number, hint?: string }) {
   return (
@@ -63,9 +64,10 @@ export function LibraryInsights() {
       </button>
       {open && (!data ? <p className="text-sm text-muted-foreground mt-3">Loading…</p> : (
         <div className="mt-3 space-y-4">
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
             <Kpi label="Series" value={k!.series} />
             <Kpi label="Issues" value={k!.issues} />
+            <Kpi label="Storage" value={formatBytes(k!.bytes)} hint={`${k!.issues} comic files on disk`} />
             <Kpi label="Read" value={k!.issues ? `${Math.round(k!.read / k!.issues * 100)}%` : "–"} hint={`${k!.read} of ${k!.issues} issues`} />
             <Kpi label="Complete series" value={k!.complete} hint="Every released issue in your library" />
             <Kpi label="Ongoing" value={k!.ongoing} />
@@ -88,6 +90,7 @@ export function LibraryInsights() {
                   </BarChart>
                 </ResponsiveContainer>
               </div>
+              <p className="text-xs text-muted-foreground mt-2">On disk: {data.byPublisher.filter(p => p.bytes > 0).map(p => `${p.publisher} ${formatBytes(p.bytes)}`).join(' · ')}</p>
             </Panel>
 
             <Panel title="Issues by release year">
