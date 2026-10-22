@@ -97,8 +97,13 @@ export function subjectOf(description?: string | null): string | null {
 /** Best ComicVine character result: exact name first, publisher must match when the result names one. */
 export function pickPortrait(results: any[], name: string, publisher: string): string | null {
     const fits = results.filter(r => !r?.publisher?.name || normalizePublisher(r.publisher.name) === publisher);
-    const exact = fits.find(r => r?.name?.toLowerCase() === name.toLowerCase());
-    const best = exact || fits[0];
+    const bare = (n?: string) => (n || '').toLowerCase().replace(/^the\s+/, '').trim();
+    const appearances = (r: any) => Number(r?.count_of_issue_appearances) || 0;
+    const known = [...fits].sort((a, b) => appearances(b) - appearances(a))[0];
+    const exact = fits.find(r => bare(r?.name) === bare(name));
+    // An exact name only wins if it isn't a minor namesake: "The Flash" is Barry Allen (thousands of
+    // appearances), not the DC character literally called "Flash" (a handful).
+    const best = exact && appearances(exact) * 10 >= appearances(known) ? exact : known || exact;
     return best?.image?.medium_url || best?.image?.original_url || null;
 }
 

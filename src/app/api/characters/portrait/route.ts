@@ -18,15 +18,15 @@ const isPlaceholder = (url?: string | null) => !url || /\/6373148-blank\.png$|bl
 // /characters/ in one call. Results keep the search order.
 async function searchCharacters(cvKey: string, name: string, limit: number) {
     const res = await cachedCvGet(`${CV}/search/`, {
-        params: { api_key: cvKey, format: 'json', query: name, resources: 'character', limit, field_list: 'id,name,image,publisher,deck' },
+        params: { api_key: cvKey, format: 'json', query: name, resources: 'character', limit, field_list: 'id,name,image,publisher,deck,count_of_issue_appearances' },
         headers: { 'User-Agent': 'Omnibus/1.0' }, timeout: 8000,
     });
     let results: any[] = res.data?.results || [];
-    const ids = results.filter(r => r?.id && (isPlaceholder(r.image?.medium_url) || !r.publisher)).map(r => r.id);
+    const ids = results.filter(r => r?.id && (isPlaceholder(r.image?.medium_url) || !r.publisher || r.count_of_issue_appearances == null)).map(r => r.id);
     if (ids.length > 0) {
         try {
             const full = await cachedCvGet(`${CV}/characters/`, {
-                params: { api_key: cvKey, format: 'json', filter: `id:${ids.join('|')}`, limit: 100, field_list: 'id,image,publisher,deck' },
+                params: { api_key: cvKey, format: 'json', filter: `id:${ids.join('|')}`, limit: 100, field_list: 'id,image,publisher,deck,count_of_issue_appearances' },
                 headers: { 'User-Agent': 'Omnibus/1.0' }, timeout: 8000,
             });
             const byId = new Map((full.data?.results || []).map((c: any) => [c.id, c]));
