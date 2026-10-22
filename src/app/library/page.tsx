@@ -1,6 +1,7 @@
 // src/app/library/page.tsx
 "use client"
 
+import { SeriesStateBadges, SeriesStateCells, issuesLabel } from "@/components/library-series-state"
 import { LibraryInsights } from "@/components/library-insights"
 import { useState, useEffect, useCallback, useMemo, useRef, forwardRef, Suspense } from "react"
 import { TableVirtuoso, type TableComponents } from "react-virtuoso"
@@ -75,18 +76,6 @@ interface LibrarySeries {
   status?: string | null;
   released?: number;   // fork: issues out so far
   complete?: boolean;  // fork: every released issue downloaded
-}
-
-// Fork: "12/13" when issues are missing, plus Complete and Ongoing/Ended
-const issuesLabel = (item: LibrarySeries) => item.released && item.released > item.count ? `${item.count}/${item.released}` : `${item.count}`
-function SeriesStateBadges({ item }: { item: LibrarySeries }) {
-  const ended = item.status && /ended|completed|cancel/i.test(item.status)
-  return (
-    <>
-      {item.complete && <Badge className="text-[9px] px-1.5 h-4 bg-violet-600 hover:bg-violet-600 border-0 text-white font-black uppercase tracking-wider shadow-sm" title="Every released issue is in your library">Complete</Badge>}
-      {item.status && <Badge className={cn("text-[9px] px-1.5 h-4 border-0 font-bold uppercase tracking-wider shadow-sm", ended ? "bg-zinc-600 hover:bg-zinc-600 text-white" : "bg-sky-600 hover:bg-sky-600 text-white")}>{ended ? 'Ended' : 'Ongoing'}</Badge>}
-    </>
-  )
 }
 
 // Context handed to the virtualized table's row component so it can stay module-scoped (stable identity →
@@ -1419,23 +1408,7 @@ function LibraryContent() {
                             )}
                         </td>
                         {/* Fork: one column per state instead of a pile of badges in "Issues" */}
-                        <td className="px-3 py-3 text-center">
-                            {isCompleted ? <Badge className="bg-green-600 hover:bg-green-600 text-white border-0 text-[10px] font-bold uppercase tracking-wider"><Check className="w-3 h-3 mr-1" />Read</Badge>
-                              : unread > 0 ? <Badge className="bg-primary/20 text-primary border-0 font-bold uppercase tracking-wider text-[10px]">{unread === item.count ? 'Unread' : `${unread} Left`}</Badge>
-                              : <span className="text-muted-foreground">–</span>}
-                        </td>
-                        <td className="px-3 py-3 text-center hidden md:table-cell">
-                            {item.complete ? <Badge className="bg-violet-600 hover:bg-violet-600 text-white border-0 text-[10px] font-bold uppercase tracking-wider">Complete</Badge>
-                              : /^\d+$/.test(item.metadataId || '') && (item.released || 0) > item.count ? <span className="text-xs font-bold text-orange-600 dark:text-orange-400">{(item.released || 0) - item.count} missing</span>
-                              : <span className="text-muted-foreground">–</span>}
-                        </td>
-                        <td className="px-3 py-3 text-center hidden md:table-cell">
-                            {item.status ? <Badge className={cn("border-0 text-[10px] font-bold uppercase tracking-wider text-white", /ended|completed|cancel/i.test(item.status) ? "bg-zinc-600 hover:bg-zinc-600" : "bg-sky-600 hover:bg-sky-600")}>{/ended|completed|cancel/i.test(item.status) ? 'Ended' : 'Ongoing'}</Badge>
-                              : <span className="text-muted-foreground">–</span>}
-                        </td>
-                        <td className="px-3 py-3 text-center hidden lg:table-cell">
-                            {item.monitored ? <Activity className="w-4 h-4 text-emerald-600 mx-auto" aria-label="Monitored" /> : <span className="text-muted-foreground">–</span>}
-                        </td>
+                        <SeriesStateCells item={item} unread={unread} isCompleted={isCompleted} />
                         {!isSelectionMode && (
                             <td className="px-4 py-3 text-right">
                                 <div className="flex items-center justify-end gap-2">

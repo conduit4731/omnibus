@@ -2,6 +2,9 @@
 // unread backlog and upcoming issues, from one pass over every issue row.
 import { normalizePublisher } from '@/lib/reading-list-groups';
 
+/** Series.status from ComicVine / Metron: "Ended", "Completed", "Cancelled" end a run; anything else is ongoing. */
+export const isEndedStatus = (status?: string | null) => !!status && /ended|completed|cancel/i.test(status);
+
 const TOP_PUBLISHERS = 5;
 
 export type IssueRow = {
@@ -60,7 +63,7 @@ export function buildInsights(rows: IssueRow[], today = new Date().toISOString()
             issues: owned.length,
             read: owned.filter(r => r.read).length,
             complete: series.filter(s => s.matched && s.owned >= s.released).length,
-            ongoing: series.filter(s => s.status && !/ended|completed|cancel/i.test(s.status)).length,
+            ongoing: series.filter(s => s.status && !isEndedStatus(s.status)).length,
             missing: [...byPublisher.values()].reduce((n, p) => n + p.missing, 0),
             upcoming: [...upcoming.values()].reduce((n, c) => n + c, 0),
         },
