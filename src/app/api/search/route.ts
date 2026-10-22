@@ -45,7 +45,7 @@ export async function GET(request: Request) {
     }
 
     // --- NEW: Robust Database Caching ---
-    const cacheKey = `search_v3_${provider}_${rawQuery.toLowerCase().replace(/[^a-z0-9]/g, '_')}_p${page}${wantCovers ? '' : '_nocovers'}`;
+    const cacheKey = `search_v4_${provider}_${rawQuery.toLowerCase().replace(/[^a-z0-9]/g, '_')}_p${page}${wantCovers ? '' : '_nocovers'}`;
     const cachedData = await prisma.systemSetting.findUnique({ where: { key: cacheKey } });
     
     if (cachedData?.value) {
@@ -115,6 +115,23 @@ export async function GET(request: Request) {
 
         if (!response.data || !Array.isArray(response.data.results)) {
             return NextResponse.json({ results: [], hasMore: false });
+        }
+
+        // Fork: ComicVine's /search/ now answers volumes with placeholders (blank cover, no publisher, 0 issues,
+        // deck "Volume 1") while /volumes/ still has the real data: one batched call per page fills them in
+        // (before the foreign-publisher filter, which needs the publisher). On failure the bare results stay.
+        const vols: ComicVineVolume[] = response.data.results;
+        const ids = vols.map(v => v.id).filter(Boolean);
+        if (ids.length > 0) {
+            try {
+                const full = await cachedCvGet(`${BASE_URL}/volumes/`, {
+                    params: { api_key: CV_API_KEY, format: 'json', filter: `id:${ids.join('|')}`, limit: 100,
+                              field_list: 'id,publisher,count_of_issues,image,deck,description' },
+                    headers: { 'User-Agent': 'Omnibus/1.0' }
+                });
+                const byId = new Map<number, Partial<ComicVineVolume>>((full.data?.results || []).map((v: ComicVineVolume) => [v.id, v]));
+                response.data.results = vols.map(v => ({ ...v, ...(byId.get(v.id) || {}) }));
+            } catch { /* keep the bare search results */ }
         }
 
         let results: FormattedSearchResult[] = response.data.results.map((vol: ComicVineVolume) => {
