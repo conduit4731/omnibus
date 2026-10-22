@@ -44,9 +44,9 @@ describe('buildInsights (fork)', () => {
     });
 
     it('issues without a publisher are "Unknown", not a second "Other"; long histories grow by month', () => {
-        const rows = [row('s1', series(null as any)), ...['2026-01-05', '2026-03-05', '2026-06-05'].map(d => row('s2', series('DC'), { fileAddedAt: new Date(d) }))];
+        const rows = [row('s1', series(null as any)), row('s3', series('Other')), ...['2026-01-05', '2026-03-05', '2026-06-05'].map(d => row('s2', series('DC'), { fileAddedAt: new Date(d) }))];
         const r = buildInsights(rows, '2026-10-21');
-        expect(r.publishers).toEqual(['DC', 'Unknown']);
+        expect(r.publishers).toEqual(['DC', 'Unknown']);   // null and a literal "Other" publisher alike
         expect(r.growth.map(g => g.month)).toEqual(['2026-01', '2026-03', '2026-06', '2026-09']);
     });
 });

@@ -14,7 +14,8 @@ export type IssueRow = {
 };
 
 export function buildInsights(rows: IssueRow[], today = new Date().toISOString().slice(0, 10)) {
-    const pub = (r: IssueRow) => normalizePublisher(r.series.publisher) || 'Unknown';  // "Other" is the small-publisher bucket
+    // "Other" is the small-publisher bucket; a series without a publisher (some say literally "Other") is "Unknown"
+    const pub = (r: IssueRow) => { const p = normalizePublisher(r.series.publisher); return !p || /^other$/i.test(p) ? 'Unknown' : p; };
     const matched = (r: IssueRow) => /^\d+$/.test(r.series.metadataId || '');
     const owned = rows.filter(r => r.filePath);
     const released = (r: IssueRow) => !r.releaseDate || r.releaseDate.slice(0, 10) <= today;
