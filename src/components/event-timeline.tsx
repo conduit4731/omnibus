@@ -5,12 +5,14 @@
 import { useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { BookOpen, ListOrdered, Loader2, Play } from "lucide-react"
+import { BookOpen, CloudDownload, ListOrdered, Loader2, Play } from "lucide-react"
+import { useSession } from "next-auth/react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useToast } from "@/components/ui/use-toast"
 import { Chip, displayName, type ListSummary } from "@/components/list-cards"
 import { nextInList } from "@/lib/reading-list-next"
+import { requestListItem } from "@/lib/request-list-item"
 import { cn } from "@/lib/utils"
 
 export type EventStatus = 'Complete' | 'Ongoing' | 'Ended'
@@ -59,7 +61,37 @@ function ReadButton({ l }: { l: ListSummary }) {
     )
 }
 
+// Request every entry of the event that has no file yet, one after another (same request as the reading list page)
+function RequestMissingButton({ l, onDone }: { l: ListSummary, onDone: () => void }) {
+    const { toast } = useToast()
+    const [progress, setProgress] = useState<string | null>(null)
+    const missing = l.itemCount - l.ownedCount
+    if (missing <= 0) return null
+    const go = async () => {
+        setProgress('…')
+        const d = await fetch(`/api/reading-lists?id=${encodeURIComponent(l.id)}`).then(r => r.ok ? r.json() : null).catch(() => null)
+        const items = (d?.items || []).filter((i: any) => !i.issue?.filePath)
+        let ok = 0
+        for (const [n, item] of items.entries()) {
+            setProgress(`${n + 1}/${items.length}`)
+            try { await requestListItem(item); ok++ } catch { /* counted as failed */ }
+            await new Promise(res => setTimeout(res, 300))
+        }
+        setProgress(null)
+        toast({ title: displayName(l.name), description: `Requested ${ok} of ${items.length} missing issues.` })
+        onDone()
+    }
+    return (
+        <Button size="sm" variant="outline" className="h-8 text-xs font-bold" disabled={progress !== null} onClick={go} title={`Request the ${missing} issues you don't have`}>
+            {progress ? <><Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />{progress}</> : <><CloudDownload className="w-3.5 h-3.5 mr-1" />Request {missing}</>}
+        </Button>
+    )
+}
+
 export function EventTimeline({ events }: { events: ListSummary[] }) {
+    const { data: session } = useSession()
+    const canRequest = (session?.user as any)?.role === 'ADMIN' || !!(session?.user as any)?.canRequest
+    const [requested, setRequested] = useState<Set<string>>(new Set())
     const [open, setOpen] = useState(false)
     const [publisher, setPublisher] = useState('All')
     const [ownedOnly, setOwnedOnly] = useState(false)
@@ -117,7 +149,12 @@ export function EventTimeline({ events }: { events: ListSummary[] }) {
                                             </td>
                                             <td className="py-2 pr-3 text-right hidden sm:table-cell">{l.readCount > 0 ? <span className="inline-flex items-center gap-1"><BookOpen className="w-3 h-3" />{l.readCount}</span> : '–'}</td>
                                             <td className="py-2 pr-3"><span className={cn("text-[10px] font-black uppercase tracking-wider text-white px-1.5 py-0.5 rounded", STATUS_STYLE[st])}>{st}</span></td>
-                                            <td className="py-2 text-right"><ReadButton l={l} /></td>
+                                            <td className="py-2 text-right whitespace-nowrap">
+                                                <div className="inline-flex gap-1.5">
+                                                    {canRequest && !requested.has(l.id) && <RequestMissingButton l={l} onDone={() => setRequested(prev => new Set(prev).add(l.id))} />}
+                                                    <ReadButton l={l} />
+                                                </div>
+                                            </td>
                                         </tr>
                                     )
                                 })}

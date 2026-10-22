@@ -1,6 +1,7 @@
 // src/app/reading-lists/page.tsx
 "use client"
 
+import { requestListItem } from "@/lib/request-list-item"
 import { RequestSearch } from "@/components/request-search"
 import { useState, useEffect, Suspense } from "react"
 import { useSession } from "next-auth/react"
@@ -23,8 +24,6 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 import { Badge } from "@/components/ui/badge"
-import { Logger } from "@/lib/logger"
-import { getErrorMessage } from "@/lib/utils/error"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ReadingListPicker } from "@/components/reading-list-picker"
@@ -604,68 +603,7 @@ function ReadingListsContent() {
       setRequestingIds(prev => new Set(prev).add(item.id));
       
       try {
-          let volumeId = 0;
-          let year = new Date().getFullYear().toString();
-          
-          // FIX: Natively pull the provider from the list item
-          const provider = item.metadataSource || item.issue?.metadataSource || 'COMICVINE';
-          
-          if (item.issue?.series?.metadataId && provider === (item.issue.series.metadataSource || 'COMICVINE')) {
-              // Fork: series already in Omnibus (issue WANTED) - no ComicVine lookup needed
-              volumeId = Number(item.issue.series.metadataId) || 0;
-              if (item.issue.series.year) year = String(item.issue.series.year);
-          } else if (item.cvIssueId) {
-              try {
-                  // FIX: Pass provider to lookup-volume API
-                  const lookupRes = await fetch(`/api/reading-lists/lookup-volume?issueId=${item.cvIssueId}&provider=${provider}`);
-                  if (lookupRes.ok) {
-                      const data = await lookupRes.json();
-                      if (data.volumeId) volumeId = data.volumeId;
-                      if (data.year) year = data.year;
-                  }
-              } catch (e) { Logger.log(`Lookup failed: ${getErrorMessage(e)}`, 'error'); }
-          }
-
-          let extractedIssueNumber = "1";
-          const match = item.title.match(/(?:#|issue\s*#?|ch(?:apter)?\s*\.?)\s*0*(\d+(?:\.\d+)?)/i);
-          if (match) {
-              extractedIssueNumber = match[1];
-          }
-
-          const standardRes = await fetch('/api/request', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                  type: 'issue',
-                  cvId: volumeId,
-                  name: item.title, 
-                  year: year,
-                  publisher: "Unknown",
-                  image: coverUrl,
-                  issueNumber: extractedIssueNumber,
-                  metadataSource: provider // <-- FIX: Pass down provider
-              })
-          });
-
-          if (!standardRes.ok) {
-              const baseName = item.title.split('#')[0].trim();
-              const cleanSearchTerm = baseName.replace(/[^a-zA-Z0-9\s]/g, "").trim().replace(/\s+/g, "+");
-              const searchLink = `https://getcomics.org/?s=${cleanSearchTerm}`;
-
-              const fallbackRes = await fetch('/api/reading-lists/manual-fallback', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                      cvId: volumeId,
-                      name: item.title,
-                      image: coverUrl,
-                      searchLink: searchLink,
-                      metadataSource: provider // <-- FIX: Pass down provider
-                  })
-              });
-
-              if (!fallbackRes.ok) throw new Error("Fallback failed");
-          }
+          await requestListItem(item, coverUrl);
 
           setRequestedIds(prev => {
               const next = new Set(prev).add(item.id);
