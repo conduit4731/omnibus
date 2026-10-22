@@ -23,6 +23,7 @@ import { Switch } from "@/components/ui/switch"
 import { TierBadge } from "@/components/tier-badge"
 import { ImpersonationBanner, useStopImpersonating } from "@/components/impersonation-banner"
 import { cn } from "@/lib/utils"
+import { RequestSearch } from "@/components/request-search"
 
 // --- INTERNAL NOTIFICATION COMPONENT ---
 function NotificationBell() {
@@ -348,6 +349,7 @@ export function SiteHeader() {
                 </Button>
               )}
 
+              {session && <RequestSearch variant="header" />}{/* fork: search from every page */}
               {session && <NotificationBell />}
 
               <button

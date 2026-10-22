@@ -1,6 +1,7 @@
 // src/components/request-search.tsx
 "use client"
 
+import { useRouter } from "next/navigation"
 import { searchKind, SEARCH_KIND_LABEL, type SearchKind } from "@/lib/search-kind"
 import { Chip } from "@/components/list-cards"
 import { useState, useEffect, useMemo } from "react"
@@ -60,7 +61,10 @@ interface Issue {
 }
 
 
-export function RequestSearch() {
+// variant "header": a search icon in the site header (fork) — same results dialog, the input in a small dialog
+export function RequestSearch({ variant = 'home' }: { variant?: 'home' | 'header' } = {}) {
+  const router = useRouter()
+  const [askOpen, setAskOpen] = useState(false)
   const { data: session } = useSession()
   // Admins, or users granted the Request permission, may make requests. Civilians cannot.
   const canRequest = (session?.user as any)?.role === 'ADMIN' || !!(session?.user as any)?.canRequest
@@ -86,6 +90,31 @@ export function RequestSearch() {
   const { getVolumeStatus, getIssueStatus, setMonitoredSeries, setRequestedVolumes, setRequestedIssues, setActiveRequests } = useLibraryOwnership();
 
   const { toast } = useToast()
+
+  // Fork: the opened series' library folder (owned or subscribed), for "Open series"
+  const [seriesPath, setSeriesPath] = useState<string | null>(null)
+  const [opening, setOpening] = useState(false)
+  const lookupPath = async (volumeId: number | string): Promise<string | null> => {
+      const d: { path?: string | null } = await fetch(`/api/library/series-path?id=${encodeURIComponent(String(volumeId))}`).then(r => r.ok ? r.json() : {}).catch(() => ({}))
+      return d.path || null
+  }
+  useEffect(() => {
+      setSeriesPath(null)
+      if (selectedItem?.volumeId) lookupPath(selectedItem.volumeId).then(setSeriesPath)
+  }, [selectedItem?.volumeId])
+  const openSeries = (path: string) => { setOpen(false); router.push(`/library/series?path=${encodeURIComponent(path)}`) }
+  const subscribeAndOpen = async () => {
+      setOpening(true)
+      await handleRequest(selectedItem.volumeId, seriesBaseName, selectedItem.image, selectedItem.year, 'volume', selectedItem.publisher || 'Unknown', true, undefined, true, selectedItem.metadataSource || 'COMICVINE')
+      // the series row is written with the request; a moment later at most
+      for (let i = 0; i < 6; i++) {
+          const path = await lookupPath(selectedItem.volumeId)
+          if (path) { setOpening(false); return openSeries(path) }
+          await new Promise(res => setTimeout(res, 1000))
+      }
+      setOpening(false)
+      toast({ title: "Subscribed", description: "The series isn't in the library yet — it shows up there after the next scan." })
+  }
 
   const performSearch = async (e?: React.FormEvent, isLoadMore = false) => {
     if (e) e.preventDefault();
@@ -280,15 +309,15 @@ export function RequestSearch() {
   
   const seriesBaseName = selectedItem?.volumeName || (selectedItem?.name ? selectedItem.name.split(' #')[0] : "Unknown");
 
-  return (
-    <div className="w-full max-w-2xl mx-auto transition-colors duration-300">
+ const searchForm = (
       <form 
-        onSubmit={performSearch} 
+        onSubmit={(e) => { setAskOpen(false); performSearch(e) }} 
         className="flex items-center gap-2 p-1 bg-background rounded-xl shadow-lg border border-border transition-colors duration-300"
       >
         <div className="relative flex-1 h-12">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
           <Input 
+ autoFocus={variant === 'header'}
             placeholder="Search for a comic series..." 
             className="pl-11 h-full border-none bg-transparent focus-visible:ring-0 text-lg text-foreground placeholder:text-muted-foreground" 
             value={homeQuery} 
@@ -297,6 +326,23 @@ export function RequestSearch() {
         </div>
         <Button type="submit" className="h-12 px-8 rounded-lg font-bold">Search</Button>
       </form>
+ )
+
+  return (
+    <div className={variant === 'header' ? "contents" : "w-full max-w-2xl mx-auto transition-colors duration-300"}>
+      {variant === 'header' ? (
+        <>
+          <Button variant="ghost" size="icon" aria-label="Search comics" className="rounded-full" onClick={() => setAskOpen(true)}>
+            <Search className="h-5 w-5 text-muted-foreground" />
+          </Button>
+          <Dialog open={askOpen} onOpenChange={setAskOpen}>
+            <DialogContent className="sm:max-w-2xl w-[95%] p-3 bg-transparent border-none shadow-none [&>button]:hidden">
+              <DialogTitle className="sr-only">Search comics</DialogTitle>
+              {searchForm}
+            </DialogContent>
+          </Dialog>
+        </>
+      ) : searchForm}
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-hidden flex flex-col p-0 gap-0 border-none shadow-2xl [&>button]:hidden bg-background">
@@ -434,6 +480,16 @@ export function RequestSearch() {
 
                               return (
                                 <div className="flex flex-col gap-2.5 sm:gap-3 w-full max-w-[300px] mx-auto md:max-w-none mt-2">
+                                    {/* Fork: open the whole series in the library (owned / subscribed), or subscribe and open it */}
+                                    {seriesPath ? (
+                                        <Button className="w-full gap-1.5 shadow-sm h-auto min-h-10 py-1.5 text-sm font-bold" onClick={() => openSeries(seriesPath)}>
+                                            <Library className="w-4 h-4 shrink-0" /> <span className="leading-tight">Open series</span>
+                                        </Button>
+                                    ) : canRequest && (
+                                        <Button className="w-full gap-1.5 shadow-sm h-auto min-h-10 py-1.5 text-sm font-bold" variant="secondary" disabled={opening} onClick={subscribeAndOpen}>
+                                            {opening ? <Loader2 className="w-4 h-4 animate-spin shrink-0" /> : <Library className="w-4 h-4 shrink-0" />} <span className="leading-tight">Subscribe &amp; open series</span>
+                                        </Button>
+                                    )}
                                     {/* VOLUME BUTTONS */}
                                     {loading ? (
                                         <Button className="w-full gap-1.5 shadow-sm h-auto min-h-10 py-1.5 text-sm font-bold whitespace-normal" variant="outline" disabled>
