@@ -5,7 +5,10 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { ArrowLeft, Loader2, Search, User } from "lucide-react"
+import { useSession } from "next-auth/react"
 import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Chip, ListCard, type ListSummary } from "@/components/list-cards"
 
 type Character = { key: string, name: string, publisher: string, lists: ListSummary[], issues: number, owned: number, read: number }
@@ -46,7 +49,65 @@ function Portrait({ c, className }: { c: Character, className: string }) {
     )
 }
 
+// Admin: pick one of ComicVine's matches, paste an image URL, or go back to the automatic pick
+type Candidate = { name: string, publisher: string | null, deck: string | null, url: string }
+function PortraitEditor({ c, onChanged }: { c: Character, onChanged: () => void }) {
+    const [open, setOpen] = useState(false)
+    const [candidates, setCandidates] = useState<Candidate[] | null>(null)
+    const [error, setError] = useState<string | null>(null)
+    const [url, setUrl] = useState("")
+    const [saving, setSaving] = useState(false)
+    useEffect(() => {
+        if (!open || candidates) return
+        fetch(`/api/characters/portrait?name=${encodeURIComponent(c.name)}&publisher=${encodeURIComponent(c.publisher)}&candidates=1`)
+            .then(r => r.json()).then(d => { setCandidates(d.candidates || []); setError(d.error || null) }).catch(() => setError("ComicVine is not answering right now."))
+    }, [open, candidates, c.name, c.publisher])
+    const save = async (value: string) => {
+        setSaving(true)
+        const res = await fetch('/api/characters/portrait', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: c.name, publisher: c.publisher, url: value }) })
+        const d = await res.json().catch(() => ({}))
+        setSaving(false)
+        if (!res.ok) { setError(d.error || 'Could not save.'); return }
+        portraits.set(`${c.publisher}:${c.name}`, value ? Promise.resolve(value) : fetch(`/api/characters/portrait?name=${encodeURIComponent(c.name)}&publisher=${encodeURIComponent(c.publisher)}`).then(r => r.json()).then(d => d.url ?? null).catch(() => null))
+        setOpen(false); onChanged()
+    }
+    return (
+        <>
+            <Button variant="outline" size="sm" className="w-40 sm:w-48 font-bold" onClick={() => setOpen(true)}>Change portrait</Button>
+            <Dialog open={open} onOpenChange={setOpen}>
+                <DialogContent className="sm:max-w-2xl w-[95%] max-h-[85vh] overflow-y-auto bg-background border-border">
+                    <DialogHeader>
+                        <DialogTitle>Portrait for {c.name}</DialogTitle>
+                        <DialogDescription>Pick ComicVine's match, or paste an image URL.</DialogDescription>
+                    </DialogHeader>
+                    {error && <p className="text-sm text-destructive">{error}</p>}
+                    {candidates === null ? <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+                        : candidates.length === 0 ? <p className="text-sm text-muted-foreground">ComicVine has no pictures for this name.</p> : (
+                        <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
+                            {candidates.map(k => (
+                                <button key={k.url} disabled={saving} onClick={() => save(k.url)} className="text-left space-y-1 group" title={k.deck || k.name}>
+                                    <img src={k.url} alt="" className="w-full aspect-[2/3] object-cover object-top rounded-md border border-border group-hover:ring-2 group-hover:ring-primary" />
+                                    <p className="text-[11px] font-bold leading-tight line-clamp-2">{k.name}</p>
+                                    <p className="text-[10px] text-muted-foreground line-clamp-1">{k.publisher || '–'}</p>
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                    <div className="flex gap-2 pt-2">
+                        <Input placeholder="https://… image URL" value={url} onChange={e => setUrl(e.target.value)} />
+                        <Button disabled={saving || !url.trim()} onClick={() => save(url.trim())}>Use URL</Button>
+                    </div>
+                    <Button variant="ghost" size="sm" className="self-start text-muted-foreground" disabled={saving} onClick={() => save('')}>Reset to automatic</Button>
+                </DialogContent>
+            </Dialog>
+        </>
+    )
+}
+
 function CharactersContent() {
+    const { data: session } = useSession()
+    const isAdmin = (session?.user as any)?.role === 'ADMIN'
+    const [portraitVersion, setPortraitVersion] = useState(0)
     const params = useSearchParams()
     const selected = params.get("c")
     const [lists, setLists] = useState<ListSummary[] | null>(null)
@@ -77,7 +138,10 @@ function CharactersContent() {
             <div className="container mx-auto py-10 px-6 max-w-[1400px] space-y-8">
                 <Link href="/characters" className="inline-flex items-center gap-2 text-sm font-bold text-muted-foreground hover:text-foreground"><ArrowLeft className="w-4 h-4" /> Characters</Link>
                 <div className="flex flex-col sm:flex-row gap-6 rounded-2xl border border-border bg-card/60 p-6">
-                    <Portrait c={current} className="w-40 sm:w-48 aspect-[2/3] rounded-xl shrink-0" />
+                    <div className="space-y-2 shrink-0">
+                        <Portrait key={portraitVersion} c={current} className="w-40 sm:w-48 aspect-[2/3] rounded-xl" />
+                        {isAdmin && <PortraitEditor c={current} onChanged={() => setPortraitVersion(v => v + 1)} />}
+                    </div>
                     <div className="space-y-3">
                         <p className="text-sm font-black uppercase tracking-widest text-primary">{current.publisher}</p>
                         <h1 className="text-4xl font-black">{current.name}</h1>
