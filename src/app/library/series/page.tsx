@@ -2125,7 +2125,7 @@ function SeriesContent() {
                                         <div className="w-20 h-28 shrink-0 rounded-md overflow-hidden bg-muted border border-border grayscale">{issue.coverUrl || seriesInfo.cover ? <img src={issue.coverUrl || seriesInfo.cover} onError={coverImgError(seriesInfo.cover)} className="w-full h-full object-cover" alt="" /> : <ImageIcon className="w-8 h-8 m-auto mt-10 text-muted-foreground/50" />}</div>
                                         <div className="flex flex-col justify-between flex-1 py-1 min-w-0">
                                             <div><h5 className="font-bold text-base line-clamp-2 text-foreground leading-tight">{issue.name}</h5><span className="text-[10px] mt-1 font-black text-muted-foreground uppercase tracking-widest">{laneLabel(issue)} #{issue.parsedNum}</span><ReleaseInfo date={issue.releaseDate} /><ListChips lists={seriesLists.byIssue[issue.id]} /></div>
-                                            <div className="flex flex-wrap items-center gap-2 mt-3">{isAlreadyRequested ? <Button size="sm" variant="secondary" disabled className="flex-1 h-9 bg-green-50 text-green-700 dark:bg-green-900/20 border-green-200 opacity-100 cursor-not-allowed"><Check className="w-4 h-4 mr-2"/> Queued</Button> : <Button size="sm" variant="outline" className="flex-1 h-9 font-black text-[10px] border-border hover:bg-muted uppercase tracking-wider min-w-[80px]" onClick={(e) => { e.stopPropagation(); handleRequestMissing(issue); }} disabled={isRequesting}>{isRequesting ? <Loader2 className="w-4 h-4 animate-spin mr-2"/> : <CloudDownload className="w-4 h-4 mr-2"/>}Request</Button>}<DirectSources onGetComics={() => handleRequestMissing(issue, 'getcomics')} disabled={isRequesting || isAlreadyRequested} seriesName={seriesInfo.name} /></div>
+                                            <div className="flex flex-wrap items-center gap-2 mt-3">{isAlreadyRequested ? <Button size="sm" variant="secondary" disabled className="flex-1 h-9 bg-green-50 text-green-700 dark:bg-green-900/20 border-green-200 opacity-100 cursor-not-allowed"><Check className="w-4 h-4 mr-2"/> Queued</Button> : <Button size="sm" variant="outline" className="flex-1 h-9 font-black text-[10px] border-border hover:bg-muted uppercase tracking-wider min-w-[80px]" onClick={(e) => { e.stopPropagation(); handleRequestMissing(issue); }} disabled={isRequesting}>{isRequesting ? <Loader2 className="w-4 h-4 animate-spin mr-2"/> : <CloudDownload className="w-4 h-4 mr-2"/>}Request</Button>}<DirectSources onGetComics={() => handleRequestMissing(issue, 'getcomics')} disabled={isRequesting || isAlreadyRequested} seriesName={seriesInfo.name} buttonClass="flex-1 h-9 font-black text-[10px] border-border hover:bg-muted uppercase tracking-wider min-w-[80px]" /></div>
                                         </div>
                                       </div>
                                   );
@@ -2172,7 +2172,7 @@ function SeriesContent() {
                                                                   {isRequesting ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1"/> : <CloudDownload className="w-3.5 h-3.5 mr-1"/>} Request
                                                               </Button>
                                                           )}
-                                                          <div className="inline-flex ml-1.5 align-middle"><DirectSources onGetComics={() => handleRequestMissing(issue, 'getcomics')} disabled={isRequesting || isAlreadyRequested} seriesName={seriesInfo.name} /></div>
+                                                          <div className="inline-flex gap-1.5 ml-1.5 align-middle"><DirectSources onGetComics={() => handleRequestMissing(issue, 'getcomics')} disabled={isRequesting || isAlreadyRequested} seriesName={seriesInfo.name} buttonClass="h-8 font-bold border-border hover:bg-muted text-[10px] uppercase tracking-wider" /></div>
                                                       </td>
                                                   </tr>
                                               )
@@ -2737,15 +2737,16 @@ function SeriesContent() {
 
 // Fork: per missing issue — GetComics only (Omnibus' DDL path, no indexers) and a Batcave search to download
 // by hand into ~/batcave (the Mac sync + omnibus-match.sh file it). Batcave runs DataLife Engine: search by GET.
-function DirectSources({ onGetComics, disabled, seriesName }: { onGetComics: () => void, disabled: boolean, seriesName: string }) {
+// buttonClass: the same classes as the row's Request button, so all three match
+function DirectSources({ onGetComics, disabled, seriesName, buttonClass }: { onGetComics: () => void, disabled: boolean, seriesName: string, buttonClass: string }) {
   return (
-    <div className="flex gap-1.5">
-      <Button size="sm" variant="outline" className="h-8 px-2 font-bold text-[10px] uppercase tracking-wider border-border" title="Request from GetComics only"
+    <>
+      <Button size="sm" variant="outline" className={buttonClass} title="Request from GetComics only"
         disabled={disabled} onClick={e => { e.stopPropagation(); onGetComics() }}>GetComics</Button>
-      <Button size="sm" variant="outline" className="h-8 px-2 font-bold text-[10px] uppercase tracking-wider border-border" title="Find this series on Batcave and download it into ~/batcave" asChild>
+      <Button size="sm" variant="outline" className={buttonClass} title="Find this series on Batcave and download it into ~/batcave" asChild>
         <a href={`https://batcave.biz/index.php?do=search&subaction=search&story=${encodeURIComponent(seriesName)}`} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>Batcave</a>
       </Button>
-    </div>
+    </>
   )
 }
 
