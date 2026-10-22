@@ -50,7 +50,7 @@ export async function GET(request: Request) {
         // Fork: cached per date range. A range that ended before today no longer changes and is kept; a
         // current or future one is refetched once a day. (Was: one key per day and week offset, so every
         // week was fetched again each day and the old keys piled up.)
-        const cacheKey = `calendar_global_v18_${startDateStr}_${endDateStr}`;
+        const cacheKey = `calendar_global_v19_${startDateStr}_${endDateStr}`;
         const cache = await prisma.systemSetting.findUnique({ where: { key: cacheKey } });
         if (cache?.value) {
             const cached = JSON.parse(cache.value);
@@ -196,7 +196,7 @@ export async function GET(request: Request) {
 
         // Older cache generations (v15, v16 and the fork's v16p day keys)
         await prisma.systemSetting.deleteMany({
-            where: { OR: ['calendar_global_v15_', 'calendar_global_v16_', 'calendar_global_v16p_', 'calendar_global_v17_'].map(p => ({ key: { startsWith: p } })) }
+            where: { OR: ['calendar_global_v15_', 'calendar_global_v16_', 'calendar_global_v16p_', 'calendar_global_v17_', 'calendar_global_v18_'].map(p => ({ key: { startsWith: p } })) }
         }).catch(()=>{});
 
         return NextResponse.json({ startDate: startDateStr, endDate: endDateStr, releases: formattedReleases });

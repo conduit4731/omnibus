@@ -31,7 +31,7 @@ export interface MatchableSeries {
  * Resolve which local series a pull-list release belongs to.
  *
  * - 0 name matches  → null (not in library).
- * - 1 name match    → that series. The common case is unchanged, so recall doesn't regress.
+ * - 1 name match    → that series, if its start year is within ±1 of the release's (fork; unknown years match).
  * - >1 name matches → the franchise has multiple same-named volumes, so disambiguate by start year
  *   (exact first, then ±1 for the occasional cross-provider off-by-one). If the release's year matches
  *   NONE of the same-named volumes we own, it's a different volume we don't have → null (the
@@ -50,7 +50,14 @@ export function findLocalSeriesMatch<T extends MatchableSeries>(
 
     const candidates = localSeries.filter(s => normalizeSeriesName(s.name) === target);
     if (candidates.length === 0) return null;
-    if (candidates.length === 1) return candidates[0];
+    // Fork: a single same-named volume must fit the year too. Owning only "Catwoman (2011)" made every
+    // "Catwoman (2018)" release count as in-library, and the monitored auto-create filed its new issues
+    // (Catwoman #92, Action Comics #1103, ...) as WANTED under the 2011 volume, where they got downloaded.
+    if (candidates.length === 1) {
+        const only = candidates[0];
+        const fits = !releaseYear || typeof only.year !== 'number' || only.year <= 0 || Math.abs(only.year - releaseYear) <= 1;
+        return fits ? only : null;
+    }
 
     if (releaseYear) {
         const exact = candidates.find(s => s.year === releaseYear);
