@@ -17,7 +17,7 @@ describe('listMeta (fork)', () => {
             { listId: 'a', title: 'Batman (2011) #26', issue: { coverUrl: 'c2', series: { publisher: 'DC Comics', year: 2011 } } },
         ]);
         const first = await listMeta([list('a', 1)]);
-        expect(first.get('a')).toEqual({ publisher: 'DC', category: 'Events', subject: null, era: 'New 52', eraStart: 2011, covers: ['c1', 'c2'] });
+        expect(first.get('a')).toEqual({ publisher: 'DC', category: 'Events', subject: null, era: 'New 52', eraStart: 2011, covers: ['c1', 'c2'], from: 2011, to: 2011 });
 
         await listMeta([list('a', 1)]);
         expect(findMany).toHaveBeenCalledTimes(1);   // cached

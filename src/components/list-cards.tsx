@@ -8,6 +8,7 @@ import { BookOpen, ListOrdered } from "lucide-react"
 export type ListSummary = {
     id: string, name: string, itemCount: number, ownedCount: number, readCount: number,
     publisher: string, category: string, subject: string | null, era: string, eraStart: number, covers: string[],
+    from?: number | null, to?: number | null,  // fork: first / last release year of its issues
 }
 
 import { displayListName } from "@/lib/reading-list-groups"

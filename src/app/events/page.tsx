@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react"
 import { Loader2, Search, Zap } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Chip, ListCard, type ListSummary } from "@/components/list-cards"
+import { EventTimeline } from "@/components/event-timeline"
 
 // Batcave's buckets: how long reading the whole event takes
 const LENGTHS = [
@@ -64,6 +65,7 @@ export default function EventsPage() {
                 <Chip active={publisher === "All"} onClick={() => { setPublisher("All"); setEra("All") }} label="All" count={events.length} />
                 {byPublisher.map(([p, n]) => <Chip key={p} active={publisher === p} onClick={() => { setPublisher(p); setEra("All") }} label={p} count={n} />)}
                 <div className="flex-1" />
+                <EventTimeline events={events} />
                 <select value={era} onChange={e => setEra(e.target.value)} className="h-9 rounded-full border border-border bg-background px-3 text-sm font-bold">
                     <option value="All">All eras</option>
                     {eras.map(e => <option key={e} value={e}>{e}</option>)}
