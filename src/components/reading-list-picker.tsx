@@ -19,14 +19,14 @@ type Props = {
     onOpenChange: (open: boolean) => void
     lists: ListSummary[]
     activeId: string | null
-    mainId: string | null
+    favoriteIds: string[]
     onSelect: (id: string) => void
-    onSetMain: (id: string | null) => void
+    onToggleFavorite: (id: string) => void
 }
 
 const pct = (n: number, of: number) => (of ? Math.round(100 * n / of) : 0)
 
-export function ReadingListPicker({ open, onOpenChange, lists, activeId, mainId, onSelect, onSetMain }: Props) {
+export function ReadingListPicker({ open, onOpenChange, lists, activeId, favoriteIds, onSelect, onToggleFavorite }: Props) {
     const [query, setQuery] = useState("")
     const [publisher, setPublisher] = useState<string>("All")
 
@@ -58,7 +58,7 @@ export function ReadingListPicker({ open, onOpenChange, lists, activeId, mainId,
             <DialogContent className="sm:max-w-[760px] max-h-[85vh] flex flex-col bg-background border-border rounded-xl p-0 gap-0">
                 <DialogHeader className="p-5 pb-3 space-y-3">
                     <DialogTitle>Choose a reading list</DialogTitle>
-                    <DialogDescription>Star one as your main list; it opens by default.</DialogDescription>
+                    <DialogDescription>Star your favorites: they show on the home screen, and the first one opens by default.</DialogDescription>
                     <div className="relative">
                         <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                         <Input autoFocus value={query} onChange={e => setQuery(e.target.value)} placeholder="Search lists, events, characters, eras…" className="pl-9" />
@@ -83,9 +83,9 @@ export function ReadingListPicker({ open, onOpenChange, lists, activeId, mainId,
                                     className={`flex items-center gap-3 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${l.id === activeId ? 'border-primary/40 bg-primary/10' : 'border-transparent hover:bg-muted/60'}`}>
                                     <button
                                         className="shrink-0 p-1 rounded hover:bg-muted"
-                                        title={l.id === mainId ? "Main list (click to unset)" : "Make this my main list"}
-                                        onClick={e => { e.stopPropagation(); onSetMain(l.id === mainId ? null : l.id) }}>
-                                        <Star className={`w-4 h-4 ${l.id === mainId ? 'fill-amber-400 text-amber-400' : 'text-muted-foreground'}`} />
+                                        title={favoriteIds.includes(l.id) ? "Favorite (click to remove)" : "Add to favorites"}
+                                        onClick={e => { e.stopPropagation(); onToggleFavorite(l.id) }}>
+                                        <Star className={`w-4 h-4 ${favoriteIds.includes(l.id) ? 'fill-amber-400 text-amber-400' : 'text-muted-foreground'}`} />
                                     </button>
                                     <div className="min-w-0 flex-1">
                                         <div className="flex items-center gap-2">

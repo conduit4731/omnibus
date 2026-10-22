@@ -78,7 +78,7 @@ function ReadingListsContent() {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [showAllSeries, setShowAllSeries] = useState(false)
   const [skipNoticeOpen, setSkipNoticeOpen] = useState(false)
-  const [mainListId, setMainListId] = useState<string | null>(null)
+  const [favoriteIds, setFavoriteIds] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   
   // Modals
@@ -205,13 +205,14 @@ function ReadingListsContent() {
     return () => { cancelled = true };
   }, [activeListId, detailNonce])
 
-  const handleSetMainList = async (id: string | null) => {
-    const res = await fetch('/api/reading-lists/main', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listId: id }) })
+  const handleToggleFavorite = async (id: string) => {
+    const favorite = !favoriteIds.includes(id)
+    const res = await fetch('/api/reading-lists/favorites', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listId: id, favorite }) })
     if (res.ok) {
-        setMainListId(id)
-        toast({ title: id ? "Main list set" : "Main list cleared" })
+        setFavoriteIds((await res.json()).listIds || [])
+        toast({ title: favorite ? "Added to favorites" : "Removed from favorites" })
     } else {
-        toast({ title: "Error", description: "Failed to save the main list.", variant: "destructive" })
+        toast({ title: "Error", description: "Failed to save the favorites.", variant: "destructive" })
     }
   }
 
@@ -219,11 +220,11 @@ function ReadingListsContent() {
     try {
       const [res, mainRes] = await Promise.all([
         fetch(`/api/reading-lists?t=${Date.now()}`),
-        fetch(`/api/reading-lists/main?t=${Date.now()}`),
+        fetch(`/api/reading-lists/favorites?t=${Date.now()}`),
       ])
-      const main = mainRes.ok ? (await mainRes.json()).listId : null
-      setMainListId(main)
-      if (!selectId && !activeListId) selectId = main
+      const favorites: string[] = mainRes.ok ? (await mainRes.json()).listIds || [] : []
+      setFavoriteIds(favorites)
+      if (!selectId && !activeListId) selectId = favorites[0] || null
       if (res.ok) {
         const data = await res.json()
         setLists(data)
@@ -756,7 +757,7 @@ function ReadingListsContent() {
               <Button variant="outline" className="h-11 font-bold border-primary/30 bg-primary/5 hover:bg-primary/10 text-primary max-w-full" onClick={() => setPickerOpen(true)}>
                   <ListOrdered className="w-4 h-4 mr-2 shrink-0" />
                   <span className="truncate">{lists.find(l => l.id === activeListId)?.name || "Choose a reading list"}</span>
-                  {activeListId && activeListId === mainListId && <Star className="w-3.5 h-3.5 ml-2 fill-amber-400 text-amber-400 shrink-0" />}
+                  {activeListId && favoriteIds.includes(activeListId) && <Star className="w-3.5 h-3.5 ml-2 fill-amber-400 text-amber-400 shrink-0" />}
                   <ChevronDown className="w-4 h-4 ml-2 shrink-0" />
               </Button>
               <span className="text-xs text-muted-foreground font-bold">{lists.length} lists</span>
@@ -782,9 +783,9 @@ function ReadingListsContent() {
               onOpenChange={setPickerOpen}
               lists={lists}
               activeId={activeListId}
-              mainId={mainListId}
+              favoriteIds={favoriteIds}
               onSelect={setActiveListId}
-              onSetMain={handleSetMainList}
+              onToggleFavorite={handleToggleFavorite}
           />
 
           {activeList ? (
