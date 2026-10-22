@@ -1,6 +1,6 @@
 // Fork only: publisher / era grouping for the reading list picker.
 
-type Era = { name: string, from: number };
+type Era = { name: string, from: number, month?: number };  // month: first month of the era (1-12), for issue chips
 
 // Start years of the publishers' named eras, oldest first. Anything else falls back to decades.
 const ERAS: Record<string, Era[]> = {
@@ -9,9 +9,9 @@ const ERAS: Record<string, Era[]> = {
         { name: 'Silver Age', from: 1956 },
         { name: 'Bronze Age', from: 1970 },
         { name: 'Post-Crisis', from: 1986 },
-        { name: 'New 52', from: 2011 },
-        { name: 'Rebirth', from: 2016 },
-        { name: 'Infinite Frontier', from: 2021 },
+        { name: 'New 52', from: 2011, month: 9 },
+        { name: 'Rebirth', from: 2016, month: 6 },
+        { name: 'Infinite Frontier', from: 2021, month: 3 },
         { name: 'Dawn of DC', from: 2023 },
     ],
     Marvel: [
@@ -19,9 +19,9 @@ const ERAS: Record<string, Era[]> = {
         { name: 'Silver Age', from: 1956 },
         { name: 'Bronze Age', from: 1970 },
         { name: 'Modern Age', from: 1986 },
-        { name: 'Marvel NOW!', from: 2012 },
-        { name: 'All-New / Legacy', from: 2015 },
-        { name: 'Fresh Start', from: 2018 },
+        { name: 'Marvel NOW!', from: 2012, month: 10 },
+        { name: 'All-New / Legacy', from: 2015, month: 10 },
+        { name: 'Fresh Start', from: 2018, month: 5 },
         { name: 'Modern Marvel', from: 2021 },
     ],
 };
@@ -47,9 +47,12 @@ export function eraFor(publisher: string, year: number | null): { era: string, e
     return { era: era.name, eraStart: era.from };
 }
 
-/** The publisher's named era ("New 52") for a year; null when the publisher has no named eras. */
-export function namedEra(publisher: string | null, year: number | null): string | null {
-    return publisher && ERAS[publisher] && year !== null ? eraFor(publisher, year).era : null;
+/** The publisher's named era ("New 52") for an issue's year and month (1-12); null when the publisher has no
+ *  named eras. Month-precise: Batman #1 of August 2011 is still before the New 52 (September 2011). */
+export function namedEra(publisher: string | null, year: number | null, month = 12): string | null {
+    const eras = publisher ? ERAS[publisher] : undefined;
+    if (!eras || year === null) return null;
+    return [...eras].reverse().find(e => year > e.from || (year === e.from && month >= (e.month ?? 1)))!.name;
 }
 
 /** Median of the years, or null when there are none. */

@@ -20,9 +20,10 @@ export async function GET(request: Request) {
 
     const [series, issues] = await Promise.all([
         prisma.series.findUnique({ where: { id: seriesId }, select: { publisher: true, year: true } }),
-        prisma.issue.findMany({ where: { seriesId }, select: { id: true, metadataId: true, releaseDate: true } }),
+        prisma.issue.findMany({ where: { seriesId }, select: { id: true, metadataId: true, metadataSource: true, releaseDate: true } }),
     ]);
-    const byCv = new Map(issues.filter(i => /^\d+$/.test(i.metadataId || '')).map(i => [Number(i.metadataId), i.id]));
+    // Only ComicVine ids: an issue the calendar created carries a Metron id, which could equal an unrelated CV id
+    const byCv = new Map(issues.filter(i => i.metadataSource === 'COMICVINE' && /^\d+$/.test(i.metadataId || '')).map(i => [Number(i.metadataId), i.id]));
     const items = await prisma.readingListItem.findMany({
         where: {
             OR: [{ issueId: { in: issues.map(i => i.id) } }, { cvIssueId: { in: [...byCv.keys()] } }],
@@ -50,7 +51,7 @@ export async function GET(request: Request) {
     const publisher = normalizePublisher(series?.publisher);
     for (const i of issues) {
         const year = parseInt(i.releaseDate?.slice(0, 4) || '', 10) || series?.year || null;
-        const era = namedEra(publisher, year);
+        const era = namedEra(publisher, year, parseInt(i.releaseDate?.slice(5, 7) || '', 10) || undefined);
         if (era) byIssue[i.id] = [{ name: era, kind: 'era', href: `/events?publisher=${encodeURIComponent(publisher!)}&era=${encodeURIComponent(era)}` }];
     }
     for (const l of result) {

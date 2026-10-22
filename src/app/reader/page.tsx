@@ -324,10 +324,13 @@ function ReaderContent() {
   }, [filePath, seriesPath, pageParam, getAuthHeaders]);
 
   // Sync Progress
+  const unmarkedAtPage = useRef<number | null>(null);
   useEffect(() => {
     if (loading || !isReadyToSync || pages.length === 0) return;
+    if (unmarkedAtPage.current !== currentIndex) unmarkedAtPage.current = null; // a page turn ends the unmark
     
     const timer = setTimeout(() => {
+        if (unmarkedAtPage.current === currentIndex) return; // unmarked while this save was pending: stays unread
         fetch('/api/progress', {
             method: 'POST',
             headers: getAuthHeaders(),
@@ -543,6 +546,8 @@ function ReaderContent() {
   const toggleReadStatus = async () => {
       const newStatus = !isMarkedRead;
       setIsMarkedRead(newStatus);
+      // Fork: unmarked on (or near) the last page — the page sync would mark it read again 1.5 s later
+      unmarkedAtPage.current = newStatus ? null : currentIndex;
       await fetch('/api/progress', {
           method: 'POST',
           headers: getAuthHeaders(),

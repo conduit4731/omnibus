@@ -16,9 +16,10 @@ describe('GET /api/reading-lists/for-series (fork)', () => {
     it('lists by linked issue or ComicVine id; chips = era + events, not reading orders', async () => {
         m.series.mockResolvedValue({ publisher: 'DC Comics', year: 2011 });
         m.issues.mockResolvedValue([
-            { id: 'i1', metadataId: '101', releaseDate: '2013-06-05' },
-            { id: 'i2', metadataId: '102', releaseDate: '2016-08-01' },   // Rebirth by date
-            { id: 'i3', metadataId: '103', releaseDate: null },           // falls back to the series year
+            { id: 'i1', metadataId: '101', metadataSource: 'COMICVINE', releaseDate: '2013-06-05' },
+            { id: 'i2', metadataId: '102', metadataSource: 'COMICVINE', releaseDate: '2016-08-01' },   // Rebirth by date
+            { id: 'i3', metadataId: '103', metadataSource: 'COMICVINE', releaseDate: null },           // falls back to the series year
+            { id: 'i4', metadataId: '101', metadataSource: 'METRON', releaseDate: '2011-08-31' },  // Metron id 101 is not CV 101; Aug 2011 is pre-New 52
         ]);
         m.items.mockResolvedValue([
             { listId: 'ev', issueId: 'i1', cvIssueId: 101, list: list('ev', '[DC] Zero Year') },
@@ -31,7 +32,7 @@ describe('GET /api/reading-lists/for-series (fork)', () => {
         expect(body.lists.map((l: any) => [l.id, l.category, l.issueCount])).toEqual([['ev', 'Events', 2], ['ch', 'Characters', 1], ['mro', 'Master Reading Order', 1]]);
         const era = (name: string) => ({ name, kind: 'era', href: `/events?publisher=DC&era=${encodeURIComponent(name)}` });
         const event = { name: 'Zero Year', kind: 'event', href: '/reading-lists?id=ev' };
-        expect(body.byIssue).toEqual({ i1: [era('New 52'), event], i2: [era('Rebirth'), event], i3: [era('New 52')] });
+        expect(body.byIssue).toEqual({ i1: [era('New 52'), event], i2: [era('Rebirth'), event], i3: [era('New 52')], i4: [era('Post-Crisis')] });
     });
 
     it('no era chip for publishers without named eras', async () => {
