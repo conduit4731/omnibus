@@ -16,7 +16,7 @@ export async function listMeta(lists: ListRow[]): Promise<Map<string, ListMeta>>
         const items = await prisma.readingListItem.findMany({
             where: { listId: { in: missing.map(l => l.id) } },
             orderBy: { order: 'asc' },
-            select: { listId: true, title: true, issue: { select: { coverUrl: true, releaseDate: true, series: { select: { publisher: true, year: true } } } } },
+            select: { listId: true, title: true, year: true, issue: { select: { coverUrl: true, releaseDate: true, series: { select: { publisher: true, year: true } } } } },
         });
         const byList = new Map<string, typeof items>();
         for (const item of items) byList.set(item.listId, [...(byList.get(item.listId) || []), item]);
@@ -25,8 +25,9 @@ export async function listMeta(lists: ListRow[]): Promise<Map<string, ListMeta>>
             const { publisher, category } = classifyList(l, rows.map(r => r.issue?.series?.publisher ?? null));
             const years = rows.map(r => r.issue?.series?.year ?? yearFromTitle(r.title)).filter((y): y is number => !!y);
             const covers = rows.flatMap(r => r.issue?.coverUrl ? [r.issue.coverUrl] : []).slice(0, 3);
-            // Fork: first and last year the list's issues came out (release date of linked issues, else the year in the title)
-            const released = rows.map(r => parseInt(r.issue?.releaseDate?.slice(0, 4) || '', 10) || yearFromTitle(r.title)).filter((y): y is number => !!y);
+            // Fork: first and last year the list's issues came out: the CBL's issue year, else the linked issue's release
+            // date. Not the year in the title — that is the series' start ("Batman (1940) #497" came out in 1993).
+            const released = rows.map(r => r.year || parseInt(r.issue?.releaseDate?.slice(0, 4) || '', 10)).filter((y): y is number => !!y);
             const from = released.length ? Math.min(...released) : null, to = released.length ? Math.max(...released) : null;
             cache.set(l.id, { stamp: l.updatedAt.getTime(), meta: { publisher, category, subject: subjectOf(l.description), ...eraFor(publisher, medianYear(years)), covers, from, to } });
         }

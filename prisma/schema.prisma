@@ -670,6 +670,7 @@ model ReadingListItem {
   metadataSource     String   @default("COMICVINE")
   title       String       
   order       Int          
+  year        Int?         // fork: release year of the issue (from the CBL), for the events timeline
 
   @@index([listId])
   @@index([issueId])

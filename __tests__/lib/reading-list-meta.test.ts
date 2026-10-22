@@ -12,12 +12,12 @@ describe('listMeta (fork)', () => {
 
     it('classifies from items once and serves the cache until the list changes', async () => {
         findMany.mockResolvedValue([
-            { listId: 'a', title: 'Batman (2011) #24', issue: { coverUrl: 'c1', series: { publisher: 'DC Comics', year: 2011 } } },
-            { listId: 'a', title: 'Batman (2011) #25', issue: null },
+            { listId: 'a', title: 'Batman (2011) #24', year: 2013, issue: { coverUrl: 'c1', series: { publisher: 'DC Comics', year: 2011 } } },
+            { listId: 'a', title: 'Batman (2011) #25', year: 2014, issue: null },   // CBL issue year, not the series' 2011
             { listId: 'a', title: 'Batman (2011) #26', issue: { coverUrl: 'c2', series: { publisher: 'DC Comics', year: 2011 } } },
         ]);
         const first = await listMeta([list('a', 1)]);
-        expect(first.get('a')).toEqual({ publisher: 'DC', category: 'Events', subject: null, era: 'New 52', eraStart: 2011, covers: ['c1', 'c2'], from: 2011, to: 2011 });
+        expect(first.get('a')).toEqual({ publisher: 'DC', category: 'Events', subject: null, era: 'New 52', eraStart: 2011, covers: ['c1', 'c2'], from: 2013, to: 2014 });
 
         await listMeta([list('a', 1)]);
         expect(findMany).toHaveBeenCalledTimes(1);   // cached
