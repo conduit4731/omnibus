@@ -1,6 +1,8 @@
 // Fork only: publisher / era grouping for the reading list picker.
 
-type Era = { name: string, from: number, month?: number };  // month: first month of the era (1-12), for issue chips
+// month: first month of the era (1-12), for issue chips; listFrom: first whole year a list (median year) counts as this era,
+// when the era starts so late in a year that most of that year still belongs to the one before
+type Era = { name: string, from: number, month?: number, listFrom?: number };
 
 // Start years of the publishers' named eras, oldest first. Anything else falls back to decades.
 const ERAS: Record<string, Era[]> = {
@@ -13,6 +15,7 @@ const ERAS: Record<string, Era[]> = {
         { name: 'Rebirth', from: 2016, month: 6 },
         { name: 'Infinite Frontier', from: 2021, month: 3 },
         { name: 'Dawn of DC', from: 2023 },
+        { name: 'All In', from: 2024, month: 10, listFrom: 2025 },   // DC All In Special #1, Absolute Universe
     ],
     Marvel: [
         { name: 'Golden Age', from: 0 },
@@ -43,7 +46,7 @@ export function eraFor(publisher: string, year: number | null): { era: string, e
         const decade = Math.floor(year / 10) * 10;
         return { era: `${decade}s`, eraStart: decade };
     }
-    const era = [...eras].reverse().find(e => year >= e.from)!;
+    const era = [...eras].reverse().find(e => year >= (e.listFrom ?? e.from))!;
     return { era: era.name, eraStart: era.from };
 }
 

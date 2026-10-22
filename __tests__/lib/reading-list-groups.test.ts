@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyList, eraFor, medianYear, normalizePublisher, subjectOf, yearFromTitle } from '@/lib/reading-list-groups';
+import { classifyList, eraFor, medianYear, namedEra, normalizePublisher, subjectOf, yearFromTitle } from '@/lib/reading-list-groups';
 
 describe('reading list grouping (fork)', () => {
     it('normalizes publisher names', () => {
@@ -18,6 +18,10 @@ describe('reading list grouping (fork)', () => {
         expect(eraFor('Marvel', 1963)).toEqual({ era: 'Silver Age', eraStart: 1956 });
         expect(eraFor('Image', 1997)).toEqual({ era: '1990s', eraStart: 1990 });
         expect(eraFor('DC', null)).toEqual({ era: 'Unknown era', eraStart: 9999 });
+        expect(eraFor('DC', 2024)).toEqual({ era: 'Dawn of DC', eraStart: 2023 });   // Absolute Power (2024) is still Dawn of DC
+        expect(eraFor('DC', 2025)).toEqual({ era: 'All In', eraStart: 2024 });
+        expect(namedEra('DC', 2024, 10)).toBe('All In');        // Absolute Batman #1, October 2024
+        expect(namedEra('DC', 2024, 9)).toBe('Dawn of DC');
     });
 
     it('takes the median year and reads years from titles', () => {
