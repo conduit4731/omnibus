@@ -1854,7 +1854,7 @@ function SeriesContent() {
               <div className="space-y-6">
                   {/* Fork: wraps on narrow screens (iPad mini portrait = 744 px) instead of running off the edge */}
                   <div className="flex flex-wrap items-center justify-between gap-3 border-b-2 border-border pb-4">
-                      <h4 className="font-black flex items-center gap-2 text-xl text-foreground tracking-tight"><Layers className="w-6 h-6 text-primary"/> Downloaded Issues ({downloadedIssues.length})</h4>
+                      <h4 className="font-black flex items-center gap-2 text-xl text-foreground tracking-tight"><Layers className="w-6 h-6 text-primary"/> Downloaded Issues ({chipFilter ? `${sortedDownloaded.length} of ${downloadedIssues.length}` : downloadedIssues.length})</h4>
                       <div className="flex flex-wrap items-center gap-2">
                       <IssueSortControl value={sortMode} onChange={changeSortMode} />
                       {canDownload && downloadedIssues.some(i => i.fullPath) && (
@@ -2099,7 +2099,7 @@ function SeriesContent() {
               {seriesInfo.cvId && (
                   <div className="space-y-6 pt-4 border-t-2 border-border">
                       <div className="flex flex-wrap items-center justify-between gap-3">
-                          <h4 className="font-black flex items-center gap-2 text-xl text-muted-foreground opacity-80 tracking-tight"><CloudOff className="w-6 h-6"/> Missing Issues ({missingIssues.length})</h4>
+                          <h4 className="font-black flex items-center gap-2 text-xl text-muted-foreground opacity-80 tracking-tight"><CloudOff className="w-6 h-6"/> Missing Issues ({chipFilter ? `${sortedMissing.length} of ${missingIssues.length}` : missingIssues.length})</h4>
                           {canRequest && missingIssues.length > 0 && (
                               <Button size="sm" className="font-bold" disabled={isBulkDownloading} onClick={handleDownloadAllMissing}>
                                   {isBulkDownloading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <DownloadCloud className="w-4 h-4 mr-2" />} Request all ({missingIssues.length})
