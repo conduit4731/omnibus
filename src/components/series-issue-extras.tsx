@@ -2,6 +2,7 @@
 
 // Fork only: the series page's era / event chips and columns, release dates and per-issue download buttons.
 // Kept out of src/app/library/series/page.tsx so the weekly upstream merge touches as little fork code as possible.
+import { deDate } from "@/lib/date-de"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -44,7 +45,7 @@ export function ReleaseInfo({ date }: { date?: string | null }) {
   const d = date ? new Date(`${date.slice(0, 10)}T12:00:00`) : null
   if (!d || isNaN(d.getTime())) return <div className="text-[10px] mt-1 text-muted-foreground">Release date unknown</div>
   const upcoming = date!.slice(0, 10) > new Date().toISOString().slice(0, 10)
-  const text = d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+  const text = deDate(date!)
   return <div className={cn("text-[10px] mt-1", upcoming ? "font-bold text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>{upcoming ? `Releases ${text}` : `Released ${text}`}</div>
 }
 

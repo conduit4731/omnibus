@@ -1,6 +1,7 @@
 // src/app/calendar/page.tsx
 "use client"
 
+import { deDate, deMonthYear, deWeekdayDate } from "@/lib/date-de"
 import { useState, useEffect } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -134,7 +135,7 @@ export default function CalendarPage() {
                     setLocalIssues(data.releases);
                     const start = new Date(data.startDate + "T00:00:00Z");
                     const end = new Date(data.endDate + "T00:00:00Z");
-                    setLocalWeekLabel(`${start.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })} - ${end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}`);
+                    setLocalWeekLabel(`${deDate(start)} – ${deDate(end)}`);
                 }
             })
             .catch(() => {})
@@ -154,7 +155,7 @@ export default function CalendarPage() {
                     setPersonalIssues(data.releases);
                     const start = new Date(data.startDate + "T00:00:00Z");
                     const end = new Date(data.endDate + "T00:00:00Z");
-                    setPersonalWeekLabel(`${start.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })} - ${end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}`);
+                    setPersonalWeekLabel(`${deDate(start)} – ${deDate(end)}`);
                 }
             })
             .catch(() => {})
@@ -173,7 +174,7 @@ export default function CalendarPage() {
                     setGlobalIssues(data.releases);
                     const start = new Date(data.startDate + "T00:00:00Z");
                     const end = new Date(data.endDate + "T00:00:00Z");
-                    setWeekLabel(`${start.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })} - ${end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}`);
+                    setWeekLabel(`${deDate(start)} – ${deDate(end)}`);
                 }
             })
             .catch(() => {})
@@ -192,8 +193,8 @@ export default function CalendarPage() {
                 else if (safeDate.length === 7) safeDate += "-01";
                 const dateObj = new Date(`${safeDate}T00:00:00Z`);
                 if (!isNaN(dateObj.getTime())) {
-                    monthYear = dateObj.toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
-                    exactDay = dateObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
+                    monthYear = deMonthYear(dateObj); // fork: German dates
+                    exactDay = deWeekdayDate(dateObj);
                 }
             } catch(e) {}
             if (!acc[monthYear]) acc[monthYear] = [];

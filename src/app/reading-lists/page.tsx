@@ -1,6 +1,7 @@
 // src/app/reading-lists/page.tsx
 "use client"
 
+import { deDate } from "@/lib/date-de"
 import { requestListItem } from "@/lib/request-list-item"
 import { RequestSearch } from "@/components/request-search"
 import { useState, useEffect, Suspense } from "react"
@@ -50,7 +51,7 @@ function MissingRelease({ item }: { item: any }) {
   const date: string | null = item.issue?.releaseDate || null
   const today = new Date().toISOString().slice(0, 10)
   const upcoming = date ? date.slice(0, 10) > today : !!item.year && item.year > new Date().getFullYear()
-  const when = date ? new Date(`${date.slice(0, 10)}T12:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : item.year ? String(item.year) : null
+  const when = date ? deDate(date) : item.year ? String(item.year) : null
   return (
     <div className="leading-tight">
       <span className={`text-[10px] font-bold uppercase ${upcoming ? 'text-sky-500' : 'text-orange-500'}`}>{upcoming ? 'Not out yet' : item.issue ? 'Missing' : 'Not in library'}</span>

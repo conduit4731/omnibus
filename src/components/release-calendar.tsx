@@ -1,6 +1,7 @@
 // Fork only: day / week / month / year release calendar with Batcave-style publisher filter.
 "use client"
 
+import { deDate, deDayMonth, DE_MONTHS } from "@/lib/date-de"
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { ChevronLeft, ChevronRight, ExternalLink, ImageIcon, Loader2 } from "lucide-react"
@@ -18,7 +19,7 @@ export type Release = {
 }
 type Source = 'followed' | 'tracked' | 'global'
 
-const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+const MONTHS = DE_MONTHS
 const pub = (r: Release) => normalizePublisher(r.publisher) || 'Other'
 const isFirst = (r: Release) => /^0*1$/.test(r.issueNumber || '')
 const owned = (r: Release) => r.libraryState === 'IN_LIBRARY' || r.inLibrary
@@ -97,7 +98,7 @@ function ReleaseDialog({ r, onClose }: { r: Release | null, onClose: () => void 
             <DialogContent className="sm:max-w-md w-[95%] bg-background border-border rounded-xl">
                 <DialogHeader>
                     <DialogTitle>{r.seriesName} #{r.issueNumber}</DialogTitle>
-                    <DialogDescription>{r.publisher} · {r.releaseDate}{r.year ? ` · series started ${r.year}` : ''} · not in your library yet</DialogDescription>
+                    <DialogDescription>{r.publisher} · {deDate(r.releaseDate)}{r.year ? ` · series started ${r.year}` : ''} · not in your library yet</DialogDescription>
                 </DialogHeader>
                 <div className="flex gap-4">
                     <div className="w-28 shrink-0 aspect-[2/3] rounded-md overflow-hidden bg-muted border border-border">
@@ -158,7 +159,7 @@ export function ReleaseCalendar({ source, view, onViewChange }: { source: Source
     }, [shown])
 
     const title = view === 'year' ? String(anchor.getUTCFullYear())
-        : `Releases ${parseDay(range.from).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })} – ${parseDay(range.to).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}`
+        : `Woche ${deDayMonth(range.from)} – ${deDate(range.to)}`
     const open = (day: string, v: CalendarView) => { setAnchor(parseDay(day)); onViewChange(v) }
     const today = iso(new Date())
 

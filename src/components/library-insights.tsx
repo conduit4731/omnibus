@@ -1,6 +1,7 @@
 "use client"
 
 // Fork only: collapsible "Insights" panel on the library page (data from /api/library/insights).
+import { deDate, deDayMonth } from "@/lib/date-de"
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, AreaChart, Area, Legend } from "recharts"
@@ -111,7 +112,7 @@ export function LibraryInsights() {
               <div className="h-48">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={data.growth} margin={{ left: -10, right: 4 }}>
-                    <XAxis dataKey="month" {...axis} interval="preserveStartEnd" />
+                    <XAxis dataKey="month" {...axis} interval="preserveStartEnd" tickFormatter={(m) => m.length === 10 ? deDayMonth(m) : `${m.slice(5)}.${m.slice(0, 4)}`} />
                     <YAxis {...axis} allowDecimals={false} />
                     <Tooltip {...tooltip} formatter={(v, n) => [v, n === "total" ? "In library" : "Added"]} />
                     <Area type="monotone" dataKey="total" stroke="var(--primary)" fill="var(--primary)" fillOpacity={0.15} />
@@ -145,9 +146,9 @@ export function LibraryInsights() {
                 <div className="h-36">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={data.upcoming} margin={{ left: -20, right: 4 }}>
-                      <XAxis dataKey="week" {...axis} />
+                      <XAxis dataKey="week" {...axis} tickFormatter={(w) => deDayMonth(w)} />
                       <YAxis {...axis} allowDecimals={false} />
-                      <Tooltip {...tooltip} formatter={(v) => [v, "Issues"]} labelFormatter={(w) => `Week of ${w}`} />
+                      <Tooltip {...tooltip} formatter={(v) => [v, "Issues"]} labelFormatter={(w) => `Woche ab ${deDate(w)}`} />
                       <Bar dataKey="issues" fill="#f59e0b" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>

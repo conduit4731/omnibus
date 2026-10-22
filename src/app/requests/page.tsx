@@ -33,11 +33,12 @@ const STATUS_GROUPS: { tab: string, label: string, statuses: string[], color: st
   { tab: "UNRELEASED", label: "Unreleased", statuses: ['UNRELEASED'], color: '#a855f7' },
   { tab: "AWAITING", label: "Awaiting", statuses: ['AWAITING_RELEASE'], color: '#0ea5e9' },
   { tab: "COMPLETED", label: "Completed", statuses: ['IMPORTED', 'COMPLETED'], color: '#22c55e' },
+  { tab: "REVIEW", label: "Review", statuses: ['NEEDS_REVIEW'], color: '#eab308' }, // v1.4.9: a pack imported, but not this issue
   { tab: "FAILED", label: "Failed", statuses: ['FAILED', 'STALLED', 'ERROR'], color: '#ef4444' },
   { tab: "CANCELLED", label: "Cancelled", statuses: ['CANCELLED'], color: '#64748b' },
 ];
-// Requests that wait for you: a GetComics link behind Cloudflare, or an admin approval
-const needsAction = (r: any) => r.status === 'MANUAL_DDL' || r.status === 'PENDING_APPROVAL';
+// Requests that wait for you: a GetComics link behind Cloudflare, an admin approval, or an import to review
+const needsAction = (r: any) => r.status === 'MANUAL_DDL' || r.status === 'PENDING_APPROVAL' || r.status === 'NEEDS_REVIEW';
 const SORTS: Record<string, { label: string, cmp: (a: any, b: any) => number }> = {
   action: { label: "Needs action first", cmp: (a, b) => Number(needsAction(b)) - Number(needsAction(a)) || +new Date(b.createdAt) - +new Date(a.createdAt) },
   newest: { label: "Newest", cmp: (a, b) => +new Date(b.createdAt) - +new Date(a.createdAt) },
@@ -46,7 +47,7 @@ const SORTS: Record<string, { label: string, cmp: (a: any, b: any) => number }> 
   status: { label: "Status", cmp: (a, b) => (a.status || '').localeCompare(b.status || '') },
 };
 const CANCELLABLE = ['PENDING_APPROVAL', 'PENDING', 'DOWNLOADING', 'MANUAL_DDL', 'UNRELEASED', 'AWAITING_RELEASE'];
-const statusLabel = (status: string) => status === 'PENDING_APPROVAL' ? 'Needs Approval' : status === 'MANUAL_DDL' ? 'GETCOMICS' : status === 'AWAITING_RELEASE' ? 'Awaiting' : status === 'IMPORTING' ? 'Importing…' : status;
+const statusLabel = (status: string) => status === 'PENDING_APPROVAL' ? 'Needs Approval' : status === 'NEEDS_REVIEW' ? 'Needs review' : status === 'MANUAL_DDL' ? 'GETCOMICS' : status === 'AWAITING_RELEASE' ? 'Awaiting' : status === 'IMPORTING' ? 'Importing…' : status;
 
 // Fork: ring of all requests by status group; a click filters to that group
 function StatusRing({ requests, active, onSelect }: { requests: any[], active: string, onSelect: (tab: string) => void }) {

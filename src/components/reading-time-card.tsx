@@ -1,6 +1,7 @@
 "use client"
 
 // Fork only: reading time per day, per series and per reading order (profile page).
+import { deDayMonth } from "@/lib/date-de"
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts"
@@ -26,7 +27,7 @@ export function chartBuckets(daily: Data["daily"], days: number, today = new Dat
     return Array.from({ length: days }, (_, i) => {
       const d = new Date(today); d.setDate(d.getDate() - (days - 1 - i))
       const key = d.toISOString().slice(0, 10)
-      return { label: key.slice(5).replace("-", "."), minutes: Math.round((byDay.get(key) || 0) / 60) }
+      return { label: deDayMonth(key), minutes: Math.round((byDay.get(key) || 0) / 60) }
     })
   }
   const months = new Map<string, number>()

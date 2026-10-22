@@ -35,7 +35,7 @@ describe('reading time (fork)', () => {
         expect(formatDuration(59 * 60)).toBe('59 min');
         expect(formatDuration(135 * 60)).toBe('2 h 15 min');
         const b = chartBuckets([{ date: '2026-10-20', seconds: 600 }], 3, new Date('2026-10-21T12:00:00Z'));
-        expect(b).toEqual([{ label: '10.19', minutes: 0 }, { label: '10.20', minutes: 10 }, { label: '10.21', minutes: 0 }]);
+        expect(b).toEqual([{ label: '19.10.', minutes: 0 }, { label: '20.10.', minutes: 10 }, { label: '21.10.', minutes: 0 }]);
         expect(chartBuckets([{ date: '2026-09-01', seconds: 60 }, { date: '2026-09-30', seconds: 120 }], 0)).toEqual([{ label: '2026-09', minutes: 3 }]);
     });
 });
