@@ -22,6 +22,10 @@ export default function EventsPage() {
     const [era, setEra] = useState("All")
     const [sort, setSort] = useState<"size" | "era" | "name">("size")
     const [query, setQuery] = useState("")
+    // Cards or the chronological timeline; remembered per browser
+    const [view, setView] = useState<"cards" | "timeline">("cards")
+    useEffect(() => { try { if (localStorage.getItem("omnibus-events-view") === "timeline") setView("timeline") } catch { /* private mode */ } }, [])
+    const pickView = (v: "cards" | "timeline") => { setView(v); try { localStorage.setItem("omnibus-events-view", v) } catch { /* private mode */ } }
 
     // Era chips on series pages link here with ?publisher=DC&era=New%2052
     useEffect(() => {
@@ -65,16 +69,20 @@ export default function EventsPage() {
                 <Chip active={publisher === "All"} onClick={() => { setPublisher("All"); setEra("All") }} label="All" count={events.length} />
                 {byPublisher.map(([p, n]) => <Chip key={p} active={publisher === p} onClick={() => { setPublisher(p); setEra("All") }} label={p} count={n} />)}
                 <div className="flex-1" />
-                <EventTimeline events={events} />
+                <div className="flex gap-1 bg-background p-1 rounded-full border border-border">
+                    {(["cards", "timeline"] as const).map(v => (
+                        <button key={v} onClick={() => pickView(v)} className={`h-7 px-3 rounded-full text-xs font-bold capitalize ${view === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>{v}</button>
+                    ))}
+                </div>
                 <select value={era} onChange={e => setEra(e.target.value)} className="h-9 rounded-full border border-border bg-background px-3 text-sm font-bold">
                     <option value="All">All eras</option>
                     {eras.map(e => <option key={e} value={e}>{e}</option>)}
                 </select>
-                <select value={sort} onChange={e => setSort(e.target.value as typeof sort)} className="h-9 rounded-full border border-border bg-background px-3 text-sm font-bold">
+                {view === "cards" && <select value={sort} onChange={e => setSort(e.target.value as typeof sort)} className="h-9 rounded-full border border-border bg-background px-3 text-sm font-bold">
                     <option value="size">Biggest first</option>
                     <option value="era">Chronological</option>
                     <option value="name">A–Z</option>
-                </select>
+                </select>}
                 <div className="relative w-full sm:w-60">
                     <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                     <Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search by name…" className="pl-9 rounded-full h-9" />
@@ -85,6 +93,8 @@ export default function EventsPage() {
                 <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
             ) : shown.length === 0 ? (
                 <p className="text-center text-muted-foreground italic py-20">No events match.</p>
+            ) : view === "timeline" ? (
+                <EventTimeline events={shown} />
             ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-x-4 gap-y-8">
                     {shown.map(l => <ListCard key={l.id} list={l} />)}

@@ -5,10 +5,9 @@
 import { useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { BookOpen, CloudDownload, ListOrdered, Loader2, Play } from "lucide-react"
+import { BookOpen, CloudDownload, Loader2, Play } from "lucide-react"
 import { useSession } from "next-auth/react"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useToast } from "@/components/ui/use-toast"
 import { Chip, displayName, type ListSummary } from "@/components/list-cards"
 import { nextInList } from "@/lib/reading-list-next"
@@ -92,29 +91,18 @@ export function EventTimeline({ events }: { events: ListSummary[] }) {
     const { data: session } = useSession()
     const canRequest = (session?.user as any)?.role === 'ADMIN' || !!(session?.user as any)?.canRequest
     const [requested, setRequested] = useState<Set<string>>(new Set())
-    const [open, setOpen] = useState(false)
-    const [publisher, setPublisher] = useState('All')
     const [ownedOnly, setOwnedOnly] = useState(false)
-    const publishers = useMemo(() => [...new Set(events.map(e => e.publisher))].sort(), [events])
-    const rows = useMemo(() => events.filter(e => (publisher === 'All' || e.publisher === publisher) && (!ownedOnly || e.ownedCount > 0)),
-        [events, publisher, ownedOnly])
+    const publisher = 'All' // the events page filters by publisher; era headers name them under "All"
+    const rows = useMemo(() => events.filter(e => !ownedOnly || e.ownedCount > 0), [events, ownedOnly])
     const groups = useMemo(() => byEra(rows), [rows])
 
     return (
-        <>
-            <Button variant="outline" className="rounded-full font-bold h-9" onClick={() => setOpen(true)}><ListOrdered className="w-4 h-4 mr-2" /> Timeline</Button>
-            <Dialog open={open} onOpenChange={setOpen}>
-                <DialogContent className="sm:max-w-6xl w-[96%] max-h-[90vh] flex flex-col bg-background border-border">
-                    <DialogHeader>
-                        <DialogTitle>Events in chronological order</DialogTitle>
-                        <DialogDescription>{rows.length} events · first to last year of their issues · owned and read from your library</DialogDescription>
-                    </DialogHeader>
-                    <div className="flex flex-wrap gap-2">
-                        <Chip active={publisher === 'All'} onClick={() => setPublisher('All')} label="All" count={events.length} />
-                        {publishers.map(p => <Chip key={p} active={publisher === p} onClick={() => setPublisher(p)} label={p} count={events.filter(e => e.publisher === p).length} />)}
-                        <Chip active={ownedOnly} onClick={() => setOwnedOnly(o => !o)} label="Only with owned issues" count={events.filter(e => e.ownedCount > 0).length} />
-                    </div>
-                    <div className="overflow-auto -mx-6 px-6">
+        <div className="space-y-3">
+            <div className="flex items-center gap-3">
+                <Chip active={ownedOnly} onClick={() => setOwnedOnly(o => !o)} label="Only with owned issues" count={events.filter(e => e.ownedCount > 0).length} />
+                <span className="text-xs text-muted-foreground">{rows.length} events · years of their issues · owned and read from your library</span>
+            </div>
+            <div className="rounded-xl border border-border bg-background/80 overflow-x-auto px-3">
                         <table className="w-full text-sm">
                             <thead className="text-xs text-muted-foreground uppercase sticky top-0 bg-background">
                                 <tr className="border-b border-border text-left">
@@ -161,9 +149,7 @@ export function EventTimeline({ events }: { events: ListSummary[] }) {
                             </tbody>
                             ))}
                         </table>
-                    </div>
-                </DialogContent>
-            </Dialog>
-        </>
+            </div>
+        </div>
     )
 }
