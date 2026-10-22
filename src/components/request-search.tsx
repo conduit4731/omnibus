@@ -1,6 +1,8 @@
 // src/components/request-search.tsx
 "use client"
 
+import { searchKind, SEARCH_KIND_LABEL, type SearchKind } from "@/lib/search-kind"
+import { Chip } from "@/components/list-cards"
 import { useState, useEffect, useMemo } from "react"
 import { useSession } from "next-auth/react" 
 import { Search, Loader2, X, Plus, Calendar, Info, Layers, ChevronLeft, Download, CheckCircle2, Clock, Globe, PenTool, Paintbrush, Users, Image as ImageIcon, Activity, Library, FileCheck, Tags, BookMarked, Shield, MapPin, ExternalLink } from "lucide-react"
@@ -121,15 +123,24 @@ export function RequestSearch() {
     }
   }
 
+  // Fork: results by kind (series / annuals / collected / one-shots), filterable with chips above the grid
+  const [kindFilter, setKindFilter] = useState<SearchKind | 'all'>('all');
+  const kindCounts = useMemo(() => {
+      const m = new Map<SearchKind, number>();
+      for (const r of results) m.set(searchKind(r), (m.get(searchKind(r)) || 0) + 1);
+      return m;
+  }, [results]);
+  useEffect(() => { setKindFilter('all'); }, [homeQuery]);
+
   const sortedResults = useMemo(() => {
-      const sorted = [...results];
+      const sorted = results.filter(r => kindFilter === 'all' || searchKind(r) === kindFilter);
       if (searchSort === 'year_desc') sorted.sort((a, b) => parseInt(b.year || '0') - parseInt(a.year || '0'));
       if (searchSort === 'year_asc') sorted.sort((a, b) => parseInt(a.year || '0') - parseInt(b.year || '0'));
       if (searchSort === 'name_asc') sorted.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
       if (searchSort === 'name_desc') sorted.sort((a, b) => (b.name || '').localeCompare(a.name || ''));
       if (searchSort === 'issues_desc') sorted.sort((a, b) => (b.count || 0) - (a.count || 0));
       return sorted;
-  }, [results, searchSort]);
+  }, [results, searchSort, kindFilter]);
 
   const handleSelectSearchResult = async (item: SearchResult) => {
       setLoading(true);
@@ -318,6 +329,14 @@ export function RequestSearch() {
           <div className="flex-1 overflow-y-auto p-6 bg-background transition-colors duration-300">
             {!selectedItem ? (
                 <>
+                {kindCounts.size > 1 && (
+                    <div className="flex flex-wrap gap-2 mb-4 px-1">
+                        <Chip active={kindFilter === 'all'} onClick={() => setKindFilter('all')} label="All" count={results.length} />
+                        {(Object.keys(SEARCH_KIND_LABEL) as SearchKind[]).filter(k => kindCounts.has(k)).map(k => (
+                            <Chip key={k} active={kindFilter === k} onClick={() => setKindFilter(k)} label={SEARCH_KIND_LABEL[k]} count={kindCounts.get(k)!} />
+                        ))}
+                    </div>
+                )}
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 pb-4 px-1">
                   {sortedResults.map((item) => {
                     const volStatus = getVolumeStatus(item.id);
@@ -333,6 +352,11 @@ export function RequestSearch() {
                             </div>
                         )}
                         
+                        {searchKind(item) !== 'series' && (
+                            <span className="absolute top-2 left-2 z-10 text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-black/75 text-white shadow">
+                                {searchKind(item) === 'collected' ? 'TPB / HC' : searchKind(item) === 'annual' ? 'Annual' : 'One-shot'}
+                            </span>
+                        )}
                         {volStatus === 'LIBRARY_MONITORED' && (<div className="absolute top-2 right-2 bg-green-500 text-white rounded-full p-1 z-10 shadow-md" title="Monitored"><Activity className="w-4 h-4" /></div>)}
                         {volStatus === 'LIBRARY_UNMONITORED' && (<div className="absolute top-2 right-2 bg-blue-500 text-white rounded-full p-1 z-10 shadow-md" title="In Library"><Library className="w-4 h-4" /></div>)}
                         {volStatus === 'REQUESTED' && (<div className="absolute top-2 right-2 bg-orange-500 text-white rounded-full p-1 z-10 shadow-md" title="Requested"><Clock className="w-4 h-4" /></div>)}
