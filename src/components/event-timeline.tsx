@@ -25,6 +25,18 @@ export function chronological<T extends Pick<ListSummary, 'from' | 'to' | 'name'
     return [...lists].sort((a, b) => (a.from ?? 9999) - (b.from ?? 9999) || (a.to ?? 9999) - (b.to ?? 9999) || a.name.localeCompare(b.name))
 }
 
+/** Chronological rows grouped under era headers (DC: Golden … Dawn of DC, Marvel: Golden … Modern Marvel, others by
+ *  decade); eras sorted by start year, shared names (Golden / Silver / Bronze Age) form one group. */
+export function byEra<T extends Pick<ListSummary, 'era' | 'eraStart' | 'from' | 'to' | 'name' | 'publisher'>>(lists: T[]) {
+    const groups = new Map<string, { era: string, start: number, rows: T[] }>()
+    for (const l of lists) {
+        const g = groups.get(l.era) || { era: l.era, start: l.eraStart, rows: [] }
+        g.start = Math.min(g.start, l.eraStart); g.rows.push(l)
+        groups.set(l.era, g)
+    }
+    return [...groups.values()].sort((a, b) => a.start - b.start || a.era.localeCompare(b.era)).map(g => ({ ...g, rows: chronological(g.rows) }))
+}
+
 const STATUS_STYLE: Record<EventStatus, string> = { Complete: 'bg-violet-600', Ongoing: 'bg-sky-600', Ended: 'bg-zinc-600' }
 
 function ReadButton({ l }: { l: ListSummary }) {
@@ -52,8 +64,9 @@ export function EventTimeline({ events }: { events: ListSummary[] }) {
     const [publisher, setPublisher] = useState('All')
     const [ownedOnly, setOwnedOnly] = useState(false)
     const publishers = useMemo(() => [...new Set(events.map(e => e.publisher))].sort(), [events])
-    const rows = useMemo(() => chronological(events.filter(e => (publisher === 'All' || e.publisher === publisher) && (!ownedOnly || e.ownedCount > 0))),
+    const rows = useMemo(() => events.filter(e => (publisher === 'All' || e.publisher === publisher) && (!ownedOnly || e.ownedCount > 0)),
         [events, publisher, ownedOnly])
+    const groups = useMemo(() => byEra(rows), [rows])
 
     return (
         <>
@@ -79,8 +92,14 @@ export function EventTimeline({ events }: { events: ListSummary[] }) {
                                     <th className="py-2 pr-3 text-right hidden sm:table-cell">Read</th><th className="py-2 pr-3">Status</th><th className="py-2" />
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-border">
-                                {rows.map(l => {
+                            {groups.map(g => (
+                            <tbody key={g.era} className="divide-y divide-border">
+                                <tr className="bg-muted/60">
+                                    <td colSpan={9} className="py-1.5 px-2 text-xs font-black uppercase tracking-widest text-primary">
+                                        {g.era} <span className="text-muted-foreground font-bold normal-case tracking-normal">· {g.start > 0 ? `from ${g.start}` : 'earliest'} · {g.rows.length} {g.rows.length === 1 ? 'event' : 'events'}{publisher === 'All' ? ` · ${[...new Set(g.rows.map(x => x.publisher))].join(', ')}` : ''}</span>
+                                    </td>
+                                </tr>
+                                {g.rows.map(l => {
                                     const st = eventStatus(l)
                                     const pct = l.itemCount ? Math.round(100 * l.ownedCount / l.itemCount) : 0
                                     return (
@@ -103,6 +122,7 @@ export function EventTimeline({ events }: { events: ListSummary[] }) {
                                     )
                                 })}
                             </tbody>
+                            ))}
                         </table>
                     </div>
                 </DialogContent>
