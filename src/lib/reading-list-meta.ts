@@ -29,7 +29,8 @@ export async function listMeta(lists: ListRow[]): Promise<Map<string, ListMeta>>
             // date. Not the year in the title — that is the series' start ("Batman (1940) #497" came out in 1993).
             const released = rows.map(r => r.year || parseInt(r.issue?.releaseDate?.slice(0, 4) || '', 10)).filter((y): y is number => !!y);
             const from = released.length ? Math.min(...released) : null, to = released.length ? Math.max(...released) : null;
-            cache.set(l.id, { stamp: l.updatedAt.getTime(), meta: { publisher, category, subject: subjectOf(l.description), ...eraFor(publisher, medianYear(years)), covers, from, to } });
+            // Era from when the issues came out (Knightfall is 1993, not Batman's 1940 start); series years only as fallback
+            cache.set(l.id, { stamp: l.updatedAt.getTime(), meta: { publisher, category, subject: subjectOf(l.description), ...eraFor(publisher, medianYear(released.length ? released : years)), covers, from, to } });
         }
     }
     return new Map(lists.map(l => [l.id, cache.get(l.id)!.meta]));

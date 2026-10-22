@@ -26,4 +26,9 @@ describe('listMeta (fork)', () => {
         await listMeta([list('a', 2)]);               // list changed -> recomputed
         expect(findMany).toHaveBeenCalledTimes(2);
     });
+
+    it('takes the era from when the issues came out, not from the series start', async () => {
+        findMany.mockResolvedValue([{ listId: 'k', title: 'Batman (1940) #497', year: 1993, issue: { coverUrl: null, series: { publisher: 'DC Comics', year: 1940 } } }]);
+        expect((await listMeta([list('k', 1)])).get('k')).toEqual(expect.objectContaining({ era: 'Post-Crisis', from: 1993, to: 1993 }));   // Knightfall, not Golden Age
+    });
 });
