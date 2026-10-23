@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert" 
 import { useToast } from "@/components/ui/use-toast"
@@ -50,6 +51,7 @@ export default function LoginPage() {
   const [username, setUsername] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [remember, setRemember] = useState(false)
   const [confirmPassword, setConfirmPassword] = useState("")
 
   useEffect(() => {
@@ -109,6 +111,7 @@ export default function LoginPage() {
           username, 
           password, 
           totpCode: showTwoFactor ? totpCode : "",
+          remember: String(remember),
           redirect: false 
       })
       
@@ -340,6 +343,13 @@ export default function LoginPage() {
                   />
                   {view === 'register' && <p className="text-[10px] text-muted-foreground">Min 12 chars. Must include uppercase, lowercase, number, and symbol.</p>}
                 </div>
+
+                {view === 'login' && (
+                  <div className="flex items-center gap-2">
+                    <Checkbox id="remember" checked={remember} onCheckedChange={(checked) => setRemember(checked === true)} />
+                    <Label htmlFor="remember" className="text-xs text-muted-foreground cursor-pointer">Keep me logged in (30 days)</Label>
+                  </div>
+                )}
 
                 {view === 'register' && (
                   <div className="space-y-2">

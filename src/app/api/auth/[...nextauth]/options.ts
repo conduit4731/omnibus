@@ -7,7 +7,7 @@ import { cookies } from "next/headers";
 import { decrypt2FA } from "@/lib/encryption";
 import { Logger } from "@/lib/logger";
 import { grantAllLibraries, setUserLibraryAccess, getDefaultLibraryIds } from "@/lib/library-access";
-import { isInactivityExpired, windowRole } from "@/lib/session-timeout";
+import { isInactivityExpired, windowRole, REMEMBER_TIMEOUT_MS } from "@/lib/session-timeout";
 import { IMPERSONATION_COOKIE, readImpersonationCookie } from "@/lib/impersonation";
 
 // --- SECURITY SAFEGUARD ---
@@ -70,7 +70,8 @@ export async function getAuthOptions(): Promise<NextAuthOptions> {
       credentials: {
         username: { label: "Username", type: "text" },
         password: { label: "Password", type: "password" },
-        totpCode: { label: "2FA Code", type: "text" }
+        totpCode: { label: "2FA Code", type: "text" },
+        remember: { label: "Keep me logged in", type: "checkbox" }
       },
       async authorize(credentials) {
           if (!credentials?.username || !credentials?.password) return null;
@@ -105,7 +106,7 @@ export async function getAuthOptions(): Promise<NextAuthOptions> {
           loginAttempts.delete(input);
           // Every tier flag, like the SSO path below: the browser's request buttons read canRequest
           // from the session, and a password sign-in without it showed every Hero "Requests not enabled".
-          return { id: user.id, name: user.username, email: user.email, role: user.role, canRequest: user.canRequest, autoApproveRequests: user.autoApproveRequests, canDownload: user.canDownload, canCreateGlobalLists: user.canCreateGlobalLists, image: user.avatar, sessionVersion: user.sessionVersion };
+          return { id: user.id, name: user.username, email: user.email, role: user.role, canRequest: user.canRequest, autoApproveRequests: user.autoApproveRequests, canDownload: user.canDownload, canCreateGlobalLists: user.canCreateGlobalLists, image: user.avatar, sessionVersion: user.sessionVersion, remember: credentials.remember === "true" };
     }
     })
   ];
@@ -235,6 +236,7 @@ export async function getAuthOptions(): Promise<NextAuthOptions> {
           token.canCreateGlobalLists = (user as any).canCreateGlobalLists;
           token.picture = user.image;
           token.sessionVersion = (user as any).sessionVersion;
+          token.remember = (user as any).remember === true;
           token.lastActive = Date.now();
           token.lastSessionCheck = Date.now();
           // An impersonation cookie counts only if it was issued after this — signing out and back
@@ -354,6 +356,7 @@ export async function getAuthOptions(): Promise<NextAuthOptions> {
       }
     },
     pages: { signIn: "/login", error: "/login" },
-    session: { strategy: "jwt", maxAge: 6 * 60 * 60, updateAge: 15 * 60 }
+    // Cookie lifetime = longest window; the per-token inactivity window (session-timeout.ts) still ends shorter sessions.
+    session: { strategy: "jwt", maxAge: REMEMBER_TIMEOUT_MS / 1000, updateAge: 15 * 60 }
   };
 }
