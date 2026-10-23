@@ -927,21 +927,23 @@ function ReadingListsContent() {
                                                       : owned ? (item.progress?.currentPage > 0 ? <ReadState progress={item.progress} /> : <span className="text-[10px] font-bold uppercase text-muted-foreground">Owned</span>)
                                                       : <MissingRelease item={item} />}
                                               </td>
-                                              <td className="w-32 pr-2 py-1 text-right whitespace-nowrap">
+                                              <td className="w-40 pr-2 py-1 text-right whitespace-nowrap">
+                                                  <div className="inline-flex items-center justify-end gap-1">
                                                   {owned ? (
-                                                      <Button size="sm" asChild className="h-7 px-2 font-bold bg-primary hover:bg-primary/90 text-primary-foreground">
+                                                      <Button size="sm" asChild className="h-8 px-2 font-bold bg-primary hover:bg-primary/90 text-primary-foreground">
                                                           <Link href={readerHref(issue)}><BookOpen className="w-3.5 h-3.5 sm:mr-1" /><span className="hidden sm:inline">Read</span></Link>
                                                       </Button>
                                                   ) : (
                                                       <RequestIconButton label={`Request ${item.title}`} busy={isRequesting} done={isAlreadyRequested} onClick={() => handleRequestMissing(item)} />
                                                   )}
-                                                  {!isAlreadyRequested && !item.issue?.filePath && <GetComicsButton className="ml-1" disabled={isRequesting} onClick={() => handleRequestMissing(item, null, 'getcomics')} />}
-                                                  {!isAlreadyRequested && !item.issue?.filePath && <BatcaveButton className="ml-1" body={{ listItemIds: [item.id] }} />}
+                                                  {!isAlreadyRequested && !item.issue?.filePath && <GetComicsButton disabled={isRequesting} onClick={() => handleRequestMissing(item, null, 'getcomics')} />}
+                                                  {!isAlreadyRequested && !item.issue?.filePath && <BatcaveButton body={{ listItemIds: [item.id] }} />}
                                                   {(isAdmin || activeList.userId === session?.user?.id) && (
-                                                      <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500 hover:text-red-700 ml-1 hidden sm:inline-flex" title="Remove from list" onClick={() => handleRemoveItem(item.id)}>
+                                                      <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:text-red-700 hidden sm:inline-flex" title="Remove from list" onClick={() => handleRemoveItem(item.id)}>
                                                           <Minus className="w-3.5 h-3.5" />
                                                       </Button>
                                                   )}
+                                                  </div>
                                               </td>
                                           </tr>
                                       );

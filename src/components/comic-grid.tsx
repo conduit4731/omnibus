@@ -403,18 +403,7 @@ export function ComicGrid({ title, type, refreshSignal = 0 }: Props) {
                                                 <><Activity className="w-4 h-4 shrink-0" /> <span className="leading-tight text-center">Subscribe to Series</span></>
                                             )}
                                         </Button>
-                                    ) : (
-                                        <Button 
-                                            className={cn("w-full gap-1.5 shadow-sm h-auto min-h-10 py-1.5 text-sm font-bold whitespace-normal", isVolOwned && "bg-green-600 hover:bg-green-700 text-white")} 
-                                            variant="default" 
-                                            onClick={() => setMonitorPrompt({ id: selectedComic.volumeId, name: seriesBaseName, image: selectedComic.image, year: selectedComic.year, publisher: selectedComic.publisher || 'Unknown', directSource: undefined, metadataSource: (selectedComic as any).metadataSource || 'COMICVINE' })} 
-                                            disabled={requestingTarget === `vol-${selectedComic.volumeId}`}
-                                        >
-                                            {requestingTarget === `vol-${selectedComic.volumeId}` ? <Loader2 className="w-4 h-4 animate-spin shrink-0" /> : (
-                                                isVolOwned ? <><Download className="w-4 h-4 shrink-0" /> <span className="leading-tight text-center">Request Missing</span></> : <><Plus className="w-4 h-4 shrink-0" /> <span className="leading-tight text-center">Request Series</span></>
-                                            )}
-                                        </Button>
-                                    )}
+                                    ) : null}
                                       
                                       {/* ISSUE BUTTONS */}
                                       {(isAllAvailableOwned && volStatus === 'LIBRARY_MONITORED') ? (
@@ -428,19 +417,15 @@ export function ComicGrid({ title, type, refreshSignal = 0 }: Props) {
                                               {issueStatus === 'REQUESTED' && <><Clock className="w-4 h-4 text-orange-500 shrink-0" /> <span className="leading-tight">Requested</span></>}
                                               {issueStatus === 'UNRELEASED' && <><Clock className="w-4 h-4 text-purple-500 shrink-0" /> <span className="leading-tight">Unreleased (Queued)</span></>}
                                           </Button>
-                                      ) : (
-                                          <Button 
-                                             className="w-full gap-1.5 shadow-sm h-auto min-h-10 py-1.5 text-sm font-bold bg-primary/10 text-primary border-primary/30 hover:bg-primary/20 whitespace-normal" 
-                                             variant="outline" 
-                                             onClick={() => handleRequest(selectedComic.volumeId, selectedComic.isVolume ? seriesBaseName : selectedComic.name, selectedComic.image, selectedComic.year, 'issue', selectedComic.publisher, false, undefined, selectedComic.issueNumber, false, (selectedComic as any).metadataSource || 'COMICVINE')} 
-                                             disabled={requestingTarget === `iss-${issueTargetName}`}
-                                          >
-                                              {requestingTarget === `iss-${issueTargetName}` ? <Loader2 className="w-4 h-4 animate-spin shrink-0" /> : <><Download className="w-4 h-4 shrink-0" /> <span className="leading-tight text-center">Request Issue</span></>}
-                                          </Button>
-                                      )}
+                                      ) : null}
                                       
                                       {selectedComic.volumeId && !(selectedComic.isVolume ? (isAllAvailableOwned && volStatus === 'LIBRARY_MONITORED') : isIssueOwned) && (
                                         <AllSources className="justify-center" label={selectedComic.isVolume ? "All" : null}>
+                                        {canRequest && (selectedComic.isVolume ? !isAllAvailableOwned : (issueStatus !== 'PENDING_APPROVAL' && issueStatus !== 'REQUESTED' && issueStatus !== 'UNRELEASED')) && (
+                                          <RequestIconButton title={selectedComic.isVolume ? "Alle fehlenden anfragen (Usenet)" : "Heft anfragen (Usenet)"} srText={selectedComic.isVolume ? (isVolOwned ? "Request Missing" : "Request Series") : "Request Issue"}
+                                            busy={requestingTarget === (selectedComic.isVolume ? `vol-${selectedComic.volumeId}` : `iss-${issueTargetName}`)}
+                                            onClick={() => selectedComic.isVolume ? setMonitorPrompt({ id: selectedComic.volumeId, name: seriesBaseName, image: selectedComic.image, year: selectedComic.year, publisher: selectedComic.publisher || 'Unknown', directSource: undefined, metadataSource: (selectedComic as any).metadataSource || 'COMICVINE' }) : handleRequest(selectedComic.volumeId, selectedComic.isVolume ? seriesBaseName : selectedComic.name, selectedComic.image, selectedComic.year, 'issue', selectedComic.publisher, false, undefined, selectedComic.issueNumber, false, (selectedComic as any).metadataSource || 'COMICVINE')} />
+                                        )}
                                           {canRequest && <GetComicsButton title={selectedComic.isVolume ? "Alle fehlenden über GetComics" : "Über GetComics laden"}
                                             onClick={() => selectedComic.isVolume
                                               ? handleRequest(selectedComic.volumeId, seriesBaseName, selectedComic.image, selectedComic.year, 'volume', selectedComic.publisher || 'Unknown', false, 'getcomics', undefined, false, (selectedComic as any).metadataSource || 'COMICVINE')

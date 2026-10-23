@@ -524,18 +524,7 @@ export function RequestSearch({ variant = 'home', query }: { variant?: 'home' | 
                                                 <><Activity className="w-4 h-4 shrink-0" /> <span className="leading-tight text-center">Subscribe to Series</span></>
                                             )}
                                         </Button>
-                                    ) : (
-                                        <Button 
-                                            className={cn("w-full gap-1.5 shadow-sm h-auto min-h-10 py-1.5 text-sm font-bold whitespace-normal", isVolOwned && "bg-green-600 hover:bg-green-700 text-white")} 
-                                            variant="default" 
-                                            onClick={() => setMonitorPrompt({ id: selectedItem.volumeId, name: seriesBaseName, image: selectedItem.image, year: selectedItem.year, publisher: selectedItem.publisher || 'Unknown', metadataSource: selectedItem.metadataSource || 'COMICVINE' })} 
-                                            disabled={requestingTarget === `vol-${selectedItem.volumeId}`}
-                                        >
-                                            {requestingTarget === `vol-${selectedItem.volumeId}` ? <Loader2 className="w-4 h-4 animate-spin shrink-0" /> : (
-                                                isVolOwned ? <><Download className="w-4 h-4 shrink-0" /> <span className="leading-tight text-center">Request Missing</span></> : <><Plus className="w-4 h-4 shrink-0" /> <span className="leading-tight text-center">Request Series</span></>
-                                            )}
-                                        </Button>
-                                    )}
+                                    ) : null}
                                     
                                     {/* ISSUE BUTTONS */}
                                     {(isAllAvailableOwned && volStatus === 'LIBRARY_MONITORED') ? (
@@ -549,19 +538,15 @@ export function RequestSearch({ variant = 'home', query }: { variant?: 'home' | 
                                             {issueStatus === 'REQUESTED' && <><Clock className="w-4 h-4 text-orange-500 shrink-0" /> <span className="leading-tight">Requested</span></>}
                                             {issueStatus === 'UNRELEASED' && <><Clock className="w-4 h-4 text-purple-500 shrink-0" /> <span className="leading-tight">Unreleased (Queued)</span></>}
                                         </Button>
-                                    ) : (
-                                        <Button 
-                                            className="w-full gap-1.5 shadow-sm h-auto min-h-10 py-1.5 text-sm font-bold bg-primary/10 text-primary border-primary/30 hover:bg-primary/20 whitespace-normal" 
-                                            variant="outline" 
-                                            onClick={() => handleRequest(selectedItem.volumeId, selectedItem.isVolume ? seriesBaseName : selectedItem.name, selectedItem.image, selectedItem.year, 'issue', selectedItem.publisher, false, selectedItem.issueNumber, false, selectedItem.metadataSource || 'COMICVINE')} 
-                                            disabled={requestingTarget === `iss-${issueTargetName}`}
-                                        >
-                                            {requestingTarget === `iss-${issueTargetName}` ? <Loader2 className="w-4 h-4 animate-spin shrink-0" /> : <><Download className="w-4 h-4 shrink-0" /> <span className="leading-tight text-center">Request Issue</span></>}
-                                        </Button>
-                                    )}
+                                    ) : null}
                                     
                                     {selectedItem.volumeId && !(selectedItem.isVolume ? (isAllAvailableOwned && volStatus === 'LIBRARY_MONITORED') : isIssueOwned) && (
                                       <AllSources className="justify-center" label={selectedItem.isVolume ? "All" : null}>
+                                        {canRequest && (selectedItem.isVolume ? !isAllAvailableOwned : (issueStatus !== 'PENDING_APPROVAL' && issueStatus !== 'REQUESTED' && issueStatus !== 'UNRELEASED')) && (
+                                          <RequestIconButton title={selectedItem.isVolume ? "Alle fehlenden anfragen (Usenet)" : "Heft anfragen (Usenet)"} srText={selectedItem.isVolume ? (isVolOwned ? "Request Missing" : "Request Series") : "Request Issue"}
+                                            busy={requestingTarget === (selectedItem.isVolume ? `vol-${selectedItem.volumeId}` : `iss-${issueTargetName}`)}
+                                            onClick={() => selectedItem.isVolume ? setMonitorPrompt({ id: selectedItem.volumeId, name: seriesBaseName, image: selectedItem.image, year: selectedItem.year, publisher: selectedItem.publisher || 'Unknown', metadataSource: selectedItem.metadataSource || 'COMICVINE' }) : handleRequest(selectedItem.volumeId, selectedItem.isVolume ? seriesBaseName : selectedItem.name, selectedItem.image, selectedItem.year, 'issue', selectedItem.publisher, false, selectedItem.issueNumber, false, selectedItem.metadataSource || 'COMICVINE')} />
+                                        )}
                                         {canRequest && <GetComicsButton title={selectedItem.isVolume ? "Alle fehlenden über GetComics" : "Über GetComics laden"}
                                           onClick={() => selectedItem.isVolume
                                             ? handleRequest(selectedItem.volumeId, seriesBaseName, selectedItem.image, selectedItem.year, 'volume', selectedItem.publisher || 'Unknown', false, undefined, false, selectedItem.metadataSource || 'COMICVINE', 'getcomics')
