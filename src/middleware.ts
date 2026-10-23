@@ -34,6 +34,7 @@ export async function middleware(req: NextRequest) {
         '/api/admin/update-check',     // Used by the frontend to check for updates, but has its own internal key check
         '/api/cron',          // Hit by external uptime monitors
         '/api/v1/stats',      // Validates its own custom x-api-key
+        '/api/batcave',       // Fork: Batcave userscript, admin x-api-key checked in each handler
         '/api/uploads',       // Serves public avatars and banners
         '/api/opds',          // Serves uploaded files but checks for valid keys in the route handler
         '/api/koreader',      // KOReader devices auth via x-auth-user/x-auth-key (no NextAuth cookie); each handler self-validates
