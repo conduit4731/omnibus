@@ -23,14 +23,19 @@ export function normIssueNumber(n: string | number): string {
 
 type SeriesRow = { id: string; name: string; year: number; folderPath: string };
 
-/** Same name, start year within 1 (Batcave and ComicVine disagree by a year at times), closest year wins. */
+/**
+ * Same name, start year within 1 (Batcave and ComicVine disagree by a year at times), closest year wins.
+ * Batcave lists some series without a year ("Avengers: The Initiative"): then only an unambiguous name counts.
+ */
 export function pickSeries<T extends SeriesRow>(rows: T[], title: string): T | null {
     const t = parseBatcaveTitle(title);
-    if (!t) return null;
-    const key = normSeriesName(t.name);
+    const key = normSeriesName(t ? t.name : title);
+    if (!key) return null;
+    const same = rows.filter(r => normSeriesName(r.name) === key);
+    if (!t) return same.length === 1 ? same[0] : null;
     let best: T | null = null;
-    for (const r of rows) {
-        if (normSeriesName(r.name) !== key || Math.abs(r.year - t.year) > 1) continue;
+    for (const r of same) {
+        if (Math.abs(r.year - t.year) > 1) continue;
         if (!best || Math.abs(r.year - t.year) < Math.abs(best.year - t.year)) best = r;
     }
     return best;

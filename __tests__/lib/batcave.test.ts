@@ -21,6 +21,10 @@ describe('lib/batcave', () => {
         expect(pickSeries(rows, 'Flash (2011)')?.id).toBe('b');
         expect(pickSeries(rows, 'New Avengers: Illuminati (2007)')?.id).toBe('d');
         expect(pickSeries(rows, 'The Flash (2016)')).toBeNull();
+        // no year on Batcave: only a unique name
+        expect(pickSeries(rows, 'New Avengers: Illuminati')?.id).toBe('d');
+        expect(pickSeries(rows, 'The Flash')).toBeNull();
+        expect(pickSeries(rows, '')).toBeNull();
     });
 
     it('normalises issue numbers', () => {
