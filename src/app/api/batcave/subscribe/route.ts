@@ -14,7 +14,7 @@ import { validateApiKey } from '@/lib/api-auth';
 import { Logger } from '@/lib/logger';
 import { cachedCvGet } from '@/lib/metadata/metadata-cache';
 import { addSeriesFromCv } from '@/lib/batcave-queue';
-import { BATCAVE_MAP_KEY, parseBatcaveTitle, pickCvVolume, titleKey } from '@/lib/batcave';
+import { BATCAVE_MAP_KEY, normSeriesName, parseBatcaveTitle, pickCvVolume, titleKey } from '@/lib/batcave';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,8 +39,21 @@ export async function POST(req: NextRequest) {
                 params: { api_key: cvKey, format: 'json', query, resources: 'volume', limit: 50, field_list: 'id,name,start_year,publisher,count_of_issues' },
                 headers: { 'User-Agent': 'Omnibus/1.0' }, timeout: 10000,
             });
-            const hits = res.data?.results || [];
-            const vol = pickCvVolume(hits, title);
+            let hits = res.data?.results || [];
+            let vol = pickCvVolume(hits, title);
+            const key = normSeriesName(parseBatcaveTitle(title)?.name || title);
+            const same = hits.filter((h: { name: string }) => normSeriesName(h.name) === key);
+            if (!vol && same.length > 1) {
+                // The search answers count_of_issues with 0 at times ("Invincible" 2003: two hits, both 0) — the
+                // volume list has the real counts, which separate the series from its same-named TPBs.
+                const counts = await cachedCvGet('https://comicvine.gamespot.com/api/volumes/', {
+                    params: { api_key: cvKey, format: 'json', filter: `id:${same.slice(0, 50).map((h: { id: number }) => h.id).join('|')}`, field_list: 'id,count_of_issues', limit: 50 },
+                    headers: { 'User-Agent': 'Omnibus/1.0' }, timeout: 10000,
+                });
+                const byId = new Map<number, number>((counts.data?.results || []).map((r: { id: number; count_of_issues: number }) => [r.id, Number(r.count_of_issues) || 0]));
+                hits = hits.map((h: { id: number; count_of_issues?: number }) => byId.has(h.id) ? { ...h, count_of_issues: byId.get(h.id) } : h);
+                vol = pickCvVolume(hits, title);
+            }
             if (!vol) {
                 const near = hits.slice(0, 5).map((h: { name: string; start_year: unknown; count_of_issues?: number }) => `${h.name} (${h.start_year}, ${h.count_of_issues ?? '?'} Hefte)`);
                 result[title] = { error: 'Bei ComicVine nicht eindeutig gefunden' + (near.length ? '. Treffer: ' + near.join('; ') : ', keine Treffer') };
