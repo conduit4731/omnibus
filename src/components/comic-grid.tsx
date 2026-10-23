@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useMemo } from "react"
 import { useSession } from "next-auth/react"
+import { BatcaveButton } from "@/components/batcave-button"
 import { Button } from "@/components/ui/button"
 import { Loader2, ChevronLeft, ChevronRight, Plus, Info, Calendar, Paintbrush, PenTool, Image as ImageIcon, ExternalLink, Layers, Download, CheckCircle2, Clock, Users, Globe, Activity, Library, FileCheck, Tags, BookMarked, MapPin, Shield } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
@@ -438,6 +439,10 @@ export function ComicGrid({ title, type, refreshSignal = 0 }: Props) {
                                           </Button>
                                       )}
                                       
+                                      {((selectedComic as any).metadataSource || 'COMICVINE') === 'COMICVINE' && selectedComic.volumeId && !(selectedComic.isVolume ? (isAllAvailableOwned && volStatus === 'LIBRARY_MONITORED') : isIssueOwned) && (
+                                        <BatcaveButton size="default" className="w-full h-auto min-h-10 py-1.5" label={selectedComic.isVolume ? "Fehlende über Batcave" : "Über Batcave laden"}
+                                          body={selectedComic.isVolume ? { cvId: selectedComic.volumeId } : { cvId: selectedComic.volumeId, issues: [{ number: String(selectedComic.issueNumber || '1') }] }} />
+                                      )}
                                       <Button 
                                         variant="outline" 
                                         className="w-full gap-1.5 border-dashed shadow-sm h-auto min-h-10 py-1.5 text-sm font-bold border-border hover:bg-muted text-foreground whitespace-normal" 
@@ -610,6 +615,7 @@ export function ComicGrid({ title, type, refreshSignal = 0 }: Props) {
                                                             >
                                                                 {requestingTarget === `iss-${relIssueTargetName}` ? <Loader2 className="w-4 h-4 animate-spin"/> : <Download className="w-4 h-4"/>}
                                                             </Button>
+                                                            <BatcaveButton iconOnly className="h-8 w-8 rounded-full pointer-events-auto bg-background" body={{ cvId: selectedComic.volumeId, issues: [{ number: String(issue.issueNumber || '1') }] }} />
                                                         </div>
                                                     )}
 

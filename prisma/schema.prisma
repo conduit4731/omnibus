@@ -823,3 +823,18 @@ model DigestHistory {
 
   @@unique([seriesId, issueNum])
 }
+// Fork only: issues queued for the Batcave userscript worker (see src/lib/batcave-queue.ts).
+// No relation to Series on purpose (keeps the upstream model untouched); jobs of a deleted series are skipped.
+model BatcaveJob {
+  id        String   @id @default(cuid())
+  seriesId  String
+  number    String
+  isAnnual  Boolean  @default(false)
+  status    String   @default("QUEUED") // QUEUED, DONE, NOT_FOUND, ERROR
+  message   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([seriesId, number, isAnnual])
+  @@index([status])
+}

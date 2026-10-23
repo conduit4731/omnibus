@@ -13,6 +13,7 @@ import { Loader2, Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight, Im
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
+import { BatcaveButton } from "@/components/batcave-button"
 import { FollowBell } from "@/components/follow-bell"
 import { hasMetronCredentials } from "@/lib/metron/credentials"
 import { ReleaseCalendar } from "@/components/release-calendar"
@@ -579,6 +580,7 @@ export default function CalendarPage() {
                                                                         {requestingTarget === `iss-${issueTargetName}` ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Download className="w-3 h-3 mr-1" />} Request Issue
                                                                     </Button>
                                                                 )}
+                                                                {volIdKey ? <BatcaveButton iconOnly className="h-8 w-8 border-2 border-white text-white bg-transparent" body={{ cvId: volIdKey, metadataSource: (issue as any).metadataSource || 'METRON', issues: [{ number: String(issue.issueNumber) }] }} /> : null}
                                                             </div>
                                                             <Button
                                                                 size="sm"
@@ -643,6 +645,7 @@ export default function CalendarPage() {
                                                             {requestingTarget === `iss-${issueTargetName}` ? <Loader2 className="w-3 h-3 animate-spin mr-1.5" /> : <Download className="w-3 h-3 mr-1.5" />} Request Issue
                                                         </Button>
                                                     )}
+                                                    {volIdKey ? <BatcaveButton className="w-full h-8 text-[10px]" label="Über Batcave laden" body={{ cvId: volIdKey, metadataSource: (issue as any).metadataSource || 'METRON', issues: [{ number: String(issue.issueNumber) }] }} /> : null}
 
                                                     <Button 
                                                         size="sm" 

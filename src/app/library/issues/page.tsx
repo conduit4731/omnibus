@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback, useRef, Suspense } from "react"
 import Link from "next/link"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { useSession } from "next-auth/react"
+import { BatcaveButton } from "@/components/batcave-button"
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog"
 import { requestNameFor } from "@/lib/utils/request-name"
 import { normalizeFractionNumbers } from "@/lib/utils/issue-parser"
@@ -254,6 +255,7 @@ function LibraryIssuesInner() {
   // issue is never counted, shown or not: you have the story, and the bulk action asks for what's
   // missing. Its own Request button stays for the deliberate ask.
   const requestableShown = issues.filter(i => i.requestable && !i.coveredBy && !requestedIds.has(i.id));
+  const batcaveShown = issues.filter(i => !i.onDisk && !i.coveredBy && i.seriesMetadataId && (i.metadataSource || 'COMICVINE') === 'COMICVINE');
 
   const requestAllShown = async () => {
     setBulkOpen(false);
@@ -307,6 +309,10 @@ function LibraryIssuesInner() {
             ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Requesting {bulkProgress.done}/{bulkProgress.total}…</>
             : <><DownloadCloud className="w-4 h-4 mr-2" /> Request all shown ({requestableShown.length})</>}
         </Button>
+      )}
+      {batcaveShown.length > 0 && (
+        <BatcaveButton className="h-10 sm:h-9 shrink-0" label={`Alle angezeigten über Batcave (${batcaveShown.length})`}
+          body={() => ({ batch: batcaveShown.map(i => ({ cvId: i.seriesMetadataId, issues: [{ number: i.number, isAnnual: i.isAnnual }] })) })} />
       )}
       </div>
 
@@ -489,6 +495,9 @@ function LibraryIssuesInner() {
                       ? <><Check className="w-3.5 h-3.5 mr-1" /> Requested</>
                       : <><DownloadCloud className="w-3.5 h-3.5 mr-1" /> Request</>}
                 </Button>
+              )}
+              {!issue.onDisk && issue.seriesMetadataId && (issue.metadataSource || 'COMICVINE') === 'COMICVINE' && (
+                <BatcaveButton className="h-8 text-[10px] uppercase tracking-wider" body={{ cvId: issue.seriesMetadataId, issues: [{ number: issue.number, isAnnual: issue.isAnnual }] }} />
               )}
             </div>
           ))}

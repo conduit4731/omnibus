@@ -305,6 +305,9 @@ export function SiteHeader() {
                       <DropdownMenuItem asChild className="p-3 text-base font-bold cursor-pointer rounded-lg text-primary hover:bg-primary/10 focus:bg-primary/20 focus:text-primary transition-colors">
                         <Link href="/admin"><ShieldAlert className="w-5 h-5 mr-3" /> Admin Dashboard</Link>
                       </DropdownMenuItem>
+                      <DropdownMenuItem asChild className={cn("p-3 text-base font-medium cursor-pointer rounded-lg transition-colors", pathname?.startsWith("/batcave") ? "bg-primary/10 text-primary" : "hover:bg-muted focus:bg-primary/10 focus:text-primary")}>
+                        <Link href="/batcave">Batcave-Warteschlange</Link>
+                      </DropdownMenuItem>
                     </>
                   )}
                 </DropdownMenuContent>
@@ -325,6 +328,9 @@ export function SiteHeader() {
             <Link href="/characters" className={cn("uppercase tracking-[0.08em] font-extrabold text-sm px-3 py-1.5 whitespace-nowrap transition-colors duration-200 ease-out motion-reduce:transition-none active:scale-95", pathname?.startsWith("/characters") ? "bg-card border-2 border-primary shadow-[3px_3px_0_rgb(0_0_0/0.45)] dark:shadow-[3px_3px_0_rgb(255_255_255/0.2)] text-primary transition-all" : "text-muted-foreground hover:text-foreground")}>Characters</Link>
             <Link href="/requests" className={cn("uppercase tracking-[0.08em] font-extrabold text-sm px-3 py-1.5 whitespace-nowrap transition-colors duration-200 ease-out motion-reduce:transition-none active:scale-95", pathname?.startsWith("/requests") ? "bg-card border-2 border-primary shadow-[3px_3px_0_rgb(0_0_0/0.45)] dark:shadow-[3px_3px_0_rgb(255_255_255/0.2)] text-primary transition-all" : "text-muted-foreground hover:text-foreground")}>My Requests</Link>
             <Link href="/calendar" className={cn("uppercase tracking-[0.08em] font-extrabold text-sm px-3 py-1.5 whitespace-nowrap transition-colors duration-200 ease-out motion-reduce:transition-none active:scale-95", pathname?.startsWith("/calendar") ? "bg-card border-2 border-primary shadow-[3px_3px_0_rgb(0_0_0/0.45)] dark:shadow-[3px_3px_0_rgb(255_255_255/0.2)] text-primary transition-all" : "text-muted-foreground hover:text-foreground")}>Calendar</Link>
+            {session?.user?.role === "ADMIN" && (
+              <Link href="/batcave" className={cn("uppercase tracking-[0.08em] font-extrabold text-sm px-3 py-1.5 whitespace-nowrap transition-colors duration-200 ease-out motion-reduce:transition-none active:scale-95", pathname?.startsWith("/batcave") ? "bg-card border-2 border-primary shadow-[3px_3px_0_rgb(0_0_0/0.45)] dark:shadow-[3px_3px_0_rgb(255_255_255/0.2)] text-primary transition-all" : "text-muted-foreground hover:text-foreground")}>Batcave</Link>
+            )}
           </nav>
         </div>
 

@@ -1,6 +1,7 @@
 // Fork only: day / week / month / year release calendar with Batcave-style publisher filter.
 "use client"
 
+import { BatcaveButton } from "@/components/batcave-button"
 import { deDate, deDayMonth, DE_MONTHS } from "@/lib/date-de"
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
@@ -115,6 +116,7 @@ function ReleaseDialog({ r, onClose }: { r: Release | null, onClose: () => void 
                         <Button variant="outline" className="font-bold" disabled={busy !== null || !r.volumeId} onClick={() => request('issue')}>
                             {busy === 'issue' && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Request this issue
                         </Button>
+                        {r.volumeId && <BatcaveButton size="default" label="Über Batcave laden" body={{ cvId: r.volumeId, metadataSource: r.metadataSource || 'METRON', issues: [{ number: r.issueNumber }] }} />}
                         {typeof r.id === 'number' && (
                             <Button variant="ghost" asChild className="text-muted-foreground"><a href={`https://metron.cloud/issue/${r.id}/`} target="_blank" rel="noreferrer"><ExternalLink className="w-4 h-4 mr-2" />Details on Metron</a></Button>
                         )}

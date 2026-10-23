@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation"
 import { searchKind, SEARCH_KIND_LABEL, type SearchKind } from "@/lib/search-kind"
 import { Chip } from "@/components/list-cards"
 import { useState, useEffect, useMemo } from "react"
-import { useSession } from "next-auth/react" 
+import { useSession } from "next-auth/react"
+import { BatcaveButton } from "@/components/batcave-button" 
 import { Search, Loader2, X, Plus, Calendar, Info, Layers, ChevronLeft, Download, CheckCircle2, Clock, Globe, PenTool, Paintbrush, Users, Image as ImageIcon, Activity, Library, FileCheck, Tags, BookMarked, Shield, MapPin, ExternalLink } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -558,6 +559,10 @@ export function RequestSearch({ variant = 'home', query }: { variant?: 'home' | 
                                         </Button>
                                     )}
                                     
+                                    {((selectedItem as any).metadataSource || 'COMICVINE') === 'COMICVINE' && selectedItem.volumeId && !(selectedItem.isVolume ? (isAllAvailableOwned && volStatus === 'LIBRARY_MONITORED') : isIssueOwned) && (
+                                      <BatcaveButton size="default" className="w-full h-auto min-h-10 py-1.5" label={selectedItem.isVolume ? "Fehlende über Batcave" : "Über Batcave laden"}
+                                        body={selectedItem.isVolume ? { cvId: selectedItem.volumeId } : { cvId: selectedItem.volumeId, issues: [{ number: String(selectedItem.issueNumber || '1') }] }} />
+                                    )}
                                     <Button 
                                       variant="outline" 
                                       className="w-full gap-1.5 border-dashed shadow-sm h-auto min-h-10 py-1.5 text-sm font-bold border-border hover:bg-muted text-foreground whitespace-normal" 
@@ -710,6 +715,7 @@ export function RequestSearch({ variant = 'home', query }: { variant?: 'home' | 
                                                   {requestingTarget === `iss-${relIssueTargetName}` ? <Loader2 className="w-3.5 h-3.5 animate-spin"/> : <Download className="w-3.5 h-3.5 mr-1"/>} Request
                                               </Button>
                                           )}
+                                          {relIssueStatus !== 'ISSUE_OWNED' && relIssueStatus !== 'ISSUE_COVERED' && <BatcaveButton className="shrink-0 h-8 text-[10px] uppercase tracking-wider" body={{ cvId: selectedItem.volumeId, issues: [{ number: String(issue.issueNumber || '1') }] }} />}
                                       </div>
                                   )})}
                               </div>
