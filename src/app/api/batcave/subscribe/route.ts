@@ -41,11 +41,16 @@ export async function POST(req: NextRequest) {
         try {
             const query = parseBatcaveTitle(title)?.name || title;
             const res = await cachedCvGet('https://comicvine.gamespot.com/api/search/', {
-                params: { api_key: cvKey, format: 'json', query, resources: 'volume', limit: 50, field_list: 'id,name,start_year,publisher' },
+                params: { api_key: cvKey, format: 'json', query, resources: 'volume', limit: 50, field_list: 'id,name,start_year,publisher,count_of_issues' },
                 headers: { 'User-Agent': 'Omnibus/1.0' }, timeout: 10000,
             });
-            const vol = pickCvVolume(res.data?.results || [], title);
-            if (!vol) { result[title] = { error: 'Bei ComicVine nicht eindeutig gefunden' }; continue; }
+            const hits = res.data?.results || [];
+            const vol = pickCvVolume(hits, title);
+            if (!vol) {
+                const near = hits.slice(0, 5).map((h: { name: string; start_year: unknown; count_of_issues?: number }) => `${h.name} (${h.start_year}, ${h.count_of_issues ?? '?'} Hefte)`);
+                result[title] = { error: 'Bei ComicVine nicht eindeutig gefunden' + (near.length ? '. Treffer: ' + near.join('; ') : ', keine Treffer') };
+                continue;
+            }
 
             const metadataId = String(vol.id);
             let series = await prisma.series.findUnique({ where: { metadataSource_metadataId: { metadataSource: 'COMICVINE', metadataId } } });

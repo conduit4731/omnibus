@@ -42,8 +42,22 @@ describe('lib/batcave', () => {
         expect(pickCvVolume(cv, 'Absolute Superman (2024-)')?.id).toBe(3);
         expect(pickCvVolume(cv, 'Flashpoint: Reverse-Flash')?.id).toBe(4);
         expect(pickCvVolume(cv, 'The Flash (2010)')?.id).toBe(5);
-        expect(pickCvVolume(cv, 'Flashpoint')).toBeNull();          // two without a year: ambiguous
+        expect(pickCvVolume(cv, 'Flashpoint')).toBeNull();          // two without a year, no issue counts: a tie
         expect(pickCvVolume(cv, 'Booster Gold (2007)')).toBeNull();
+    });
+
+    it('prefers the series over same-named trade paperbacks', () => {
+        const cv = [
+            { id: 10, name: 'JLA', start_year: '1997', count_of_issues: 1 },
+            { id: 11, name: 'JLA', start_year: '1997', count_of_issues: 125 },
+            { id: 12, name: 'JLA', start_year: '1997', count_of_issues: 1 },
+            { id: 20, name: 'Green Lantern: Rebirth', start_year: '2004', count_of_issues: 6 },
+            { id: 21, name: 'Green Lantern: Rebirth', start_year: '2016', count_of_issues: 1 },
+            { id: 30, name: 'Rann-Thanagar War', start_year: '2005', count_of_issues: 6 },
+        ];
+        expect(pickCvVolume(cv, 'JLA (1997)')?.id).toBe(11);
+        expect(pickCvVolume(cv, 'Green Lantern: Rebirth')?.id).toBe(20);
+        expect(pickCvVolume(cv, 'Rann/Thanagar War (2005)')?.id).toBe(30);
     });
 
     it('normalises issue numbers', () => {

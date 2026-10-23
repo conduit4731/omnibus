@@ -42,18 +42,23 @@ export function pickSeries<T extends SeriesRow>(rows: T[], title: string): T | n
 export const BATCAVE_MAP_KEY = 'batcave_series_map';
 export const titleKey = (title: string) => normSeriesName(title);
 
-type CvVolume = { id: number; name: string; start_year: string | number | null; publisher?: { name?: string } | null };
+type CvVolume = { id: number; name: string; start_year: string | number | null; count_of_issues?: number | null; publisher?: { name?: string } | null };
 
-/** ComicVine search hits → the volume a Batcave title means: same name, exact start year, else the only one within ±1 / the only one at all. */
+/**
+ * ComicVine search hits → the volume a Batcave title means: same name and exact start year, else within ±1, else (no
+ * year on Batcave) any year. Several candidates: the one with the most issues — ComicVine files trade paperbacks
+ * under the series name too ("JLA" 1997 is the series and a dozen TPBs). A tie stays unresolved.
+ */
 export function pickCvVolume(results: CvVolume[], title: string): CvVolume | null {
     const t = parseBatcaveTitle(title);
     const key = normSeriesName(t ? t.name : title);
     const same = results.filter(r => normSeriesName(r.name) === key);
-    if (!t) return same.length === 1 ? same[0] : null;
-    const exact = same.filter(r => Number(r.start_year) === t.year);
-    if (exact.length) return exact.length === 1 ? exact[0] : null;
-    const near = same.filter(r => Math.abs(Number(r.start_year) - t.year) <= 1);
-    return near.length === 1 ? near[0] : null;
+    const pool = !t ? same
+        : same.some(r => Number(r.start_year) === t.year) ? same.filter(r => Number(r.start_year) === t.year)
+        : same.filter(r => Math.abs(Number(r.start_year) - t.year) <= 1);
+    const sorted = [...pool].sort((x, y) => (y.count_of_issues || 0) - (x.count_of_issues || 0));
+    if (!sorted.length || (sorted[1] && (sorted[1].count_of_issues || 0) === (sorted[0].count_of_issues || 0))) return null;
+    return sorted[0];
 }
 
 /** Upload file name batcave-import.sh understands: "<Series>_(<year>)_Issue_#7.cbz" / "…_Annual_#1.cbz". */
