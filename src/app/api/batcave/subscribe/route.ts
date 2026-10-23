@@ -4,9 +4,11 @@
 // admin API key → finds each title's ComicVine volume and adds it to Omnibus like "Subscribe" does (folder from the
 // naming pattern, metadata sync, followed by the key's user), but NOT monitored: the Batcave userscript fetches the
 // issues, the gap backfill must not search them again on GetComics. An already existing volume (same ComicVine id)
-// is reused. Every resolution is remembered in BATCAVE_MAP_KEY so /match finds it next time.
+// is reused. Every resolution is remembered in BATCAVE_MAP_KEY so /match finds it next time; a new series also
+// triggers batcave-import.sh (.neu) for files already waiting in the inbox.
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
+import fs from 'fs-extra';
 import { prisma } from '@/lib/db';
 import { validateApiKey } from '@/lib/api-auth';
 import { Logger } from '@/lib/logger';
@@ -70,6 +72,10 @@ export async function POST(req: NextRequest) {
         } catch (e) {
             result[title] = { error: String(e instanceof Error ? e.message : e) };
         }
+    }
+    // Hefte, die schon in der Inbox auf ihre Serie warten (manuelle Batcave-Downloads), beim nächsten Cron-Lauf importieren
+    if (process.env.OMNIBUS_BATCAVE_INBOX && Object.values(result).some(r => 'created' in r && r.created)) {
+        await fs.writeFile(path.join(process.env.OMNIBUS_BATCAVE_INBOX, '.neu'), '').catch(() => {});
     }
     await prisma.systemSetting.upsert({
         where: { key: BATCAVE_MAP_KEY }, update: { value: JSON.stringify(map) }, create: { key: BATCAVE_MAP_KEY, value: JSON.stringify(map) },
