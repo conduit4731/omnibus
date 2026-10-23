@@ -6,7 +6,7 @@ import { searchKind, SEARCH_KIND_LABEL, type SearchKind } from "@/lib/search-kin
 import { Chip } from "@/components/list-cards"
 import { useState, useEffect, useMemo } from "react"
 import { useSession } from "next-auth/react"
-import { BatcaveButton, GetComicsButton, RequestIconButton } from "@/components/batcave-button" 
+import { AllSources, BatcaveButton, GetComicsButton, RequestIconButton } from "@/components/batcave-button" 
 import { Search, Loader2, X, Plus, Calendar, Info, Layers, ChevronLeft, Download, CheckCircle2, Clock, Globe, PenTool, Paintbrush, Users, Image as ImageIcon, Activity, Library, FileCheck, Tags, BookMarked, Shield, MapPin, ExternalLink } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -561,14 +561,14 @@ export function RequestSearch({ variant = 'home', query }: { variant?: 'home' | 
                                     )}
                                     
                                     {selectedItem.volumeId && !(selectedItem.isVolume ? (isAllAvailableOwned && volStatus === 'LIBRARY_MONITORED') : isIssueOwned) && (
-                                      <div className="flex justify-center gap-2">
+                                      <AllSources className="justify-center" label={selectedItem.isVolume ? "All" : null}>
                                         {canRequest && <GetComicsButton title={selectedItem.isVolume ? "Alle fehlenden über GetComics" : "Über GetComics laden"}
                                           onClick={() => selectedItem.isVolume
                                             ? handleRequest(selectedItem.volumeId, seriesBaseName, selectedItem.image, selectedItem.year, 'volume', selectedItem.publisher || 'Unknown', false, undefined, false, selectedItem.metadataSource || 'COMICVINE', 'getcomics')
                                             : handleRequest(selectedItem.volumeId, selectedItem.name, selectedItem.image, selectedItem.year, 'issue', selectedItem.publisher, false, selectedItem.issueNumber, false, selectedItem.metadataSource || 'COMICVINE', 'getcomics')} />}
                                         {((selectedItem as any).metadataSource || 'COMICVINE') === 'COMICVINE' && <BatcaveButton title={selectedItem.isVolume ? "Alle fehlenden über Batcave" : "Über Batcave laden"}
                                           body={selectedItem.isVolume ? { cvId: selectedItem.volumeId } : { cvId: selectedItem.volumeId, issues: [{ number: String(selectedItem.issueNumber || '1') }] }} />}
-                                      </div>
+                                      </AllSources>
                                     )}
                                     <Button 
                                       variant="outline" 

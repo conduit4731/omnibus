@@ -118,9 +118,9 @@ function RequestRow({ req, getStatusColor, onCancel, onRetry, isAdmin, isSelecti
       <td className="px-2 py-1 whitespace-nowrap text-right" onClick={e => e.stopPropagation()}>
         {needsAction(req) ? (
           <div className="inline-flex gap-1.5">
-            <GetComicsButton className="h-7 w-7" title="GetComics erneut versuchen" onClick={() => [req, ...sameLink].forEach(x => onRetry(x.id))} />
+            <GetComicsButton title="GetComics erneut versuchen" onClick={() => [req, ...sameLink].forEach(x => onRetry(x.id))} />
             {req.volumeId && req.volumeId !== "0" && (
-              <BatcaveButton className="h-7 w-7" body={{ cvId: req.volumeId, metadataSource: req.metadataSource, issues: [req, ...sameLink].filter(x => x.issueNumber).map(x => ({ number: String(x.issueNumber) })) }} />
+              <BatcaveButton body={{ cvId: req.volumeId, metadataSource: req.metadataSource, issues: [req, ...sameLink].filter(x => x.issueNumber).map(x => ({ number: String(x.issueNumber) })) }} />
             )}
           </div>
         ) : (<>

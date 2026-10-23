@@ -6,7 +6,7 @@ import { requestListItem } from "@/lib/request-list-item"
 import { RequestSearch } from "@/components/request-search"
 import { useState, useEffect, Suspense } from "react"
 import { useSession } from "next-auth/react"
-import { BatcaveButton, GetComicsButton, RequestIconButton } from "@/components/batcave-button"
+import { AllSources, BatcaveButton, GetComicsButton, RequestIconButton } from "@/components/batcave-button"
 import { useSearchParams } from "next/navigation"
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd"
 import { Button } from "@/components/ui/button"
@@ -808,13 +808,11 @@ function ReadingListsContent() {
                                   </Button>
 
                                   {missingItems.length > 0 && (
-                                      <RequestIconButton className="h-10 w-10 sm:h-9 sm:w-9" title={`Alle ${missingItems.length} fehlenden anfragen (Usenet)`} busy={isBulkDownloading} onClick={() => handleDownloadAllMissing(missingItems)} />
-                                  )}
-                                  {missingItems.length > 0 && (
-                                      <>
-                                          <GetComicsButton className="h-10 w-10 sm:h-9 sm:w-9" title={`Alle ${missingItems.length} fehlenden über GetComics`} disabled={isBulkDownloading} onClick={() => handleDownloadAllMissing(missingItems, 'getcomics')} />
-                                          <BatcaveButton className="h-10 w-10 sm:h-9 sm:w-9" title={`Alle ${missingItems.length} fehlenden über Batcave`} body={() => ({ listItemIds: missingItems.map((i: any) => i.id) })} />
-                                      </>
+                                      <AllSources>
+                                          <RequestIconButton title={`Alle ${missingItems.length} fehlenden anfragen (Usenet)`} busy={isBulkDownloading} onClick={() => handleDownloadAllMissing(missingItems)} />
+                                          <GetComicsButton title={`Alle ${missingItems.length} fehlenden über GetComics`} disabled={isBulkDownloading} onClick={() => handleDownloadAllMissing(missingItems, 'getcomics')} />
+                                          <BatcaveButton title={`Alle ${missingItems.length} fehlenden über Batcave`} body={() => ({ listItemIds: missingItems.map((i: any) => i.id) })} />
+                                      </AllSources>
                                   )}
                                   {(isAdmin || activeList.userId === session?.user?.id) && (
                                       <Button variant="ghost" size="icon" className="h-10 w-10 sm:h-9 sm:w-9 border border-transparent hover:border-red-200 dark:hover:border-red-900/50 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20" onClick={() => setDeleteModalOpen(true)}>
@@ -878,9 +876,13 @@ function ReadingListsContent() {
                                           ) : <RequestSearch variant="find" query={name} />}
                                           <div className="hidden sm:block h-1.5 w-28 rounded-full bg-muted overflow-hidden shrink-0"><div className={`h-full ${owned === items.length ? 'bg-emerald-500' : owned === 0 ? 'bg-red-500' : 'bg-amber-500'}`} style={{ width: `${Math.max(4, Math.round(100 * owned / items.length))}%` }} /></div>
                                           <OwnedState items={items} />
-                                          {owned < items.length && <GetComicsButton className="h-7 w-7" title="Fehlende dieser Serie über GetComics" disabled={isBulkDownloading} onClick={() => handleDownloadAllMissing(items.filter((i: any) => !i.issue?.filePath), 'getcomics')} />}
-                                          {owned < items.length && <BatcaveButton className="h-7 w-7" title="Fehlende dieser Serie über Batcave" body={() => ({ listItemIds: items.filter((i: any) => !i.issue?.filePath).map((i: any) => i.id) })} />}
-                                          {owned < items.length ? <RequestIconButton className="h-7 w-7" title={`Die ${items.length - owned} fehlenden dieser Serie anfragen (Usenet)`} busy={isBulkDownloading} onClick={() => handleDownloadAllMissing(items.filter((i: any) => !i.issue?.filePath))} /> : <span className="w-[92px] shrink-0" />}
+                                          {owned < items.length ? (
+                                              <AllSources className="shrink-0">
+                                                  <RequestIconButton title={`Die ${items.length - owned} fehlenden dieser Serie anfragen (Usenet)`} busy={isBulkDownloading} onClick={() => handleDownloadAllMissing(items.filter((i: any) => !i.issue?.filePath))} />
+                                                  <GetComicsButton title="Fehlende dieser Serie über GetComics" disabled={isBulkDownloading} onClick={() => handleDownloadAllMissing(items.filter((i: any) => !i.issue?.filePath), 'getcomics')} />
+                                                  <BatcaveButton title="Fehlende dieser Serie über Batcave" body={() => ({ listItemIds: items.filter((i: any) => !i.issue?.filePath).map((i: any) => i.id) })} />
+                                              </AllSources>
+                                          ) : <span className="w-[136px] shrink-0" />}
                                       </div>
                                   );
                               })}
@@ -931,10 +933,10 @@ function ReadingListsContent() {
                                                           <Link href={readerHref(issue)}><BookOpen className="w-3.5 h-3.5 sm:mr-1" /><span className="hidden sm:inline">Read</span></Link>
                                                       </Button>
                                                   ) : (
-                                                      <RequestIconButton className="h-7 w-7" busy={isRequesting} done={isAlreadyRequested} onClick={() => handleRequestMissing(item)} />
+                                                      <RequestIconButton label={`Request ${item.title}`} busy={isRequesting} done={isAlreadyRequested} onClick={() => handleRequestMissing(item)} />
                                                   )}
-                                                  {!isAlreadyRequested && !item.issue?.filePath && <GetComicsButton className="h-7 w-7 ml-1" disabled={isRequesting} onClick={() => handleRequestMissing(item, null, 'getcomics')} />}
-                                                  {!isAlreadyRequested && !item.issue?.filePath && <BatcaveButton className="h-7 w-7 ml-1" body={{ listItemIds: [item.id] }} />}
+                                                  {!isAlreadyRequested && !item.issue?.filePath && <GetComicsButton className="ml-1" disabled={isRequesting} onClick={() => handleRequestMissing(item, null, 'getcomics')} />}
+                                                  {!isAlreadyRequested && !item.issue?.filePath && <BatcaveButton className="ml-1" body={{ listItemIds: [item.id] }} />}
                                                   {(isAdmin || activeList.userId === session?.user?.id) && (
                                                       <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500 hover:text-red-700 ml-1 hidden sm:inline-flex" title="Remove from list" onClick={() => handleRemoveItem(item.id)}>
                                                           <Minus className="w-3.5 h-3.5" />
@@ -989,7 +991,7 @@ function ReadingListsContent() {
                                                                   <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-primary" title="Re-check this item against the library" onClick={() => handleRefreshItem(item.id)} disabled={refreshingItemIds.has(item.id)}>
                                                                       {refreshingItemIds.has(item.id) ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                                                                   </Button>
-                                                                  <RequestIconButton busy={isRequesting} done={isAlreadyRequested} onClick={() => handleRequestMissing(item)} />
+                                                                  <RequestIconButton label={`Request ${item.title}`} busy={isRequesting} done={isAlreadyRequested} onClick={() => handleRequestMissing(item)} />
                                                                   {!isAlreadyRequested && <GetComicsButton disabled={isRequesting} onClick={() => handleRequestMissing(item, null, 'getcomics')} />}
                                                                   {!isAlreadyRequested && <BatcaveButton body={{ listItemIds: [item.id] }} />}
                                                               </div>

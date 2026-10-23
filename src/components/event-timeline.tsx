@@ -8,7 +8,7 @@ import { useRouter } from "next/navigation"
 import { BookOpen, CloudDownload, Loader2, Play } from "lucide-react"
 import { useSession } from "next-auth/react"
 import { Button } from "@/components/ui/button"
-import { BatcaveButton, GetComicsButton, RequestIconButton } from "@/components/batcave-button"
+import { AllSources, BatcaveButton, GetComicsButton, RequestIconButton } from "@/components/batcave-button"
 import { useToast } from "@/components/ui/use-toast"
 import { Chip, displayName, type ListSummary } from "@/components/list-cards"
 import { nextInList } from "@/lib/reading-list-next"
@@ -140,9 +140,13 @@ export function EventTimeline({ events }: { events: ListSummary[] }) {
                                             <td className="py-2 pr-3 text-right hidden sm:table-cell">{l.readCount > 0 ? <span className="inline-flex items-center gap-1"><BookOpen className="w-3 h-3" />{l.readCount}</span> : '–'}</td>
                                             <td className="py-2 pr-3"><span className={cn("text-[10px] font-black uppercase tracking-wider text-white px-1.5 py-0.5 rounded", STATUS_STYLE[st])}>{st}</span></td>
                                             <td className="py-2 text-right whitespace-nowrap">
-                                                <div className="inline-flex gap-1.5">
-                                                    {canRequest && !requested.has(l.id) && <RequestMissingButton l={l} onDone={() => setRequested(prev => new Set(prev).add(l.id))} />}
-                                                    {l.ownedCount < l.itemCount && <BatcaveButton title={`Die ${l.itemCount - l.ownedCount} fehlenden über Batcave`} body={{ readingListId: l.id }} />}
+                                                <div className="inline-flex items-center gap-3">
+                                                    {l.ownedCount < l.itemCount && (
+                                                        <AllSources>
+                                                            {canRequest && !requested.has(l.id) && <RequestMissingButton l={l} onDone={() => setRequested(prev => new Set(prev).add(l.id))} />}
+                                                            <BatcaveButton title={`Die ${l.itemCount - l.ownedCount} fehlenden über Batcave`} body={{ readingListId: l.id }} />
+                                                        </AllSources>
+                                                    )}
                                                     <ReadButton l={l} />
                                                 </div>
                                             </td>

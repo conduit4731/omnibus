@@ -14,22 +14,27 @@ import { ToastAction } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
 import type { QueueBody } from "@/lib/batcave-queue"
 
-const ICON_BTN = "h-8 w-8 shrink-0 text-white border-0 shadow-sm"
+// One size for all three, wherever they sit: 32×32, same corners, no padding
+const ICON_BTN = "h-8 w-8 min-h-8 min-w-8 p-0 rounded-md shrink-0 text-white border-0 shadow-sm"
 
-// The normal request (indexers) as the first of the three icons; done = already requested
-export function RequestIconButton({ onClick, disabled, busy, done, className, title = "Request (Usenet)" }: {
+// The normal request (indexers) as the first of the three icons; done = already requested.
+// label: accessible name (e.g. "Request Batman #12"); srText: text only screen readers see (e.g. "Request all shown (3)").
+export function RequestIconButton({ onClick, disabled, busy, done, className, title = "Request (Usenet)", label, srText }: {
     onClick: () => unknown
     disabled?: boolean
     busy?: boolean
     done?: boolean
     className?: string
     title?: string
+    label?: string
+    srText?: string
 }) {
     return (
-        <Button type="button" size="icon" title={done ? "Angefragt" : title} aria-label={done ? "Angefragt" : title} disabled={disabled || busy || done}
+        <Button type="button" size="icon" title={done ? "Angefragt" : title} aria-label={label || (done ? "Angefragt" : title)} disabled={disabled || busy || done}
             className={cn(ICON_BTN, done ? "bg-emerald-600 disabled:opacity-100" : "bg-primary hover:bg-primary/90 text-primary-foreground", className)}
             onClick={e => { e.preventDefault(); e.stopPropagation(); onClick() }}>
             {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : done ? <Check className="w-4 h-4" /> : <CloudDownload className="w-4 h-4" />}
+            <span className="sr-only">{done ? "Requested" : srText}</span>
         </Button>
     )
 }
@@ -81,5 +86,15 @@ export function BatcaveButton({ body, className, title = "Über Batcave laden" }
             className={cn(ICON_BTN, "bg-orange-500 hover:bg-orange-600", className)}>
             {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Moon className="w-4 h-4" />}
         </Button>
+    )
+}
+
+// The bulk variant: "All" and the three icons, tight and right-aligned
+export function AllSources({ children, className, label = "All" }: { children: React.ReactNode, className?: string, label?: string | null }) {
+    return (
+        <div className={cn("flex items-center justify-end gap-1", className)}>
+            {label && <span className="text-xs font-black uppercase tracking-wider text-muted-foreground mr-1">{label}</span>}
+            {children}
+        </div>
     )
 }

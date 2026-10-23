@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useRef, Suspense } from "react"
 import Link from "next/link"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { useSession } from "next-auth/react"
-import { BatcaveButton, GetComicsButton, RequestIconButton } from "@/components/batcave-button"
+import { AllSources, BatcaveButton, GetComicsButton, RequestIconButton } from "@/components/batcave-button"
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog"
 import { requestNameFor } from "@/lib/utils/request-name"
 import { normalizeFractionNumbers } from "@/lib/utils/issue-parser"
@@ -298,16 +298,21 @@ function LibraryIssuesInner() {
       </div>
       {/* "Find them all and have it search" — one action for whatever the list is filtered to.
           Withdraws itself once nothing on screen is left to ask for. */}
+      {((canRequest && requestableShown.length > 0) || batcaveShown.length > 0) && (
+      <AllSources>
       {canRequest && requestableShown.length > 0 && (
-        <RequestIconButton className="h-10 w-10 sm:h-9 sm:w-9" title={bulkProgress ? `Anfragen ${bulkProgress.done}/${bulkProgress.total} …` : `Alle ${requestableShown.length} angezeigten anfragen (Usenet)`}
+        <RequestIconButton title={bulkProgress ? `Anfragen ${bulkProgress.done}/${bulkProgress.total} …` : `Alle ${requestableShown.length} angezeigten anfragen (Usenet)`}
+          label="Request every missing issue shown on this page" srText={`Request all shown (${requestableShown.length})`}
           busy={bulkProgress !== null} onClick={() => setBulkOpen(true)} />
       )}
       {canRequest && requestableShown.length > 0 && (
-        <GetComicsButton className="h-10 w-10 sm:h-9 sm:w-9" title={`Alle ${requestableShown.length} angezeigten über GetComics`} disabled={bulkProgress !== null} onClick={() => requestAllShown('getcomics')} />
+        <GetComicsButton title={`Alle ${requestableShown.length} angezeigten über GetComics`} disabled={bulkProgress !== null} onClick={() => requestAllShown('getcomics')} />
       )}
       {batcaveShown.length > 0 && (
-        <BatcaveButton className="h-10 w-10 sm:h-9 sm:w-9" title={`Alle ${batcaveShown.length} angezeigten über Batcave`}
+        <BatcaveButton title={`Alle ${batcaveShown.length} angezeigten über Batcave`}
           body={() => ({ batch: batcaveShown.map(i => ({ cvId: i.seriesMetadataId, issues: [{ number: i.number, isAnnual: i.isAnnual }] })) })} />
+      )}
+      </AllSources>
       )}
       </div>
 
@@ -477,7 +482,7 @@ function LibraryIssuesInner() {
                   request can resolve (a matched series), and only for users allowed to ask. */}
               <div className="flex items-center gap-1.5">
               {canRequest && !issue.onDisk && issue.requestable && (
-                <RequestIconButton busy={requestingIds.has(issue.id)} done={requestedIds.has(issue.id)} onClick={() => requestIssue(issue)} />
+                <RequestIconButton label={`Request ${issue.seriesName} #${issue.number}`} busy={requestingIds.has(issue.id)} done={requestedIds.has(issue.id)} onClick={() => requestIssue(issue)} />
               )}
               {canRequest && !issue.onDisk && issue.requestable && (
                 <GetComicsButton disabled={requestingIds.has(issue.id) || requestedIds.has(issue.id)} onClick={() => requestIssue(issue, 'getcomics')} />

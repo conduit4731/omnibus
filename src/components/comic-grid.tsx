@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useMemo } from "react"
 import { useSession } from "next-auth/react"
-import { BatcaveButton, GetComicsButton } from "@/components/batcave-button"
+import { AllSources, BatcaveButton, GetComicsButton, RequestIconButton } from "@/components/batcave-button"
 import { Button } from "@/components/ui/button"
 import { Loader2, ChevronLeft, ChevronRight, Plus, Info, Calendar, Paintbrush, PenTool, Image as ImageIcon, ExternalLink, Layers, Download, CheckCircle2, Clock, Users, Globe, Activity, Library, FileCheck, Tags, BookMarked, MapPin, Shield } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
@@ -440,14 +440,14 @@ export function ComicGrid({ title, type, refreshSignal = 0 }: Props) {
                                       )}
                                       
                                       {selectedComic.volumeId && !(selectedComic.isVolume ? (isAllAvailableOwned && volStatus === 'LIBRARY_MONITORED') : isIssueOwned) && (
-                                        <div className="flex justify-center gap-2">
+                                        <AllSources className="justify-center" label={selectedComic.isVolume ? "All" : null}>
                                           {canRequest && <GetComicsButton title={selectedComic.isVolume ? "Alle fehlenden über GetComics" : "Über GetComics laden"}
                                             onClick={() => selectedComic.isVolume
                                               ? handleRequest(selectedComic.volumeId, seriesBaseName, selectedComic.image, selectedComic.year, 'volume', selectedComic.publisher || 'Unknown', false, 'getcomics', undefined, false, (selectedComic as any).metadataSource || 'COMICVINE')
                                               : handleRequest(selectedComic.volumeId, selectedComic.isVolume ? seriesBaseName : selectedComic.name, selectedComic.image, selectedComic.year, 'issue', selectedComic.publisher, false, 'getcomics', selectedComic.issueNumber, false, (selectedComic as any).metadataSource || 'COMICVINE')} />}
                                           {((selectedComic as any).metadataSource || 'COMICVINE') === 'COMICVINE' && <BatcaveButton title={selectedComic.isVolume ? "Alle fehlenden über Batcave" : "Über Batcave laden"}
                                             body={selectedComic.isVolume ? { cvId: selectedComic.volumeId } : { cvId: selectedComic.volumeId, issues: [{ number: String(selectedComic.issueNumber || '1') }] }} />}
-                                        </div>
+                                        </AllSources>
                                       )}
                                       <Button 
                                         variant="outline" 
@@ -607,22 +607,10 @@ export function ComicGrid({ title, type, refreshSignal = 0 }: Props) {
 
                                                     {!relIssueStatus && (
                                                         <div className="absolute bottom-2 inset-x-2 z-30 opacity-100 sm:opacity-0 sm:group-hover/issue:opacity-100 transition-opacity flex justify-center items-center pointer-events-none">
-                                                            <Button
-                                                                size="icon"
-                                                                className="h-8 w-8 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg pointer-events-auto"
-                                                                disabled={requestingTarget === `iss-${relIssueTargetName}`}
-                                                                onClick={(e) => {
-                                                                    e.preventDefault();
-                                                                    e.stopPropagation();
-                                                                    handleRequest(selectedComic.volumeId, issue.name, issue.image, issue.year, 'issue', selectedComic.publisher, false, undefined, issue.issueNumber, false, (selectedComic as any).metadataSource || 'COMICVINE');
-                                                                }}
-                                                                title="Request Issue"
-                                                                tabIndex={-1}
-                                                            >
-                                                                {requestingTarget === `iss-${relIssueTargetName}` ? <Loader2 className="w-4 h-4 animate-spin"/> : <Download className="w-4 h-4"/>}
-                                                            </Button>
-                                                            <GetComicsButton className="h-8 w-8 rounded-full pointer-events-auto" onClick={() => handleRequest(selectedComic.volumeId, issue.name, issue.image, issue.year, 'issue', selectedComic.publisher, false, 'getcomics', issue.issueNumber, false, (selectedComic as any).metadataSource || 'COMICVINE')} />
-                                                            <BatcaveButton className="h-8 w-8 rounded-full pointer-events-auto" body={{ cvId: selectedComic.volumeId, issues: [{ number: String(issue.issueNumber || '1') }] }} />
+                                                            <RequestIconButton className="pointer-events-auto" title="Request Issue" busy={requestingTarget === `iss-${relIssueTargetName}`}
+                                                                onClick={() => handleRequest(selectedComic.volumeId, issue.name, issue.image, issue.year, 'issue', selectedComic.publisher, false, undefined, issue.issueNumber, false, (selectedComic as any).metadataSource || 'COMICVINE')} />
+                                                            <GetComicsButton className="pointer-events-auto" onClick={() => handleRequest(selectedComic.volumeId, issue.name, issue.image, issue.year, 'issue', selectedComic.publisher, false, 'getcomics', issue.issueNumber, false, (selectedComic as any).metadataSource || 'COMICVINE')} />
+                                                            <BatcaveButton className="pointer-events-auto" body={{ cvId: selectedComic.volumeId, issues: [{ number: String(issue.issueNumber || '1') }] }} />
                                                         </div>
                                                     )}
 

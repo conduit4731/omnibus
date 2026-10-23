@@ -7,7 +7,7 @@ import { IssueSortControl } from "@/components/issue-sort-control"
 import { sortIssuesForDisplay, laneLabel, parseIssueSortMode, DEFAULT_ISSUE_SORT, ISSUE_SORT_STORAGE_KEY, type IssueSortMode } from "@/lib/utils/issue-sort"
 import { useSearchParams, useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
-import { BatcaveButton, GetComicsButton, RequestIconButton } from "@/components/batcave-button"
+import { AllSources, BatcaveButton, GetComicsButton, RequestIconButton } from "@/components/batcave-button"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { 
@@ -1433,11 +1433,11 @@ function SeriesContent() {
                         )}
 
                         {missingIssues.length > 0 && (
-                            <div className="flex justify-center gap-2">
+                            <AllSources>
                                 {canRequest && <RequestIconButton title={`Alle ${missingIssues.length} fehlenden anfragen (Usenet)`} busy={isBulkDownloading} onClick={() => handleDownloadAllMissing()} />}
                                 <GetComicsButton title={`Alle ${missingIssues.length} fehlenden über GetComics`} disabled={isBulkDownloading} onClick={() => handleDownloadAllMissing('getcomics')} />
                                 <BatcaveButton title={`Alle ${missingIssues.length} fehlenden über Batcave`} body={{ seriesId: seriesInfo.id }} />
-                            </div>
+                            </AllSources>
                         )}
                       </>
                   )}
@@ -2078,9 +2078,13 @@ function SeriesContent() {
                   <div className="space-y-6 pt-4 border-t-2 border-border">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                           <h4 className="font-black flex items-center gap-2 text-xl text-muted-foreground opacity-80 tracking-tight"><CloudOff className="w-6 h-6"/> Missing Issues ({chipFilter ? `${sortedMissing.length} of ${missingIssues.length}` : missingIssues.length})</h4>
-                          {canRequest && missingIssues.length > 0 && <RequestIconButton title={`Alle ${missingIssues.length} fehlenden anfragen (Usenet)`} busy={isBulkDownloading} onClick={() => handleDownloadAllMissing()} />}
-                          {canRequest && missingIssues.length > 0 && <GetComicsButton title={`Alle ${missingIssues.length} fehlenden über GetComics`} disabled={isBulkDownloading} onClick={() => handleDownloadAllMissing('getcomics')} />}
-                          {missingIssues.length > 0 && <BatcaveButton title={`Alle ${missingIssues.length} fehlenden über Batcave`} body={{ seriesId: seriesInfo.id }} />}
+                          {missingIssues.length > 0 && (
+                            <AllSources className="ml-auto">
+                              {canRequest && <RequestIconButton title={`Alle ${missingIssues.length} fehlenden anfragen (Usenet)`} busy={isBulkDownloading} onClick={() => handleDownloadAllMissing()} />}
+                              {canRequest && <GetComicsButton title={`Alle ${missingIssues.length} fehlenden über GetComics`} disabled={isBulkDownloading} onClick={() => handleDownloadAllMissing('getcomics')} />}
+                              <BatcaveButton title={`Alle ${missingIssues.length} fehlenden über Batcave`} body={{ seriesId: seriesInfo.id }} />
+                            </AllSources>
+                          )}
                       </div>
                       
                       {missingIssues.length === 0 ? (
@@ -2102,7 +2106,7 @@ function SeriesContent() {
                                         <div className="w-20 h-28 shrink-0 rounded-md overflow-hidden bg-muted border border-border grayscale">{issue.coverUrl || seriesInfo.cover ? <img src={issue.coverUrl || seriesInfo.cover} onError={coverImgError(seriesInfo.cover)} className="w-full h-full object-cover" alt="" /> : <ImageIcon className="w-8 h-8 m-auto mt-10 text-muted-foreground/50" />}</div>
                                         <div className="flex flex-col justify-between flex-1 py-1 min-w-0">
                                             <div><h5 className="font-bold text-base line-clamp-2 text-foreground leading-tight">{issue.name}</h5><span className="text-[10px] mt-1 font-black text-muted-foreground uppercase tracking-widest">{laneLabel(issue)} #{issue.parsedNum}</span><ReleaseInfo date={issue.releaseDate} /><ListChips lists={seriesLists.byIssue[issue.id]} /></div>
-                                            <div className="flex flex-wrap items-center gap-2 mt-3"><RequestIconButton busy={isRequesting} done={isAlreadyRequested} onClick={() => handleRequestMissing(issue)} /><GetComicsButton onClick={() => handleRequestMissing(issue, 'getcomics')} disabled={isRequesting || isAlreadyRequested} /><BatcaveButton body={{ seriesId: seriesInfo.id, issues: [{ number: issue.number, isAnnual: issue.isAnnual }] }} /></div>
+                                            <div className="flex flex-wrap items-center gap-2 mt-3"><RequestIconButton label={`Request ${seriesInfo.name} #${issue.number}`} busy={isRequesting} done={isAlreadyRequested} onClick={() => handleRequestMissing(issue)} /><GetComicsButton onClick={() => handleRequestMissing(issue, 'getcomics')} disabled={isRequesting || isAlreadyRequested} /><BatcaveButton body={{ seriesId: seriesInfo.id, issues: [{ number: issue.number, isAnnual: issue.isAnnual }] }} /></div>
                                         </div>
                                       </div>
                                   );
@@ -2140,7 +2144,7 @@ function SeriesContent() {
                                                       <ChipCell chips={seriesLists.byIssue[issue.id]} kind="era" active={chipFilter} onPick={setChipFilter} />
                                                       <ChipCell chips={seriesLists.byIssue[issue.id]} kind="event" active={chipFilter} onPick={setChipFilter} />
                                                       <td className="px-4 py-3 text-right">
-                                                          <div className="inline-flex gap-1.5 align-middle"><RequestIconButton busy={isRequesting} done={isAlreadyRequested} onClick={() => handleRequestMissing(issue)} /><GetComicsButton onClick={() => handleRequestMissing(issue, 'getcomics')} disabled={isRequesting || isAlreadyRequested} /><BatcaveButton body={{ seriesId: seriesInfo.id, issues: [{ number: issue.number, isAnnual: issue.isAnnual }] }} /></div>
+                                                          <div className="inline-flex gap-1.5 align-middle"><RequestIconButton label={`Request ${seriesInfo.name} #${issue.number}`} busy={isRequesting} done={isAlreadyRequested} onClick={() => handleRequestMissing(issue)} /><GetComicsButton onClick={() => handleRequestMissing(issue, 'getcomics')} disabled={isRequesting || isAlreadyRequested} /><BatcaveButton body={{ seriesId: seriesInfo.id, issues: [{ number: issue.number, isAnnual: issue.isAnnual }] }} /></div>
                                                       </td>
                                                   </tr>
                                               )
