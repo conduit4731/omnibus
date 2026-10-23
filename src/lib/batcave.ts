@@ -24,8 +24,10 @@ export function normIssueNumber(n: string | number): string {
 type SeriesRow = { id: string; name: string; year: number; folderPath: string };
 
 /**
- * Same name, start year within 1 (Batcave and ComicVine disagree by a year at times), closest year wins.
- * Batcave lists some series without a year ("Avengers: The Initiative"): then only an unambiguous name counts.
+ * Same name and the SAME start year. No ±1 tolerance: "The Flash (2010)" (vol. 3) and "The Flash (2011)"
+ * (New 52) are different volumes; real year disagreements are settled once by /api/batcave/subscribe via
+ * ComicVine and remembered in BATCAVE_MAP_KEY. Batcave lists some series without a year ("Avengers: The
+ * Initiative"): then only an unambiguous name counts.
  */
 export function pickSeries<T extends SeriesRow>(rows: T[], title: string): T | null {
     const t = parseBatcaveTitle(title);
@@ -33,12 +35,25 @@ export function pickSeries<T extends SeriesRow>(rows: T[], title: string): T | n
     if (!key) return null;
     const same = rows.filter(r => normSeriesName(r.name) === key);
     if (!t) return same.length === 1 ? same[0] : null;
-    let best: T | null = null;
-    for (const r of same) {
-        if (Math.abs(r.year - t.year) > 1) continue;
-        if (!best || Math.abs(r.year - t.year) < Math.abs(best.year - t.year)) best = r;
-    }
-    return best;
+    return same.find(r => r.year === t.year) || null;
+}
+
+/** SystemSetting holding { titleKey(title): seriesId } for titles resolved via ComicVine. */
+export const BATCAVE_MAP_KEY = 'batcave_series_map';
+export const titleKey = (title: string) => normSeriesName(title);
+
+type CvVolume = { id: number; name: string; start_year: string | number | null; publisher?: { name?: string } | null };
+
+/** ComicVine search hits → the volume a Batcave title means: same name, exact start year, else the only one within ±1 / the only one at all. */
+export function pickCvVolume(results: CvVolume[], title: string): CvVolume | null {
+    const t = parseBatcaveTitle(title);
+    const key = normSeriesName(t ? t.name : title);
+    const same = results.filter(r => normSeriesName(r.name) === key);
+    if (!t) return same.length === 1 ? same[0] : null;
+    const exact = same.filter(r => Number(r.start_year) === t.year);
+    if (exact.length) return exact.length === 1 ? exact[0] : null;
+    const near = same.filter(r => Math.abs(Number(r.start_year) - t.year) <= 1);
+    return near.length === 1 ? near[0] : null;
 }
 
 /** Upload file name batcave-import.sh understands: "<Series>_(<year>)_Issue_#7.cbz" / "…_Annual_#1.cbz". */

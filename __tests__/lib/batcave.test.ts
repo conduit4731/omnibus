@@ -1,6 +1,6 @@
 // __tests__/lib/batcave.test.ts
 import { describe, it, expect } from 'vitest';
-import { normIssueNumber, parseBatcaveTitle, pickSeries, uploadFileName } from '@/lib/batcave';
+import { normIssueNumber, parseBatcaveTitle, pickCvVolume, pickSeries, uploadFileName } from '@/lib/batcave';
 
 describe('lib/batcave', () => {
     it('parses Batcave series titles', () => {
@@ -10,7 +10,7 @@ describe('lib/batcave', () => {
         expect(parseBatcaveTitle('No year')).toBeNull();
     });
 
-    it('matches names loosely and years within one, closest first', () => {
+    it('matches names loosely, years exactly', () => {
         const rows = [
             { id: 'a', name: 'Flash', year: 1987, folderPath: '' },
             { id: 'b', name: 'The Flash', year: 2011, folderPath: '' },
@@ -19,12 +19,31 @@ describe('lib/batcave', () => {
         ];
         expect(pickSeries(rows, 'The Flash (2010)')?.id).toBe('c');
         expect(pickSeries(rows, 'Flash (2011)')?.id).toBe('b');
+        // vol. 3 is not New 52: no ±1
+        expect(pickSeries([rows[1]], 'The Flash (2010)')).toBeNull();
         expect(pickSeries(rows, 'New Avengers: Illuminati (2007)')?.id).toBe('d');
         expect(pickSeries(rows, 'The Flash (2016)')).toBeNull();
         // no year on Batcave: only a unique name
         expect(pickSeries(rows, 'New Avengers: Illuminati')?.id).toBe('d');
         expect(pickSeries(rows, 'The Flash')).toBeNull();
         expect(pickSeries(rows, '')).toBeNull();
+    });
+
+    it('picks the ComicVine volume for a Batcave title', () => {
+        const cv = [
+            { id: 1, name: 'Flashpoint', start_year: '1999' },
+            { id: 2, name: 'Flashpoint', start_year: '2011' },
+            { id: 3, name: 'Absolute Superman', start_year: '2025' },
+            { id: 4, name: 'Flashpoint: Reverse-Flash', start_year: '2011' },
+            { id: 5, name: 'The Flash', start_year: '2010' },
+            { id: 6, name: 'The Flash', start_year: '2011' },
+        ];
+        expect(pickCvVolume(cv, 'Flashpoint (2011)')?.id).toBe(2);
+        expect(pickCvVolume(cv, 'Absolute Superman (2024-)')?.id).toBe(3);
+        expect(pickCvVolume(cv, 'Flashpoint: Reverse-Flash')?.id).toBe(4);
+        expect(pickCvVolume(cv, 'The Flash (2010)')?.id).toBe(5);
+        expect(pickCvVolume(cv, 'Flashpoint')).toBeNull();          // two without a year: ambiguous
+        expect(pickCvVolume(cv, 'Booster Gold (2007)')).toBeNull();
     });
 
     it('normalises issue numbers', () => {

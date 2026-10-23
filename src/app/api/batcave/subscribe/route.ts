@@ -1,0 +1,78 @@
+// src/app/api/batcave/subscribe/route.ts
+//
+// Fork-only (see src/lib/batcave.ts). POST { titles: ["Flashpoint: Reverse-Flash", "The Flash (2010)", …] } with an
+// admin API key → finds each title's ComicVine volume and adds it to Omnibus like "Subscribe" does (folder from the
+// naming pattern, metadata sync, followed by the key's user), but NOT monitored: the Batcave userscript fetches the
+// issues, the gap backfill must not search them again on GetComics. An already existing volume (same ComicVine id)
+// is reused. Every resolution is remembered in BATCAVE_MAP_KEY so /match finds it next time.
+import { NextRequest, NextResponse } from 'next/server';
+import path from 'path';
+import { prisma } from '@/lib/db';
+import { validateApiKey } from '@/lib/api-auth';
+import { Logger } from '@/lib/logger';
+import { cachedCvGet } from '@/lib/metadata/metadata-cache';
+import { syncSeriesMetadata } from '@/lib/metadata-fetcher';
+import { followSeries } from '@/lib/follows';
+import { seriesFolderSegments } from '@/lib/utils/naming';
+import { BATCAVE_MAP_KEY, parseBatcaveTitle, pickCvVolume, titleKey } from '@/lib/batcave';
+
+export const dynamic = 'force-dynamic';
+
+export async function POST(req: NextRequest) {
+    const auth = await validateApiKey(req);
+    if (!auth.valid || (auth.keyType !== 'ADMIN_KEY' && auth.keyType !== 'LEGACY_ADMIN')) {
+        return NextResponse.json({ error: 'Admin API key required' }, { status: 401 });
+    }
+    const body = await req.json().catch(() => null);
+    const titles: string[] = Array.isArray(body?.titles) ? body.titles.filter((t: unknown) => typeof t === 'string').slice(0, 60) : [];
+    const cvKey = (await prisma.systemSetting.findUnique({ where: { key: 'cv_api_key' } }))?.value;
+    if (!cvKey) return NextResponse.json({ error: 'No ComicVine API key in Omnibus' }, { status: 400 });
+
+    const settings = Object.fromEntries((await prisma.systemSetting.findMany()).map(s => [s.key, s.value]));
+    const pattern = settings.folder_naming_pattern || '{Publisher}/{Series} ({Year})';
+    const libraries = await prisma.library.findMany();
+    const lib = libraries.find(l => l.isDefault && !l.isManga) || libraries.find(l => !l.isManga) || libraries[0];
+    const map: Record<string, string> = settings[BATCAVE_MAP_KEY] ? JSON.parse(settings[BATCAVE_MAP_KEY]) : {};
+
+    const result: Record<string, { id: string; name: string; year: number; created: boolean } | { error: string }> = {};
+    for (const title of titles) {
+        try {
+            const query = parseBatcaveTitle(title)?.name || title;
+            const res = await cachedCvGet('https://comicvine.gamespot.com/api/search/', {
+                params: { api_key: cvKey, format: 'json', query, resources: 'volume', limit: 50, field_list: 'id,name,start_year,publisher' },
+                headers: { 'User-Agent': 'Omnibus/1.0' }, timeout: 10000,
+            });
+            const vol = pickCvVolume(res.data?.results || [], title);
+            if (!vol) { result[title] = { error: 'Bei ComicVine nicht eindeutig gefunden' }; continue; }
+
+            const metadataId = String(vol.id);
+            let series = await prisma.series.findUnique({ where: { metadataSource_metadataId: { metadataSource: 'COMICVINE', metadataId } } });
+            const created = !series;
+            if (!series) {
+                const publisher = vol.publisher?.name || 'Unknown';
+                const year = Number(vol.start_year) || parseBatcaveTitle(title)?.year || new Date().getFullYear();
+                const parts = seriesFolderSegments(pattern, { publisher, series: vol.name, seriesYear: year });
+                if (!parts || !lib) { result[title] = { error: 'Ordnermuster/Bibliothek ergibt keinen Ordner' }; continue; }
+                series = await prisma.series.create({
+                    data: {
+                        cvId: vol.id, metadataId, metadataSource: 'COMICVINE', matchState: 'MATCHED',
+                        name: vol.name, year, publisher, folderPath: path.join(lib.path, ...parts).replace(/\\/g, '/'),
+                        monitored: false, isManga: false, libraryId: lib.id,
+                    },
+                });
+                // Issue list from ComicVine; the import's scan needs it to attach the files
+                await syncSeriesMetadata(metadataId, series.folderPath, 'COMICVINE').catch(e => Logger.log(`[Batcave] metadata sync ${vol.name}: ${e}`, 'warn'));
+                if (auth.user) await followSeries(auth.user.id, series.id).catch(() => {});
+                Logger.log(`[Batcave] Added ${vol.name} (${year}) cv:${vol.id} for Batcave title "${title}"`, 'info');
+            }
+            map[titleKey(title)] = series.id;
+            result[title] = { id: series.id, name: series.name, year: series.year, created };
+        } catch (e) {
+            result[title] = { error: String(e instanceof Error ? e.message : e) };
+        }
+    }
+    await prisma.systemSetting.upsert({
+        where: { key: BATCAVE_MAP_KEY }, update: { value: JSON.stringify(map) }, create: { key: BATCAVE_MAP_KEY, value: JSON.stringify(map) },
+    });
+    return NextResponse.json({ series: result });
+}
