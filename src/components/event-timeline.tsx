@@ -8,7 +8,7 @@ import { useRouter } from "next/navigation"
 import { BookOpen, CloudDownload, Loader2, Play } from "lucide-react"
 import { useSession } from "next-auth/react"
 import { Button } from "@/components/ui/button"
-import { BatcaveButton, GetComicsButton } from "@/components/batcave-button"
+import { BatcaveButton, GetComicsButton, RequestIconButton } from "@/components/batcave-button"
 import { useToast } from "@/components/ui/use-toast"
 import { Chip, displayName, type ListSummary } from "@/components/list-cards"
 import { nextInList } from "@/lib/reading-list-next"
@@ -83,9 +83,7 @@ function RequestMissingButton({ l, onDone }: { l: ListSummary, onDone: () => voi
     }
     return (
         <>
-            <Button size="sm" variant="outline" className="h-8 text-xs font-bold" disabled={progress !== null} onClick={() => go()} title={`Request the ${missing} issues you don't have`}>
-                {progress ? <><Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />{progress}</> : <><CloudDownload className="w-3.5 h-3.5 mr-1" />Request {missing}</>}
-            </Button>
+            <RequestIconButton title={progress ? `Anfragen ${progress}` : `Die ${missing} fehlenden anfragen (Usenet)`} busy={progress !== null} onClick={() => go()} />
             <GetComicsButton title={`Die ${missing} fehlenden über GetComics`} disabled={progress !== null} onClick={() => go('getcomics')} />
         </>
     )

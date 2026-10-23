@@ -6,7 +6,7 @@ import { requestListItem } from "@/lib/request-list-item"
 import { RequestSearch } from "@/components/request-search"
 import { useState, useEffect, Suspense } from "react"
 import { useSession } from "next-auth/react"
-import { BatcaveButton, GetComicsButton } from "@/components/batcave-button"
+import { BatcaveButton, GetComicsButton, RequestIconButton } from "@/components/batcave-button"
 import { useSearchParams } from "next/navigation"
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd"
 import { Button } from "@/components/ui/button"
@@ -808,16 +808,7 @@ function ReadingListsContent() {
                                   </Button>
 
                                   {missingItems.length > 0 && (
-                                      <Button 
-                                          size="sm" 
-                                          variant="outline" 
-                                          className="h-10 sm:h-auto font-bold border-primary/30 text-primary bg-primary/5 hover:bg-primary/10"
-                                          disabled={isBulkDownloading}
-                                          onClick={() => handleDownloadAllMissing(missingItems)}
-                                      >
-                                          {isBulkDownloading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <DownloadCloud className="w-4 h-4 mr-2" />}
-                                          Missing ({missingItems.length})
-                                      </Button>
+                                      <RequestIconButton className="h-10 w-10 sm:h-9 sm:w-9" title={`Alle ${missingItems.length} fehlenden anfragen (Usenet)`} busy={isBulkDownloading} onClick={() => handleDownloadAllMissing(missingItems)} />
                                   )}
                                   {missingItems.length > 0 && (
                                       <>
@@ -889,12 +880,7 @@ function ReadingListsContent() {
                                           <OwnedState items={items} />
                                           {owned < items.length && <GetComicsButton className="h-7 w-7" title="Fehlende dieser Serie über GetComics" disabled={isBulkDownloading} onClick={() => handleDownloadAllMissing(items.filter((i: any) => !i.issue?.filePath), 'getcomics')} />}
                                           {owned < items.length && <BatcaveButton className="h-7 w-7" title="Fehlende dieser Serie über Batcave" body={() => ({ listItemIds: items.filter((i: any) => !i.issue?.filePath).map((i: any) => i.id) })} />}
-                                          {owned < items.length ? (
-                                              <Button size="sm" variant="ghost" className="h-7 px-2 text-[10px] font-bold uppercase text-primary hover:bg-primary/10 shrink-0" disabled={isBulkDownloading}
-                                                  onClick={() => handleDownloadAllMissing(items.filter((i: any) => !i.issue?.filePath))}>
-                                                  <CloudDownload className="w-3.5 h-3.5 mr-1" /> Request {items.length - owned}
-                                              </Button>
-                                          ) : <span className="w-[86px] shrink-0" />}
+                                          {owned < items.length ? <RequestIconButton className="h-7 w-7" title={`Die ${items.length - owned} fehlenden dieser Serie anfragen (Usenet)`} busy={isBulkDownloading} onClick={() => handleDownloadAllMissing(items.filter((i: any) => !i.issue?.filePath))} /> : <span className="w-[92px] shrink-0" />}
                                       </div>
                                   );
                               })}
@@ -944,12 +930,8 @@ function ReadingListsContent() {
                                                       <Button size="sm" asChild className="h-7 px-2 font-bold bg-primary hover:bg-primary/90 text-primary-foreground">
                                                           <Link href={readerHref(issue)}><BookOpen className="w-3.5 h-3.5 sm:mr-1" /><span className="hidden sm:inline">Read</span></Link>
                                                       </Button>
-                                                  ) : isAlreadyRequested ? (
-                                                      <span className="text-[10px] font-bold uppercase text-emerald-500 px-2">Requested</span>
                                                   ) : (
-                                                      <Button size="sm" variant="outline" className="h-7 px-2 text-[10px] font-bold uppercase border-primary/30 text-primary" onClick={() => handleRequestMissing(item)} disabled={isRequesting}>
-                                                          {isRequesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CloudDownload className="w-3.5 h-3.5" />}<span className="hidden sm:inline ml-1">Request</span>
-                                                      </Button>
+                                                      <RequestIconButton className="h-7 w-7" busy={isRequesting} done={isAlreadyRequested} onClick={() => handleRequestMissing(item)} />
                                                   )}
                                                   {!isAlreadyRequested && !item.issue?.filePath && <GetComicsButton className="h-7 w-7 ml-1" disabled={isRequesting} onClick={() => handleRequestMissing(item, null, 'getcomics')} />}
                                                   {!isAlreadyRequested && !item.issue?.filePath && <BatcaveButton className="h-7 w-7 ml-1" body={{ listItemIds: [item.id] }} />}
@@ -1007,15 +989,7 @@ function ReadingListsContent() {
                                                                   <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-primary" title="Re-check this item against the library" onClick={() => handleRefreshItem(item.id)} disabled={refreshingItemIds.has(item.id)}>
                                                                       {refreshingItemIds.has(item.id) ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                                                                   </Button>
-                                                                  {isAlreadyRequested ? (
-                                                                      <Button size="sm" variant="secondary" disabled className="h-8 bg-green-50 text-green-700 dark:bg-green-900/20 border-green-200 opacity-100 cursor-not-allowed">
-                                                                          <Check className="w-3.5 h-3.5 mr-1"/> Requested
-                                                                      </Button>
-                                                                  ) : (
-                                                                      <Button size="sm" variant="outline" className="h-8 font-bold text-[10px] uppercase tracking-wider border-primary/30 text-primary bg-primary/5 hover:bg-primary/10" onClick={() => handleRequestMissing(item)} disabled={isRequesting}>
-                                                                          {isRequesting ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1"/> : <CloudDownload className="w-3.5 h-3.5 mr-1"/>} Request
-                                                                      </Button>
-                                                                  )}
+                                                                  <RequestIconButton busy={isRequesting} done={isAlreadyRequested} onClick={() => handleRequestMissing(item)} />
                                                                   {!isAlreadyRequested && <GetComicsButton disabled={isRequesting} onClick={() => handleRequestMissing(item, null, 'getcomics')} />}
                                                                   {!isAlreadyRequested && <BatcaveButton body={{ listItemIds: [item.id] }} />}
                                                               </div>

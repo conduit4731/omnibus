@@ -7,7 +7,7 @@
 import { useState } from "react"
 import Link from "next/link"
 import { useSession } from "next-auth/react"
-import { Globe, Loader2, Moon } from "lucide-react"
+import { Check, CloudDownload, Globe, Loader2, Moon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/use-toast"
 import { ToastAction } from "@/components/ui/toast"
@@ -15,6 +15,24 @@ import { cn } from "@/lib/utils"
 import type { QueueBody } from "@/lib/batcave-queue"
 
 const ICON_BTN = "h-8 w-8 shrink-0 text-white border-0 shadow-sm"
+
+// The normal request (indexers) as the first of the three icons; done = already requested
+export function RequestIconButton({ onClick, disabled, busy, done, className, title = "Request (Usenet)" }: {
+    onClick: () => unknown
+    disabled?: boolean
+    busy?: boolean
+    done?: boolean
+    className?: string
+    title?: string
+}) {
+    return (
+        <Button type="button" size="icon" title={done ? "Angefragt" : title} aria-label={done ? "Angefragt" : title} disabled={disabled || busy || done}
+            className={cn(ICON_BTN, done ? "bg-emerald-600 disabled:opacity-100" : "bg-primary hover:bg-primary/90 text-primary-foreground", className)}
+            onClick={e => { e.preventDefault(); e.stopPropagation(); onClick() }}>
+            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : done ? <Check className="w-4 h-4" /> : <CloudDownload className="w-4 h-4" />}
+        </Button>
+    )
+}
 
 export function GetComicsButton({ onClick, disabled, className, title = "Über GetComics laden" }: {
     onClick: () => unknown

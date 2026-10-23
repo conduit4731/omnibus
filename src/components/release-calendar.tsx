@@ -1,7 +1,7 @@
 // Fork only: day / week / month / year release calendar with Batcave-style publisher filter.
 "use client"
 
-import { BatcaveButton, GetComicsButton } from "@/components/batcave-button"
+import { BatcaveButton, GetComicsButton, RequestIconButton } from "@/components/batcave-button"
 import { deDate, deDayMonth, DE_MONTHS } from "@/lib/date-de"
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
@@ -113,11 +113,9 @@ function ReleaseDialog({ r, onClose }: { r: Release | null, onClose: () => void 
                                 {busy === 'series' && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Subscribe to series
                             </Button>
                         )}
-                        <Button variant="outline" className="font-bold" disabled={busy !== null || !r.volumeId} onClick={() => request('issue')}>
-                            {busy === 'issue' && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Request this issue
-                        </Button>
                         {r.volumeId && (
                             <div className="flex gap-2">
+                                <RequestIconButton title="Dieses Heft anfragen (Usenet)" busy={busy === 'issue'} disabled={busy !== null} onClick={() => request('issue')} />
                                 <GetComicsButton disabled={busy !== null} onClick={() => request('issue', 'getcomics')} />
                                 <BatcaveButton body={{ cvId: r.volumeId, metadataSource: r.metadataSource || 'METRON', issues: [{ number: r.issueNumber }] }} />
                             </div>

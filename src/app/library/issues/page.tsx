@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useRef, Suspense } from "react"
 import Link from "next/link"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { useSession } from "next-auth/react"
-import { BatcaveButton, GetComicsButton } from "@/components/batcave-button"
+import { BatcaveButton, GetComicsButton, RequestIconButton } from "@/components/batcave-button"
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog"
 import { requestNameFor } from "@/lib/utils/request-name"
 import { normalizeFractionNumbers } from "@/lib/utils/issue-parser"
@@ -299,17 +299,8 @@ function LibraryIssuesInner() {
       {/* "Find them all and have it search" — one action for whatever the list is filtered to.
           Withdraws itself once nothing on screen is left to ask for. */}
       {canRequest && requestableShown.length > 0 && (
-        <Button
-          aria-label="Request every missing issue shown on this page"
-          variant="outline"
-          disabled={bulkProgress !== null}
-          onClick={() => setBulkOpen(true)}
-          className="h-10 sm:h-9 font-bold border-primary/30 text-primary hover:bg-primary/10 shrink-0"
-        >
-          {bulkProgress
-            ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Requesting {bulkProgress.done}/{bulkProgress.total}…</>
-            : <><DownloadCloud className="w-4 h-4 mr-2" /> Request all shown ({requestableShown.length})</>}
-        </Button>
+        <RequestIconButton className="h-10 w-10 sm:h-9 sm:w-9" title={bulkProgress ? `Anfragen ${bulkProgress.done}/${bulkProgress.total} …` : `Alle ${requestableShown.length} angezeigten anfragen (Usenet)`}
+          busy={bulkProgress !== null} onClick={() => setBulkOpen(true)} />
       )}
       {canRequest && requestableShown.length > 0 && (
         <GetComicsButton className="h-10 w-10 sm:h-9 sm:w-9" title={`Alle ${requestableShown.length} angezeigten über GetComics`} disabled={bulkProgress !== null} onClick={() => requestAllShown('getcomics')} />
@@ -486,20 +477,7 @@ function LibraryIssuesInner() {
                   request can resolve (a matched series), and only for users allowed to ask. */}
               <div className="flex items-center gap-1.5">
               {canRequest && !issue.onDisk && issue.requestable && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  aria-label={`Request ${issue.seriesName} #${issue.number}`}
-                  disabled={requestingIds.has(issue.id) || requestedIds.has(issue.id)}
-                  onClick={() => requestIssue(issue)}
-                  className="h-8 text-[10px] font-black uppercase tracking-wider border-primary/30 text-primary hover:bg-primary/10"
-                >
-                  {requestingIds.has(issue.id)
-                    ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    : requestedIds.has(issue.id)
-                      ? <><Check className="w-3.5 h-3.5 mr-1" /> Requested</>
-                      : <><DownloadCloud className="w-3.5 h-3.5 mr-1" /> Request</>}
-                </Button>
+                <RequestIconButton busy={requestingIds.has(issue.id)} done={requestedIds.has(issue.id)} onClick={() => requestIssue(issue)} />
               )}
               {canRequest && !issue.onDisk && issue.requestable && (
                 <GetComicsButton disabled={requestingIds.has(issue.id) || requestedIds.has(issue.id)} onClick={() => requestIssue(issue, 'getcomics')} />
