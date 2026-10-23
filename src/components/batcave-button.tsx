@@ -1,23 +1,41 @@
-// Fork only: puts issues on the Batcave queue (src/lib/batcave-queue.ts). Sits next to the request buttons; admins only,
-// because the userscript worker uploads with an admin API key into the shared library.
+// Fork only: the two source buttons that sit next to every Request button (Request itself searches the indexers):
+//   GetComicsButton (blue)  — the same request, GetComics only (directSource 'getcomics'); the caller does the request
+//   BatcaveButton (orange)  — puts the issues on the Batcave queue (src/lib/batcave-queue.ts), which the userscript in an
+//                             open Batcave tab downloads. Admins only: it uploads with an admin API key into the library.
 "use client"
 
 import { useState } from "react"
 import Link from "next/link"
 import { useSession } from "next-auth/react"
-import { Loader2, Moon } from "lucide-react"
+import { Globe, Loader2, Moon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/use-toast"
 import { ToastAction } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
 import type { QueueBody } from "@/lib/batcave-queue"
 
-export function BatcaveButton({ body, label = "Batcave", className, size = "sm", iconOnly = false }: {
-    body: QueueBody | (() => QueueBody)
-    label?: string
+const ICON_BTN = "h-8 w-8 shrink-0 text-white border-0 shadow-sm"
+
+export function GetComicsButton({ onClick, disabled, className, title = "Über GetComics laden" }: {
+    onClick: () => unknown
+    disabled?: boolean
     className?: string
-    size?: "sm" | "default" | "icon"
-    iconOnly?: boolean
+    title?: string
+}) {
+    const [busy, setBusy] = useState(false)
+    return (
+        <Button type="button" size="icon" title={title} aria-label={title} disabled={disabled || busy}
+            className={cn(ICON_BTN, "bg-blue-600 hover:bg-blue-700", className)}
+            onClick={async e => { e.preventDefault(); e.stopPropagation(); setBusy(true); try { await onClick() } finally { setBusy(false) } }}>
+            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Globe className="w-4 h-4" />}
+        </Button>
+    )
+}
+
+export function BatcaveButton({ body, className, title = "Über Batcave laden" }: {
+    body: QueueBody | (() => QueueBody)
+    className?: string
+    title?: string
 }) {
     const { data: session } = useSession()
     const { toast } = useToast()
@@ -41,11 +59,9 @@ export function BatcaveButton({ body, label = "Batcave", className, size = "sm",
     }
 
     return (
-        <Button type="button" variant="outline" size={iconOnly ? "icon" : size} title="Über Batcave laden (Userscript im Batcave-Tab)"
-            className={cn("font-bold border-indigo-400/40 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-500/10", className)}
-            disabled={busy} onClick={queue}>
+        <Button type="button" size="icon" title={title} aria-label={title} disabled={busy} onClick={queue}
+            className={cn(ICON_BTN, "bg-orange-500 hover:bg-orange-600", className)}>
             {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Moon className="w-4 h-4" />}
-            {!iconOnly && <span className="ml-1.5">{label}</span>}
         </Button>
     )
 }

@@ -1,13 +1,13 @@
 // src/app/library/series/page.tsx
 "use client"
 
-import { ChipCell, DirectSources, ListChips, ReleaseInfo, chipKey, type IssueChip, type SeriesListRef } from "@/components/series-issue-extras"
+import { ChipCell, ListChips, ReleaseInfo, chipKey, type IssueChip, type SeriesListRef } from "@/components/series-issue-extras"
 import { useState, useEffect, useTransition, Suspense, useMemo, type SyntheticEvent } from "react"
 import { IssueSortControl } from "@/components/issue-sort-control"
 import { sortIssuesForDisplay, laneLabel, parseIssueSortMode, DEFAULT_ISSUE_SORT, ISSUE_SORT_STORAGE_KEY, type IssueSortMode } from "@/lib/utils/issue-sort"
 import { useSearchParams, useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
-import { BatcaveButton } from "@/components/batcave-button"
+import { BatcaveButton, GetComicsButton } from "@/components/batcave-button"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { 
@@ -621,14 +621,14 @@ function SeriesContent() {
       }
   }
 
-  const handleDownloadAllMissing = async () => {
+  const handleDownloadAllMissing = async (directSource?: 'getcomics') => {
     if (missingIssues.length === 0) return;
     setIsBulkDownloading(true);
     toast({ title: "Bulk Request Started", description: `Queuing ${missingIssues.length} issues...` });
     
     let successCount = 0;
     for (const issue of missingIssues) {
-      const success = await handleRequestMissing(issue);
+      const success = await handleRequestMissing(issue, directSource);
       if (success) successCount++;
       await new Promise(resolve => setTimeout(resolve, 300));
     }
@@ -1353,7 +1353,10 @@ function SeriesContent() {
                       </Button>
                   ) : null}
                   {activeIssue && !activeIssue.fullPath ? (
-                      <BatcaveButton size="default" className="w-full" label="Über Batcave laden" body={{ seriesId: seriesInfo.id, issues: [{ number: activeIssue.number, isAnnual: activeIssue.isAnnual }] }} />
+                      <div className="flex justify-center gap-2">
+                          <GetComicsButton onClick={() => handleRequestMissing(activeIssue, 'getcomics')} disabled={requestingIds.has(activeIssue.id) || requestedIds.has(activeIssue.id)} />
+                          <BatcaveButton body={{ seriesId: seriesInfo.id, issues: [{ number: activeIssue.number, isAnnual: activeIssue.isAnnual }] }} />
+                      </div>
                   ) : (
                       <Button 
                         className={cn("w-full font-black shadow-md", activeIssue?.readProgress > 0 && !(activeIssue?.isRead || activeIssue?.readProgress >= 100) && "bg-primary hover:bg-primary/90 text-primary-foreground border-0")} 
@@ -1450,13 +1453,18 @@ function SeriesContent() {
                                 variant="outline" 
                                 className={cn("w-full transition-all shadow-sm active:scale-95", missingIssues.length > 0 ? 'bg-primary/10 text-primary border-primary/30 hover:bg-primary/20' : 'opacity-50 grayscale cursor-not-allowed font-bold')}
                                 disabled={missingIssues.length === 0 || isBulkDownloading}
-                                onClick={handleDownloadAllMissing}
+                                onClick={() => handleDownloadAllMissing()}
                             >
                                 {isBulkDownloading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <DownloadCloud className="w-4 h-4 mr-2" />}
                                 Missing ({missingIssues.length})
                             </Button>
                         )}
-                        {missingIssues.length > 0 && <BatcaveButton size="default" className="w-full" label={`Fehlende über Batcave (${missingIssues.length})`} body={{ seriesId: seriesInfo.id }} />}
+                        {missingIssues.length > 0 && (
+                            <div className="flex justify-center gap-2">
+                                <GetComicsButton title={`Alle ${missingIssues.length} fehlenden über GetComics`} disabled={isBulkDownloading} onClick={() => handleDownloadAllMissing('getcomics')} />
+                                <BatcaveButton title={`Alle ${missingIssues.length} fehlenden über Batcave`} body={{ seriesId: seriesInfo.id }} />
+                            </div>
+                        )}
                       </>
                   )}
 
@@ -1848,7 +1856,7 @@ function SeriesContent() {
                                               {isRequesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : (isRequested ? 'Requested' : 'Request')}
                                           </Button>
                                       )}
-                                      {!book.fullPath && <BatcaveButton iconOnly className="h-8 w-8 shrink-0" body={{ seriesId: seriesInfo.id, issues: [{ number: book.number, isAnnual: book.isAnnual }] }} />}
+                                      {!owned && canRequest && <GetComicsButton disabled={isRequesting || isRequested} onClick={() => handleRequestMissing(book, 'getcomics')} />}
                                   </div>
                               );
                           })}
@@ -2107,11 +2115,12 @@ function SeriesContent() {
                       <div className="flex flex-wrap items-center justify-between gap-3">
                           <h4 className="font-black flex items-center gap-2 text-xl text-muted-foreground opacity-80 tracking-tight"><CloudOff className="w-6 h-6"/> Missing Issues ({chipFilter ? `${sortedMissing.length} of ${missingIssues.length}` : missingIssues.length})</h4>
                           {canRequest && missingIssues.length > 0 && (
-                              <Button size="sm" className="font-bold" disabled={isBulkDownloading} onClick={handleDownloadAllMissing}>
+                              <Button size="sm" className="font-bold" disabled={isBulkDownloading} onClick={() => handleDownloadAllMissing()}>
                                   {isBulkDownloading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <DownloadCloud className="w-4 h-4 mr-2" />} Request all ({missingIssues.length})
                               </Button>
                           )}
-                          {missingIssues.length > 0 && <BatcaveButton label={`Batcave (${missingIssues.length})`} body={{ seriesId: seriesInfo.id }} />}
+                          {canRequest && missingIssues.length > 0 && <GetComicsButton title={`Alle ${missingIssues.length} fehlenden über GetComics`} disabled={isBulkDownloading} onClick={() => handleDownloadAllMissing('getcomics')} />}
+                          {missingIssues.length > 0 && <BatcaveButton title={`Alle ${missingIssues.length} fehlenden über Batcave`} body={{ seriesId: seriesInfo.id }} />}
                       </div>
                       
                       {missingIssues.length === 0 ? (
@@ -2133,7 +2142,7 @@ function SeriesContent() {
                                         <div className="w-20 h-28 shrink-0 rounded-md overflow-hidden bg-muted border border-border grayscale">{issue.coverUrl || seriesInfo.cover ? <img src={issue.coverUrl || seriesInfo.cover} onError={coverImgError(seriesInfo.cover)} className="w-full h-full object-cover" alt="" /> : <ImageIcon className="w-8 h-8 m-auto mt-10 text-muted-foreground/50" />}</div>
                                         <div className="flex flex-col justify-between flex-1 py-1 min-w-0">
                                             <div><h5 className="font-bold text-base line-clamp-2 text-foreground leading-tight">{issue.name}</h5><span className="text-[10px] mt-1 font-black text-muted-foreground uppercase tracking-widest">{laneLabel(issue)} #{issue.parsedNum}</span><ReleaseInfo date={issue.releaseDate} /><ListChips lists={seriesLists.byIssue[issue.id]} /></div>
-                                            <div className="flex flex-wrap items-center gap-2 mt-3">{isAlreadyRequested ? <Button size="sm" variant="secondary" disabled className="flex-1 h-9 bg-green-50 text-green-700 dark:bg-green-900/20 border-green-200 opacity-100 cursor-not-allowed"><Check className="w-4 h-4 mr-2"/> Queued</Button> : <Button size="sm" variant="outline" className="flex-1 h-9 font-black text-[10px] border-border hover:bg-muted uppercase tracking-wider min-w-[80px]" onClick={(e) => { e.stopPropagation(); handleRequestMissing(issue); }} disabled={isRequesting}>{isRequesting ? <Loader2 className="w-4 h-4 animate-spin mr-2"/> : <CloudDownload className="w-4 h-4 mr-2"/>}Request</Button>}<DirectSources onGetComics={() => handleRequestMissing(issue, 'getcomics')} disabled={isRequesting || isAlreadyRequested} seriesName={seriesInfo.name} buttonClass="flex-1 h-9 font-black text-[10px] border-border hover:bg-muted uppercase tracking-wider min-w-[80px]" /><BatcaveButton className="flex-1 h-9 text-[10px] uppercase tracking-wider min-w-[80px]" body={{ seriesId: seriesInfo.id, issues: [{ number: issue.number, isAnnual: issue.isAnnual }] }} /></div>
+                                            <div className="flex flex-wrap items-center gap-2 mt-3">{isAlreadyRequested ? <Button size="sm" variant="secondary" disabled className="flex-1 h-9 bg-green-50 text-green-700 dark:bg-green-900/20 border-green-200 opacity-100 cursor-not-allowed"><Check className="w-4 h-4 mr-2"/> Queued</Button> : <Button size="sm" variant="outline" className="flex-1 h-9 font-black text-[10px] border-border hover:bg-muted uppercase tracking-wider min-w-[80px]" onClick={(e) => { e.stopPropagation(); handleRequestMissing(issue); }} disabled={isRequesting}>{isRequesting ? <Loader2 className="w-4 h-4 animate-spin mr-2"/> : <CloudDownload className="w-4 h-4 mr-2"/>}Request</Button>}<GetComicsButton onClick={() => handleRequestMissing(issue, 'getcomics')} disabled={isRequesting || isAlreadyRequested} /><BatcaveButton body={{ seriesId: seriesInfo.id, issues: [{ number: issue.number, isAnnual: issue.isAnnual }] }} /></div>
                                         </div>
                                       </div>
                                   );
@@ -2180,7 +2189,7 @@ function SeriesContent() {
                                                                   {isRequesting ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1"/> : <CloudDownload className="w-3.5 h-3.5 mr-1"/>} Request
                                                               </Button>
                                                           )}
-                                                          <div className="inline-flex gap-1.5 ml-1.5 align-middle"><DirectSources onGetComics={() => handleRequestMissing(issue, 'getcomics')} disabled={isRequesting || isAlreadyRequested} seriesName={seriesInfo.name} buttonClass="h-8 font-bold border-border hover:bg-muted text-[10px] uppercase tracking-wider" /><BatcaveButton className="h-8 text-[10px] uppercase tracking-wider" body={{ seriesId: seriesInfo.id, issues: [{ number: issue.number, isAnnual: issue.isAnnual }] }} /></div>
+                                                          <div className="inline-flex gap-1.5 ml-1.5 align-middle"><GetComicsButton onClick={() => handleRequestMissing(issue, 'getcomics')} disabled={isRequesting || isAlreadyRequested} /><BatcaveButton body={{ seriesId: seriesInfo.id, issues: [{ number: issue.number, isAnnual: issue.isAnnual }] }} /></div>
                                                       </td>
                                                   </tr>
                                               )

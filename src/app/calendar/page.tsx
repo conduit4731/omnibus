@@ -13,7 +13,7 @@ import { Loader2, Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight, Im
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
-import { BatcaveButton } from "@/components/batcave-button"
+import { BatcaveButton, GetComicsButton } from "@/components/batcave-button"
 import { FollowBell } from "@/components/follow-bell"
 import { hasMetronCredentials } from "@/lib/metron/credentials"
 import { ReleaseCalendar } from "@/components/release-calendar"
@@ -270,7 +270,7 @@ export default function CalendarPage() {
         ))
     );
 
-    const handleRequest = async (id: number | string, name: string, image: string, year: string, type: 'volume' | 'issue', publisher: string, monitored: boolean = false, issueNumber?: string, metadataSource: string = 'COMICVINE', monitorOnly: boolean = false, releaseDate?: string) => {
+    const handleRequest = async (id: number | string, name: string, image: string, year: string, type: 'volume' | 'issue', publisher: string, monitored: boolean = false, issueNumber?: string, metadataSource: string = 'COMICVINE', monitorOnly: boolean = false, releaseDate?: string, directSource?: 'getcomics') => {
         const exactIssueName = name; 
         const targetKey = type === 'volume' ? `vol-${id}` : `iss-${exactIssueName}`;
 
@@ -287,7 +287,8 @@ export default function CalendarPage() {
                     cvId: id, name: exactIssueName, year, publisher: publisher || "Unknown", image, type, monitored, metadataSource,
                     issueNumber: issueNumber || (type === 'issue' ? "1" : undefined),
                     monitorOnly,
-                    releaseDate
+                    releaseDate,
+                    directSource
                 })
             });
 
@@ -580,7 +581,10 @@ export default function CalendarPage() {
                                                                         {requestingTarget === `iss-${issueTargetName}` ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Download className="w-3 h-3 mr-1" />} Request Issue
                                                                     </Button>
                                                                 )}
-                                                                {volIdKey ? <BatcaveButton iconOnly className="h-8 w-8 border-2 border-white text-white bg-transparent" body={{ cvId: volIdKey, metadataSource: (issue as any).metadataSource || 'METRON', issues: [{ number: String(issue.issueNumber) }] }} /> : null}
+                                                                {volIdKey ? <>
+                                                                    <GetComicsButton onClick={() => handleRequest(volIdKey, compositeName, issue.coverUrl || "", issue.year || "", 'issue', issue.publisher, false, issue.issueNumber, (issue as any).metadataSource || 'METRON', false, issue.releaseDate, 'getcomics')} />
+                                                                    <BatcaveButton body={{ cvId: volIdKey, metadataSource: (issue as any).metadataSource || 'METRON', issues: [{ number: String(issue.issueNumber) }] }} />
+                                                                </> : null}
                                                             </div>
                                                             <Button
                                                                 size="sm"
@@ -645,7 +649,10 @@ export default function CalendarPage() {
                                                             {requestingTarget === `iss-${issueTargetName}` ? <Loader2 className="w-3 h-3 animate-spin mr-1.5" /> : <Download className="w-3 h-3 mr-1.5" />} Request Issue
                                                         </Button>
                                                     )}
-                                                    {volIdKey ? <BatcaveButton className="w-full h-8 text-[10px]" label="Über Batcave laden" body={{ cvId: volIdKey, metadataSource: (issue as any).metadataSource || 'METRON', issues: [{ number: String(issue.issueNumber) }] }} /> : null}
+                                                    {volIdKey ? <div className="flex justify-center gap-2">
+                                                        <GetComicsButton disabled={isMonitored} onClick={() => handleRequest(volIdKey, compositeName, issue.coverUrl || "", issue.year || "", 'issue', issue.publisher, false, issue.issueNumber, (issue as any).metadataSource || 'METRON', false, issue.releaseDate, 'getcomics')} />
+                                                        <BatcaveButton body={{ cvId: volIdKey, metadataSource: (issue as any).metadataSource || 'METRON', issues: [{ number: String(issue.issueNumber) }] }} />
+                                                    </div> : null}
 
                                                     <Button 
                                                         size="sm" 

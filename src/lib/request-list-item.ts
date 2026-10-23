@@ -4,7 +4,7 @@
 import { Logger } from '@/lib/logger';
 import { getErrorMessage } from '@/lib/utils/error';
 
-export async function requestListItem(item: any, coverUrl: string | null = null): Promise<void> {
+export async function requestListItem(item: any, coverUrl: string | null = null, directSource?: 'getcomics'): Promise<void> {
     let volumeId = 0;
     let year = new Date().getFullYear().toString();
     const provider = item.metadataSource || item.issue?.metadataSource || 'COMICVINE';
@@ -30,7 +30,7 @@ export async function requestListItem(item: any, coverUrl: string | null = null)
     const standardRes = await fetch('/api/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'issue', cvId: volumeId, name: item.title, year, publisher: "Unknown", image: coverUrl, issueNumber, metadataSource: provider })
+        body: JSON.stringify({ type: 'issue', cvId: volumeId, name: item.title, year, publisher: "Unknown", image: coverUrl, issueNumber, metadataSource: provider, directSource })
     });
 
     if (!standardRes.ok) {

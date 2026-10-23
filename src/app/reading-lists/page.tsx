@@ -6,7 +6,7 @@ import { requestListItem } from "@/lib/request-list-item"
 import { RequestSearch } from "@/components/request-search"
 import { useState, useEffect, Suspense } from "react"
 import { useSession } from "next-auth/react"
-import { BatcaveButton } from "@/components/batcave-button"
+import { BatcaveButton, GetComicsButton } from "@/components/batcave-button"
 import { useSearchParams } from "next/navigation"
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd"
 import { Button } from "@/components/ui/button"
@@ -601,11 +601,11 @@ function ReadingListsContent() {
       }
   }
 
-  const handleRequestMissing = async (item: any, coverUrl: string | null = null) => {
+  const handleRequestMissing = async (item: any, coverUrl: string | null = null, directSource?: 'getcomics') => {
       setRequestingIds(prev => new Set(prev).add(item.id));
       
       try {
-          await requestListItem(item, coverUrl);
+          await requestListItem(item, coverUrl, directSource);
 
           setRequestedIds(prev => {
               const next = new Set(prev).add(item.id);
@@ -625,7 +625,7 @@ function ReadingListsContent() {
       }
   }
 
-  const handleDownloadAllMissing = async (missingItems: any[]) => {
+  const handleDownloadAllMissing = async (missingItems: any[], directSource?: 'getcomics') => {
       if (missingItems.length === 0) return;
       setIsBulkDownloading(true);
       toast({ title: "Bulk Request Started", description: `Queuing ${missingItems.length} issues...` });
@@ -634,7 +634,7 @@ function ReadingListsContent() {
       for (const item of missingItems) {
           if (!requestedIds.has(item.id)) {
               const coverUrl = activeList?.coverUrl || null; 
-              const success = await handleRequestMissing(item, coverUrl);
+              const success = await handleRequestMissing(item, coverUrl, directSource);
               if (success) successCount++;
               await new Promise(resolve => setTimeout(resolve, 300));
           }
@@ -820,7 +820,10 @@ function ReadingListsContent() {
                                       </Button>
                                   )}
                                   {missingItems.length > 0 && (
-                                      <BatcaveButton className="h-10 sm:h-auto" label={`Batcave (${missingItems.length})`} body={() => ({ listItemIds: missingItems.map((i: any) => i.id) })} />
+                                      <>
+                                          <GetComicsButton className="h-10 w-10 sm:h-9 sm:w-9" title={`Alle ${missingItems.length} fehlenden über GetComics`} disabled={isBulkDownloading} onClick={() => handleDownloadAllMissing(missingItems, 'getcomics')} />
+                                          <BatcaveButton className="h-10 w-10 sm:h-9 sm:w-9" title={`Alle ${missingItems.length} fehlenden über Batcave`} body={() => ({ listItemIds: missingItems.map((i: any) => i.id) })} />
+                                      </>
                                   )}
                                   {(isAdmin || activeList.userId === session?.user?.id) && (
                                       <Button variant="ghost" size="icon" className="h-10 w-10 sm:h-9 sm:w-9 border border-transparent hover:border-red-200 dark:hover:border-red-900/50 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20" onClick={() => setDeleteModalOpen(true)}>
@@ -884,7 +887,8 @@ function ReadingListsContent() {
                                           ) : <RequestSearch variant="find" query={name} />}
                                           <div className="hidden sm:block h-1.5 w-28 rounded-full bg-muted overflow-hidden shrink-0"><div className={`h-full ${owned === items.length ? 'bg-emerald-500' : owned === 0 ? 'bg-red-500' : 'bg-amber-500'}`} style={{ width: `${Math.max(4, Math.round(100 * owned / items.length))}%` }} /></div>
                                           <OwnedState items={items} />
-                                          {owned < items.length && <BatcaveButton iconOnly className="h-7 w-7 shrink-0" body={() => ({ listItemIds: items.filter((i: any) => !i.issue?.filePath).map((i: any) => i.id) })} />}
+                                          {owned < items.length && <GetComicsButton className="h-7 w-7" title="Fehlende dieser Serie über GetComics" disabled={isBulkDownloading} onClick={() => handleDownloadAllMissing(items.filter((i: any) => !i.issue?.filePath), 'getcomics')} />}
+                                          {owned < items.length && <BatcaveButton className="h-7 w-7" title="Fehlende dieser Serie über Batcave" body={() => ({ listItemIds: items.filter((i: any) => !i.issue?.filePath).map((i: any) => i.id) })} />}
                                           {owned < items.length ? (
                                               <Button size="sm" variant="ghost" className="h-7 px-2 text-[10px] font-bold uppercase text-primary hover:bg-primary/10 shrink-0" disabled={isBulkDownloading}
                                                   onClick={() => handleDownloadAllMissing(items.filter((i: any) => !i.issue?.filePath))}>
@@ -947,7 +951,8 @@ function ReadingListsContent() {
                                                           {isRequesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CloudDownload className="w-3.5 h-3.5" />}<span className="hidden sm:inline ml-1">Request</span>
                                                       </Button>
                                                   )}
-                                                  {!isAlreadyRequested && !item.issue?.filePath && <BatcaveButton iconOnly className="h-7 w-7 ml-1" body={{ listItemIds: [item.id] }} />}
+                                                  {!isAlreadyRequested && !item.issue?.filePath && <GetComicsButton className="h-7 w-7 ml-1" disabled={isRequesting} onClick={() => handleRequestMissing(item, null, 'getcomics')} />}
+                                                  {!isAlreadyRequested && !item.issue?.filePath && <BatcaveButton className="h-7 w-7 ml-1" body={{ listItemIds: [item.id] }} />}
                                                   {(isAdmin || activeList.userId === session?.user?.id) && (
                                                       <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500 hover:text-red-700 ml-1 hidden sm:inline-flex" title="Remove from list" onClick={() => handleRemoveItem(item.id)}>
                                                           <Minus className="w-3.5 h-3.5" />
@@ -1011,7 +1016,8 @@ function ReadingListsContent() {
                                                                           {isRequesting ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1"/> : <CloudDownload className="w-3.5 h-3.5 mr-1"/>} Request
                                                                       </Button>
                                                                   )}
-                                                                  {!isAlreadyRequested && <BatcaveButton className="h-8 text-[10px] uppercase tracking-wider" body={{ listItemIds: [item.id] }} />}
+                                                                  {!isAlreadyRequested && <GetComicsButton disabled={isRequesting} onClick={() => handleRequestMissing(item, null, 'getcomics')} />}
+                                                                  {!isAlreadyRequested && <BatcaveButton body={{ listItemIds: [item.id] }} />}
                                                               </div>
                                                           </div>
                                                       )}

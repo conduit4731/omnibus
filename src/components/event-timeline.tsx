@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation"
 import { BookOpen, CloudDownload, Loader2, Play } from "lucide-react"
 import { useSession } from "next-auth/react"
 import { Button } from "@/components/ui/button"
+import { BatcaveButton, GetComicsButton } from "@/components/batcave-button"
 import { useToast } from "@/components/ui/use-toast"
 import { Chip, displayName, type ListSummary } from "@/components/list-cards"
 import { nextInList } from "@/lib/reading-list-next"
@@ -66,14 +67,14 @@ function RequestMissingButton({ l, onDone }: { l: ListSummary, onDone: () => voi
     const [progress, setProgress] = useState<string | null>(null)
     const missing = l.itemCount - l.ownedCount
     if (missing <= 0) return null
-    const go = async () => {
+    const go = async (directSource?: 'getcomics') => {
         setProgress('…')
         const d = await fetch(`/api/reading-lists?id=${encodeURIComponent(l.id)}`).then(r => r.ok ? r.json() : null).catch(() => null)
         const items = (d?.items || []).filter((i: any) => !i.issue?.filePath)
         let ok = 0
         for (const [n, item] of items.entries()) {
             setProgress(`${n + 1}/${items.length}`)
-            try { await requestListItem(item); ok++ } catch { /* counted as failed */ }
+            try { await requestListItem(item, null, directSource); ok++ } catch { /* counted as failed */ }
             await new Promise(res => setTimeout(res, 300))
         }
         setProgress(null)
@@ -81,9 +82,12 @@ function RequestMissingButton({ l, onDone }: { l: ListSummary, onDone: () => voi
         onDone()
     }
     return (
-        <Button size="sm" variant="outline" className="h-8 text-xs font-bold" disabled={progress !== null} onClick={go} title={`Request the ${missing} issues you don't have`}>
-            {progress ? <><Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />{progress}</> : <><CloudDownload className="w-3.5 h-3.5 mr-1" />Request {missing}</>}
-        </Button>
+        <>
+            <Button size="sm" variant="outline" className="h-8 text-xs font-bold" disabled={progress !== null} onClick={() => go()} title={`Request the ${missing} issues you don't have`}>
+                {progress ? <><Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />{progress}</> : <><CloudDownload className="w-3.5 h-3.5 mr-1" />Request {missing}</>}
+            </Button>
+            <GetComicsButton title={`Die ${missing} fehlenden über GetComics`} disabled={progress !== null} onClick={() => go('getcomics')} />
+        </>
     )
 }
 
@@ -140,6 +144,7 @@ export function EventTimeline({ events }: { events: ListSummary[] }) {
                                             <td className="py-2 text-right whitespace-nowrap">
                                                 <div className="inline-flex gap-1.5">
                                                     {canRequest && !requested.has(l.id) && <RequestMissingButton l={l} onDone={() => setRequested(prev => new Set(prev).add(l.id))} />}
+                                                    {l.ownedCount < l.itemCount && <BatcaveButton title={`Die ${l.itemCount - l.ownedCount} fehlenden über Batcave`} body={{ readingListId: l.id }} />}
                                                     <ReadButton l={l} />
                                                 </div>
                                             </td>

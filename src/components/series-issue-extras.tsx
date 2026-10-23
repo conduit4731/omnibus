@@ -7,21 +7,6 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
-// Fork: per missing issue — GetComics only (Omnibus' DDL path, no indexers) and a Batcave search to download
-// by hand into ~/batcave (the Mac sync + omnibus-match.sh file it). Batcave runs DataLife Engine: search by GET.
-// buttonClass: the same classes as the row's Request button, so all three match
-export function DirectSources({ onGetComics, disabled, seriesName, buttonClass }: { onGetComics: () => void, disabled: boolean, seriesName: string, buttonClass: string }) {
-  return (
-    <>
-      <Button size="sm" variant="outline" className={buttonClass} title="Request from GetComics only"
-        disabled={disabled} onClick={e => { e.stopPropagation(); onGetComics() }}>GetComics</Button>
-      <Button size="sm" variant="outline" className={buttonClass} title="Find this series on Batcave and download it into ~/batcave" asChild>
-        <a href={`https://batcave.biz/index.php?do=search&subaction=search&story=${encodeURIComponent(seriesName)}`} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>Batcave</a>
-      </Button>
-    </>
-  )
-}
-
 // Fork: era / events of an issue as table cells; a click filters the issue lists to that chip
 export const chipKey = (c: IssueChip) => `${c.kind}:${c.name}`
 export function ChipCell({ chips, kind, active, onPick }: { chips?: IssueChip[], kind: IssueChip['kind'], active: string | null, onPick: (key: string | null) => void }) {

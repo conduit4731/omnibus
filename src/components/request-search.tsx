@@ -6,7 +6,7 @@ import { searchKind, SEARCH_KIND_LABEL, type SearchKind } from "@/lib/search-kin
 import { Chip } from "@/components/list-cards"
 import { useState, useEffect, useMemo } from "react"
 import { useSession } from "next-auth/react"
-import { BatcaveButton } from "@/components/batcave-button" 
+import { BatcaveButton, GetComicsButton } from "@/components/batcave-button" 
 import { Search, Loader2, X, Plus, Calendar, Info, Layers, ChevronLeft, Download, CheckCircle2, Clock, Globe, PenTool, Paintbrush, Users, Image as ImageIcon, Activity, Library, FileCheck, Tags, BookMarked, Shield, MapPin, ExternalLink } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -228,7 +228,7 @@ export function RequestSearch({ variant = 'home', query }: { variant?: 'home' | 
       });
   }, [selectedItem?.id, selectedItem?.isVolume]);
 
-  const handleRequest = async (id: number, name: string, image: string, year: string, type: 'volume' | 'issue', publisher: string, monitored: boolean = false, issueNumber?: string, monitorOnly: boolean = false, metadataSource: string = 'COMICVINE') => {
+  const handleRequest = async (id: number, name: string, image: string, year: string, type: 'volume' | 'issue', publisher: string, monitored: boolean = false, issueNumber?: string, monitorOnly: boolean = false, metadataSource: string = 'COMICVINE', directSource?: 'getcomics') => {
     if (!canRequest) {
         toast({ title: "Requests not enabled", description: "Ask an admin to grant you the Request permission.", variant: "destructive" });
         return;
@@ -256,7 +256,8 @@ export function RequestSearch({ variant = 'home', query }: { variant?: 'home' | 
             monitored,
             issueNumber: issueNumber || (type === 'issue' ? "1" : undefined),
             monitorOnly,
-            metadataSource
+            metadataSource,
+            directSource
         })
       });
 
@@ -559,9 +560,15 @@ export function RequestSearch({ variant = 'home', query }: { variant?: 'home' | 
                                         </Button>
                                     )}
                                     
-                                    {((selectedItem as any).metadataSource || 'COMICVINE') === 'COMICVINE' && selectedItem.volumeId && !(selectedItem.isVolume ? (isAllAvailableOwned && volStatus === 'LIBRARY_MONITORED') : isIssueOwned) && (
-                                      <BatcaveButton size="default" className="w-full h-auto min-h-10 py-1.5" label={selectedItem.isVolume ? "Fehlende über Batcave" : "Über Batcave laden"}
-                                        body={selectedItem.isVolume ? { cvId: selectedItem.volumeId } : { cvId: selectedItem.volumeId, issues: [{ number: String(selectedItem.issueNumber || '1') }] }} />
+                                    {selectedItem.volumeId && !(selectedItem.isVolume ? (isAllAvailableOwned && volStatus === 'LIBRARY_MONITORED') : isIssueOwned) && (
+                                      <div className="flex justify-center gap-2">
+                                        {canRequest && <GetComicsButton title={selectedItem.isVolume ? "Alle fehlenden über GetComics" : "Über GetComics laden"}
+                                          onClick={() => selectedItem.isVolume
+                                            ? handleRequest(selectedItem.volumeId, seriesBaseName, selectedItem.image, selectedItem.year, 'volume', selectedItem.publisher || 'Unknown', false, undefined, false, selectedItem.metadataSource || 'COMICVINE', 'getcomics')
+                                            : handleRequest(selectedItem.volumeId, selectedItem.name, selectedItem.image, selectedItem.year, 'issue', selectedItem.publisher, false, selectedItem.issueNumber, false, selectedItem.metadataSource || 'COMICVINE', 'getcomics')} />}
+                                        {((selectedItem as any).metadataSource || 'COMICVINE') === 'COMICVINE' && <BatcaveButton title={selectedItem.isVolume ? "Alle fehlenden über Batcave" : "Über Batcave laden"}
+                                          body={selectedItem.isVolume ? { cvId: selectedItem.volumeId } : { cvId: selectedItem.volumeId, issues: [{ number: String(selectedItem.issueNumber || '1') }] }} />}
+                                      </div>
                                     )}
                                     <Button 
                                       variant="outline" 
@@ -715,7 +722,8 @@ export function RequestSearch({ variant = 'home', query }: { variant?: 'home' | 
                                                   {requestingTarget === `iss-${relIssueTargetName}` ? <Loader2 className="w-3.5 h-3.5 animate-spin"/> : <Download className="w-3.5 h-3.5 mr-1"/>} Request
                                               </Button>
                                           )}
-                                          {relIssueStatus !== 'ISSUE_OWNED' && relIssueStatus !== 'ISSUE_COVERED' && <BatcaveButton className="shrink-0 h-8 text-[10px] uppercase tracking-wider" body={{ cvId: selectedItem.volumeId, issues: [{ number: String(issue.issueNumber || '1') }] }} />}
+                                          {canRequest && relIssueStatus !== 'ISSUE_OWNED' && relIssueStatus !== 'ISSUE_COVERED' && relIssueStatus !== 'REQUESTED' && <GetComicsButton onClick={() => handleRequest(selectedItem.volumeId, issue.name, issue.image, issue.year, 'issue', selectedItem.publisher, false, issue.issueNumber, false, selectedItem.metadataSource || 'COMICVINE', 'getcomics')} />}
+                                          {relIssueStatus !== 'ISSUE_OWNED' && relIssueStatus !== 'ISSUE_COVERED' && <BatcaveButton body={{ cvId: selectedItem.volumeId, issues: [{ number: String(issue.issueNumber || '1') }] }} />}
                                       </div>
                                   )})}
                               </div>

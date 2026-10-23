@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useRef, Suspense } from "react"
 import Link from "next/link"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { useSession } from "next-auth/react"
-import { BatcaveButton } from "@/components/batcave-button"
+import { BatcaveButton, GetComicsButton } from "@/components/batcave-button"
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog"
 import { requestNameFor } from "@/lib/utils/request-name"
 import { normalizeFractionNumbers } from "@/lib/utils/issue-parser"
@@ -211,7 +211,7 @@ function LibraryIssuesInner() {
    * The same request the series page files — the composite comes from the ONE shared helper, so
    * the downloader can never be handed a different search string from this door than from that one.
    */
-  const requestIssue = async (row: IssueRow): Promise<boolean> => {
+  const requestIssue = async (row: IssueRow, directSource?: 'getcomics'): Promise<boolean> => {
     // #200: parseFloat on a vulgar fraction is NaN; the helper falls back to the raw number, so a
     // request never says "#null" or "#NaN" (the series API does this server-side; here it's ours).
     const p = parseFloat(normalizeFractionNumbers(row.number));
@@ -233,6 +233,7 @@ function LibraryIssuesInner() {
           image: row.cover,
           issueNumber: reqNum || undefined,
           metadataSource: row.metadataSource || 'COMICVINE',
+          directSource,
         }),
       });
       if (res.ok) {
@@ -257,14 +258,14 @@ function LibraryIssuesInner() {
   const requestableShown = issues.filter(i => i.requestable && !i.coveredBy && !requestedIds.has(i.id));
   const batcaveShown = issues.filter(i => !i.onDisk && !i.coveredBy && i.seriesMetadataId && (i.metadataSource || 'COMICVINE') === 'COMICVINE');
 
-  const requestAllShown = async () => {
+  const requestAllShown = async (directSource?: 'getcomics') => {
     setBulkOpen(false);
     const targets = requestableShown;
     if (targets.length === 0) return;
     setBulkProgress({ done: 0, total: targets.length });
     let ok = 0;
     for (let i = 0; i < targets.length; i++) {
-      if (await requestIssue(targets[i])) ok++;
+      if (await requestIssue(targets[i], directSource)) ok++;
       setBulkProgress({ done: i + 1, total: targets.length });
       // Same pacing the series page uses: each request fans out into a search job.
       await new Promise(r => setTimeout(r, 300));
@@ -310,8 +311,11 @@ function LibraryIssuesInner() {
             : <><DownloadCloud className="w-4 h-4 mr-2" /> Request all shown ({requestableShown.length})</>}
         </Button>
       )}
+      {canRequest && requestableShown.length > 0 && (
+        <GetComicsButton className="h-10 w-10 sm:h-9 sm:w-9" title={`Alle ${requestableShown.length} angezeigten über GetComics`} disabled={bulkProgress !== null} onClick={() => requestAllShown('getcomics')} />
+      )}
       {batcaveShown.length > 0 && (
-        <BatcaveButton className="h-10 sm:h-9 shrink-0" label={`Alle angezeigten über Batcave (${batcaveShown.length})`}
+        <BatcaveButton className="h-10 w-10 sm:h-9 sm:w-9" title={`Alle ${batcaveShown.length} angezeigten über Batcave`}
           body={() => ({ batch: batcaveShown.map(i => ({ cvId: i.seriesMetadataId, issues: [{ number: i.number, isAnnual: i.isAnnual }] })) })} />
       )}
       </div>
@@ -319,7 +323,7 @@ function LibraryIssuesInner() {
       <ConfirmationDialog
         isOpen={bulkOpen}
         onClose={() => setBulkOpen(false)}
-        onConfirm={requestAllShown}
+        onConfirm={() => requestAllShown()}
         title={`Request ${requestableShown.length} missing issue${requestableShown.length === 1 ? '' : 's'}?`}
         description="Each one becomes its own request and search, exactly as if you'd pressed Request on it. Anything you've already requested is skipped."
         confirmText="Request them"
@@ -480,6 +484,7 @@ function LibraryIssuesInner() {
               {/* A button can't live inside the link — it sits beneath it, so the card still opens
                   the series and the request is its own, deliberate click. Only where the API says a
                   request can resolve (a matched series), and only for users allowed to ask. */}
+              <div className="flex items-center gap-1.5">
               {canRequest && !issue.onDisk && issue.requestable && (
                 <Button
                   size="sm"
@@ -496,9 +501,13 @@ function LibraryIssuesInner() {
                       : <><DownloadCloud className="w-3.5 h-3.5 mr-1" /> Request</>}
                 </Button>
               )}
-              {!issue.onDisk && issue.seriesMetadataId && (issue.metadataSource || 'COMICVINE') === 'COMICVINE' && (
-                <BatcaveButton className="h-8 text-[10px] uppercase tracking-wider" body={{ cvId: issue.seriesMetadataId, issues: [{ number: issue.number, isAnnual: issue.isAnnual }] }} />
+              {canRequest && !issue.onDisk && issue.requestable && (
+                <GetComicsButton disabled={requestingIds.has(issue.id) || requestedIds.has(issue.id)} onClick={() => requestIssue(issue, 'getcomics')} />
               )}
+              {!issue.onDisk && issue.seriesMetadataId && (issue.metadataSource || 'COMICVINE') === 'COMICVINE' && (
+                <BatcaveButton body={{ cvId: issue.seriesMetadataId, issues: [{ number: issue.number, isAnnual: issue.isAnnual }] }} />
+              )}
+              </div>
             </div>
           ))}
         </div>

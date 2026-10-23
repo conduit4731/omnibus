@@ -1,7 +1,7 @@
 // Fork only: day / week / month / year release calendar with Batcave-style publisher filter.
 "use client"
 
-import { BatcaveButton } from "@/components/batcave-button"
+import { BatcaveButton, GetComicsButton } from "@/components/batcave-button"
 import { deDate, deDayMonth, DE_MONTHS } from "@/lib/date-de"
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
@@ -80,13 +80,13 @@ function ReleaseDialog({ r, onClose }: { r: Release | null, onClose: () => void 
     const [subscribed, setSubscribed] = useState(false)
     useEffect(() => { setSubscribed(false) }, [r])
     if (!r) return null
-    const request = async (type: 'volume' | 'issue') => {
+    const request = async (type: 'volume' | 'issue', directSource?: 'getcomics') => {
         setBusy(type === 'volume' ? 'series' : 'issue')
         const res = await fetch('/api/request', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(type === 'volume'
                 ? { cvId: r.volumeId, name: r.seriesName, year: r.year, publisher: r.publisher, image: r.coverUrl, type, monitored: true, monitorOnly: true, metadataSource: r.metadataSource || 'METRON' }
-                : { cvId: r.volumeId, name: `${r.seriesName} #${r.issueNumber}`, year: r.year, publisher: r.publisher, image: r.coverUrl, type, issueNumber: r.issueNumber, metadataSource: r.metadataSource || 'METRON', releaseDate: r.releaseDate }),
+                : { cvId: r.volumeId, name: `${r.seriesName} #${r.issueNumber}`, year: r.year, publisher: r.publisher, image: r.coverUrl, type, issueNumber: r.issueNumber, metadataSource: r.metadataSource || 'METRON', releaseDate: r.releaseDate, directSource }),
         }).catch(() => null)
         const data = res ? await res.json().catch(() => ({})) : {}
         setBusy(null)
@@ -116,7 +116,12 @@ function ReleaseDialog({ r, onClose }: { r: Release | null, onClose: () => void 
                         <Button variant="outline" className="font-bold" disabled={busy !== null || !r.volumeId} onClick={() => request('issue')}>
                             {busy === 'issue' && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Request this issue
                         </Button>
-                        {r.volumeId && <BatcaveButton size="default" label="Über Batcave laden" body={{ cvId: r.volumeId, metadataSource: r.metadataSource || 'METRON', issues: [{ number: r.issueNumber }] }} />}
+                        {r.volumeId && (
+                            <div className="flex gap-2">
+                                <GetComicsButton disabled={busy !== null} onClick={() => request('issue', 'getcomics')} />
+                                <BatcaveButton body={{ cvId: r.volumeId, metadataSource: r.metadataSource || 'METRON', issues: [{ number: r.issueNumber }] }} />
+                            </div>
+                        )}
                         {typeof r.id === 'number' && (
                             <Button variant="ghost" asChild className="text-muted-foreground"><a href={`https://metron.cloud/issue/${r.id}/`} target="_blank" rel="noreferrer"><ExternalLink className="w-4 h-4 mr-2" />Details on Metron</a></Button>
                         )}

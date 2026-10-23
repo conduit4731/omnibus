@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useMemo } from "react"
 import Link from "next/link"
+import { BatcaveButton, GetComicsButton } from "@/components/batcave-button"
 import { useSession } from "next-auth/react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -115,19 +116,14 @@ function RequestRow({ req, getStatusColor, onCancel, onRetry, isAdmin, isSelecti
       <td className="px-3 py-2 hidden sm:table-cell text-xs text-muted-foreground whitespace-nowrap">{new Date(req.createdAt).toLocaleDateString()}</td>
       <td className="px-3 py-2 w-14 text-xs font-mono text-primary">{req.status === 'DOWNLOADING' ? `${req.progress}%` : ''}</td>
       <td className="px-2 py-1 whitespace-nowrap text-right" onClick={e => e.stopPropagation()}>
-        {req.status === 'MANUAL_DDL' && req.downloadLink?.startsWith('http') && (
-          <Button size="sm" variant="outline" asChild className="h-7 px-2 text-[10px] font-bold uppercase border-amber-500/60 text-amber-500 mr-1" title="Open the GetComics link to pass the Cloudflare check and download the file; upload it in the admin queue">
-            <a href={req.downloadLink} target="_blank" rel="noopener noreferrer"><ExternalLink className="w-3.5 h-3.5 mr-1" />Download</a>
-          </Button>
-        )}
-        {req.status === 'MANUAL_DDL' && (
-          <Button size="icon" variant="ghost" className="h-7 w-7" title="Retry GetComics automatically" onClick={() => [req, ...sameLink].forEach(x => onRetry(x.id))}><RefreshCw className="w-3.5 h-3.5" /></Button>
-        )}
-        {needsAction(req) && isAdmin && (
-          <Button size="icon" variant="ghost" asChild className="h-7 w-7" title="Admin queue: upload the downloaded file, interactive search, approve">
-            <Link href="/admin"><Server className="w-3.5 h-3.5" /></Link>
-          </Button>
-        )}
+        {needsAction(req) ? (
+          <div className="inline-flex gap-1.5">
+            <GetComicsButton className="h-7 w-7" title="GetComics erneut versuchen" onClick={() => [req, ...sameLink].forEach(x => onRetry(x.id))} />
+            {req.volumeId && req.volumeId !== "0" && (
+              <BatcaveButton className="h-7 w-7" body={{ cvId: req.volumeId, metadataSource: req.metadataSource, issues: [req, ...sameLink].filter(x => x.issueNumber).map(x => ({ number: String(x.issueNumber) })) }} />
+            )}
+          </div>
+        ) : (<>
         {req.seriesPath && <Button size="icon" variant="ghost" asChild className="h-7 w-7" title="Go to series"><Link href={`/library/series?path=${encodeURIComponent(req.seriesPath)}`}><Library className="w-3.5 h-3.5" /></Link></Button>}
         {req.volumeId && req.volumeId !== "0" && (
           <Button size="icon" variant="ghost" asChild className="h-7 w-7" title={`View on ${req.metadataSource === 'METRON' ? 'Metron' : 'ComicVine'}`}>
@@ -140,6 +136,7 @@ function RequestRow({ req, getStatusColor, onCancel, onRetry, isAdmin, isSelecti
             {isCancelling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
           </Button>
         )}
+        </>)}
       </td>
     </tr>
   );

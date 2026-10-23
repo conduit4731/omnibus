@@ -9,7 +9,8 @@ import { useSession } from "next-auth/react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Chip, ListCard, type ListSummary } from "@/components/list-cards"
+import { Chip, type ListSummary } from "@/components/list-cards"
+import { EventTimeline } from "@/components/event-timeline"
 
 type Character = { key: string, name: string, publisher: string, lists: ListSummary[], issues: number, owned: number, read: number }
 
@@ -153,9 +154,8 @@ function CharactersContent() {
                         </div>
                     </div>
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-x-4 gap-y-8">
-                    {[...current.lists].sort((a, b) => a.eraStart - b.eraStart || a.name.localeCompare(b.name)).map(l => <ListCard key={l.id} list={l} />)}
-                </div>
+                {/* Chronologisch unter Ära-Überschriften, mit Request / GetComics / Batcave pro Leseliste (wie Events → Timeline) */}
+                <EventTimeline events={current.lists} />
             </div>
         )
     }
