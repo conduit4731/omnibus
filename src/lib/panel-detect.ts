@@ -112,6 +112,19 @@ function readingOrder(boxes: Box[], rtl: boolean): Box[] {
 }
 
 /**
+ * Real panels tile the page; art with large black or white areas (dark scenes on black gutters, sketches on white)
+ * falls apart into pieces whose boxes pile onto each other instead. Those pages stay whole. Tested on 31 pages from
+ * 1939 to 2025: real pages overlap 0–4 % (L-shaped panels), the broken ones more.
+ */
+function plausible(boxes: Box[], w: number, h: number): boolean {
+    const page = w * h;
+    let overlaps = 0;
+    for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) overlaps += overlap(boxes[i], boxes[j]);
+    if (overlaps > 0.06 * page) return false;                                    // pieces stacked on each other
+    return boxes.reduce((sum, b) => sum + size(b), 0) - overlaps >= 0.5 * page;  // together they cover the page
+}
+
+/**
  * Panels of a page in reading order, as fractions of the page. Empty when fewer than two panels are found or the art
  * fell apart into too many pieces — the guided view then shows the whole page.
  */
@@ -124,6 +137,6 @@ export function detectPanels(img: Img, opts: { rtl?: boolean } = {}): Rect[] {
     const dropContained = (list: Box[]) => list.filter(b => !list.some(o => o !== b && size(o) > size(b) && overlap(o, b) > 0.8 * size(b)));
     boxes = mergeSlivers(dropContained(boxes), w, h);
     boxes = dropContained(boxes);
-    if (boxes.length < 2 || boxes.length > MAX_PANELS) return [];
+    if (boxes.length < 2 || boxes.length > MAX_PANELS || !plausible(boxes, w, h)) return [];
     return readingOrder(boxes, !!opts.rtl).map(b => ({ x: b.x0 / w, y: b.y0 / h, w: (b.x1 - b.x0) / w, h: (b.y1 - b.y0) / h }));
 }

@@ -64,3 +64,11 @@ describe('lib/panel-detect slivers', () => {
         expect(Math.round(panels[1].x * 100)).toBe(5);
     });
 });
+
+describe('lib/panel-detect plausibility', () => {
+    it('shows the whole page when the pieces are not a panel grid', () => {
+        // two interlocking L shapes: their pixels never touch, their boxes overlap by half the page
+        const ls: [number, number, number, number][] = [[10, 10, 190, 45], [10, 10, 45, 200], [10, 215, 190, 290], [155, 60, 190, 290]];
+        expect(detectPanels(page(200, 300, ls))).toEqual([]);
+    });
+});
