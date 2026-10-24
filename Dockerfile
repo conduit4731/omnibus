@@ -20,6 +20,8 @@ RUN npm ci --legacy-peer-deps
 COPY . .
 
 RUN npx prisma generate
+# Fork: WebAssembly of onnxruntime-web for the reader's speech-bubble detection (src/workers/bubble-worker.ts)
+RUN mkdir -p public/ort && cp node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.mjs public/ort/
 RUN npm run build
 
 USER root

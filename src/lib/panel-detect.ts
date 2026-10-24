@@ -115,10 +115,10 @@ function mergeSlivers(boxes: Box[], w: number, h: number): Box[] {
  * The old row grouping put a tall panel and the two stacked beside it in one "row" sorted by x, so the lower of the
  * two came first whenever its slanted edge reached further left.
  */
-function readingOrder(boxes: Box[], rtl: boolean, w: number, h: number): Box[] {
+function readingOrder(boxes: Box[], rtl: boolean, w: number, h: number, tolerance = 0.04): Box[] {
     const groups = (list: Box[], horizontal: boolean): Box[][] => {
         const lo = (b: Box) => horizontal ? b.y0 : b.x0, hi = (b: Box) => horizontal ? b.y1 : b.x1;
-        const tol = 0.04 * (horizontal ? h : w);
+        const tol = tolerance * (horizontal ? h : w);
         const out: Box[][] = [];
         let end = -Infinity;
         for (const b of [...list].sort((a, c) => lo(a) - lo(c))) {
@@ -193,4 +193,14 @@ export function detectPanels(img: Img, opts: { rtl?: boolean } = {}): Rect[] {
     let scale = { w: small.width, h: small.height };
     if (!boxes.length && big) { boxes = pass(img, THIN, solid); scale = { w: img.width, h: img.height }; }
     return readingOrder(boxes, !!opts.rtl, scale.w, scale.h).map(b => ({ x: b.x0 / scale.w, y: b.y0 / scale.h, w: (b.x1 - b.x0) / scale.w, h: (b.y1 - b.y0) / scale.h }));
+}
+
+/**
+ * Reading order for rects given as fractions of the page (speech bubbles from the model), same rules as panels — but
+ * only a real gap separates rows: two balloons side by side sit at slightly different heights, unlike panel edges.
+ */
+export function orderRects(rects: Rect[], rtl = false): Rect[] {
+    const S = 1000;
+    const boxes = rects.map((r, i) => ({ x0: r.x * S, y0: r.y * S, x1: (r.x + r.w) * S, y1: (r.y + r.h) * S, area: i }));
+    return readingOrder(boxes, rtl, S, S, 0).map(b => rects[b.area]);
 }

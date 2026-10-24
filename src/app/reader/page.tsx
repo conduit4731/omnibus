@@ -893,6 +893,7 @@ function ReaderContent() {
           <GuidedView
               key={pages[currentIndex]}  // fresh state per page: no stale panels or zoom from the page before
               src={getPageUrl(pages[currentIndex])}
+              nextSrc={currentIndex + 1 < pages.length ? getPageUrl(pages[currentIndex + 1]) : undefined}
               rtl={settings.readingMode === 'rtl'}
               enterAtEnd={guidedFromEnd}
               imgStyle={imgStyle.filter ? { filter: imgStyle.filter } : undefined}

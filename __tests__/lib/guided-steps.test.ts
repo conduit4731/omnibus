@@ -1,0 +1,44 @@
+// __tests__/lib/guided-steps.test.ts
+import { describe, it, expect } from 'vitest';
+import { aroundBubble, guidedSteps } from '@/lib/guided-steps';
+
+const r = (x: number, y: number, w: number, h: number) => ({ x, y, w, h });
+// which input bubble a step shows: the one inside the step's frame closest to its centre (frames shift at page edges)
+const which = (steps: ReturnType<typeof guidedSteps>, bubbles: ReturnType<typeof r>[]) => steps.map(s => {
+    const inFrame = bubbles.map((b, i) => ({ b, i })).filter(({ b }) => b.x >= s.x - 1e-9 && b.y >= s.y - 1e-9 && b.x + b.w <= s.x + s.w + 1e-9 && b.y + b.h <= s.y + s.h + 1e-9);
+    const d = (b: ReturnType<typeof r>) => Math.hypot(b.x + b.w / 2 - (s.x + s.w / 2), b.y + b.h / 2 - (s.y + s.h / 2));
+    return inFrame.sort((p, q) => d(p.b) - d(q.b))[0]?.i ?? -1;
+});
+
+describe('lib/guided-steps', () => {
+    // Absolute Wonder Woman #4 p. 11: no panel grid, five balloons
+    const p11 = [r(0.72, 0.27, 0.15, 0.05), r(0.35, 0.31, 0.07, 0.03), r(0.25, 0.57, 0.08, 0.03), r(0.73, 0.55, 0.15, 0.07), r(0.43, 0.84, 0.14, 0.08)];
+
+    it('steps through the bubbles of a page without panels, top to bottom and left to right', () => {
+        // HUFF (left, a bit lower) before VISIONS (right): same row, read left to right
+        expect(which(guidedSteps([], p11), p11)).toEqual([1, 0, 2, 3, 4]);
+    });
+
+    it('goes right to left for manga', () => {
+        expect(which(guidedSteps([], p11, true), p11)).toEqual([0, 1, 3, 2, 4]);
+    });
+
+    it('needs two bubbles to guide a page without panels', () => {
+        expect(guidedSteps([], [p11[0]])).toEqual([]);
+    });
+
+    it('adds the bubbles of a big panel after it, small panels stay one step', () => {
+        const panels = [r(0, 0, 1, 0.6), r(0, 0.62, 0.5, 0.38)];
+        const bubbles = [r(0.6, 0.1, 0.1, 0.05), r(0.1, 0.1, 0.1, 0.05), r(0.1, 0.7, 0.1, 0.05), r(0.3, 0.8, 0.1, 0.05)];
+        const steps = guidedSteps(panels, bubbles);
+        expect(steps).toHaveLength(4);
+        expect(steps[0]).toEqual(panels[0]);
+        expect(which(steps.slice(1, 3), bubbles)).toEqual([1, 0]);
+        expect(steps[3]).toEqual(panels[1]);
+    });
+
+    it('shows a bubble with its surroundings, inside the page', () => {
+        const v = aroundBubble(r(0.9, 0.95, 0.08, 0.04));
+        expect(v.w).toBeCloseTo(0.4); expect(v.x + v.w).toBeCloseTo(1); expect(v.y + v.h).toBeCloseTo(1);
+    });
+});

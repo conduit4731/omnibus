@@ -90,3 +90,4 @@ tmp/
 /unmatched/
 /cache/
 RUST_ENGINE_PORT_PLAN.md
+/public/ort

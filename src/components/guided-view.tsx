@@ -2,14 +2,34 @@
 // but with the panels found automatically (src/lib/panel-detect.ts) instead of authored by hand. Each page starts as
 // the whole page, then zooms panel by panel; past the last panel comes the next page, back from the first the previous
 // page's last panel. Detection runs once per page on a downscaled canvas in the browser and is cached for the session.
+// Pages without panels (splashes, curved frames) and big panels step through their speech bubbles (a model in a web
+// worker, src/workers/bubble-worker.ts), see src/lib/guided-steps.ts.
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { detectPanels, type Rect } from "@/lib/panel-detect"
+import { guidedSteps } from "@/lib/guided-steps"
+import { detectBubblesInBrowser } from "@/lib/bubble-detect-client"
 
 const FULL: Rect = { x: 0, y: 0, w: 1, h: 1 }
 const DETECT_WIDTH = 1600      // detectPanels works on half of it, and on all of it for hairline gutters
 const cache = new Map<string, Rect[]>()
+const bubbleCache = new Map<string, Promise<Rect[]>>()
+const bubblesOf = (img: HTMLImageElement, src: string) => {
+    if (!bubbleCache.has(src)) bubbleCache.set(src, detectBubblesInBrowser(img))
+    return bubbleCache.get(src)!
+}
+
+// The model needs ~2 s per page in the browser (WebAssembly, one thread): work out the next page while this one is
+// read, so its bubbles are ready when the reader gets there. Only pages that will use them (no panels, or a big one).
+async function prefetch(src: string, rtl: boolean) {
+    if (bubbleCache.has(src)) return
+    const img = new Image()
+    img.src = src
+    try { await img.decode() } catch { return }
+    const panels = await panelsOf(img, src, rtl)
+    if (!panels.length || panels.some(p => p.w * p.h >= 0.3)) await bubblesOf(img, src)
+}
 
 async function panelsOf(img: HTMLImageElement, src: string, rtl: boolean): Promise<Rect[]> {
     const key = `${rtl ? 'rtl' : 'ltr'}:${src}`
@@ -27,8 +47,9 @@ async function panelsOf(img: HTMLImageElement, src: string, rtl: boolean): Promi
     return panels
 }
 
-export function GuidedView({ src, rtl, enterAtEnd, onNextPage, onPrevPage, onToggleUI, imgStyle }: {
+export function GuidedView({ src, nextSrc, rtl, enterAtEnd, onNextPage, onPrevPage, onToggleUI, imgStyle }: {
     src: string
+    nextSrc?: string               // the page after this one: its detection runs in the background
     rtl: boolean
     enterAtEnd: boolean            // came back from the next page: start on the last panel
     onNextPage: () => void
@@ -58,10 +79,22 @@ export function GuidedView({ src, rtl, enterAtEnd, onNextPage, onPrevPage, onTog
         if (!img) return
         setNatural({ w: img.naturalWidth, h: img.naturalHeight })
         const panels = await panelsOf(img, src, rtl)
-        const all = [FULL, ...panels]
+        const base = [FULL, ...panels]
+        setSteps(base)
+        setStep(enterAtEnd ? base.length - 1 : 0)
+        // Speech bubbles (model in a worker, a few hundred ms): the steps of a page without panels, and of big panels.
+        // Arriving later, they must not move the reader: the panel being shown stays the current step.
+        if (panels.length && !panels.some(p => p.w * p.h >= 0.3)) { if (nextSrc) prefetch(nextSrc, rtl); return }
+        const bubbles = await bubblesOf(img, src)
+        if (nextSrc) prefetch(nextSrc, rtl)
+        if (!mounted.current || !bubbles.length) return
+        const all = [FULL, ...guidedSteps(panels, bubbles, rtl)]
+        if (all.length === base.length) return
         setSteps(all)
-        setStep(enterAtEnd ? all.length - 1 : 0)
+        setStep(s => s === base.length - 1 && enterAtEnd ? all.length - 1 : Math.max(0, all.indexOf(base[s])))
     }
+    const mounted = useRef(true)
+    useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
 
     // The reader mounts one GuidedView per page (key = page). A page the browser already had (preloaded, or the one we
     // came back to) can finish loading before React attaches onLoad — then it never fires, and the page stayed hidden.
