@@ -891,6 +891,7 @@ function ReaderContent() {
           </div>
       ) : guided ? (
           <GuidedView
+              key={pages[currentIndex]}  // fresh state per page: no stale panels or zoom from the page before
               src={getPageUrl(pages[currentIndex])}
               rtl={settings.readingMode === 'rtl'}
               enterAtEnd={guidedFromEnd}

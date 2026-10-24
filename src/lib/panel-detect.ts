@@ -7,6 +7,9 @@
 //   2. panels: the connected areas between the gutters, as bounding boxes; specks dropped, boxes inside boxes merged
 //   3. reading order: rows of boxes that overlap vertically, top to bottom; inside a row left to right
 //      (right to left for manga)
+// Two passes: the first on a half-size copy for regular gutters (tested on golden age to 2025 pages); only when it
+// finds nothing, a second on the full ~1600 px image for hairline gutters between diagonal panels (Absolute Wonder Woman:
+// 2 px of white between black borders at 800 px), kept only if its panels are solid shapes.
 // A page where this finds fewer than two panels (splash, art bleeding across every border) stays one full-page step.
 // Pure arithmetic on RGBA pixels so it runs in the browser on a downscaled canvas and is testable in Node.
 
@@ -18,7 +21,11 @@ type Box = { x0: number; y0: number; x1: number; y1: number; area: number };  //
 const MIN_PANEL = 0.015;   // components below 1.5 % of the page are specks, balloons or captions, not panels
 const MAX_PANELS = 20;     // more than that: the art fell apart into pieces, show the page instead
 
-function gutterMask(img: Img): Uint8Array {
+type Pass = { white: number };  // luminance above which a pixel counts as a white gutter
+const THICK: Pass = { white: 232 };
+const THIN: Pass = { white: 200 };  // the grey anti-aliased edge of a hairline gutter counts too
+
+function gutterMask(img: Img, pass: Pass): Uint8Array {
     const { width: w, height: h, data } = img;
     const lum = new Float32Array(w * h);
     for (let i = 0; i < w * h; i++) lum[i] = (data[i * 4] * 299 + data[i * 4 + 1] * 587 + data[i * 4 + 2] * 114) / 1000;
@@ -28,9 +35,9 @@ function gutterMask(img: Img): Uint8Array {
     border.sort((a, b) => a - b);
     const bg = border[Math.floor(border.length / 2)];
     const raw = new Uint8Array(w * h);
-    for (let i = 0; i < w * h; i++) raw[i] = lum[i] > 232 || lum[i] < 40 || Math.abs(lum[i] - bg) < 24 ? 1 : 0;
+    for (let i = 0; i < w * h; i++) raw[i] = lum[i] > pass.white || lum[i] < 40 || Math.abs(lum[i] - bg) < 24 ? 1 : 0;
     // Opening with a (2r+1)² square: erode, then dilate — strips thinner than the square vanish
-    const r = Math.max(1, Math.round(Math.min(w, h) / 600));
+    const r = 1;
     const erode = (src: Uint8Array, keep: number) => {
         const out = new Uint8Array(w * h);
         // separable: rows then columns
@@ -124,19 +131,42 @@ function plausible(boxes: Box[], w: number, h: number): boolean {
     return boxes.reduce((sum, b) => sum + size(b), 0) - overlaps >= 0.5 * page;  // together they cover the page
 }
 
-/**
- * Panels of a page in reading order, as fractions of the page. Empty when fewer than two panels are found or the art
- * fell apart into too many pieces — the guided view then shows the whole page.
- */
-export function detectPanels(img: Img, opts: { rtl?: boolean } = {}): Rect[] {
+/** Thin pass: diagonal panels overlap as boxes, so only ask that they are solid shapes and cover the page. */
+function solid(boxes: Box[], w: number, h: number): boolean {
+    const fills = boxes.map(b => b.area / size(b)).sort((a, c) => a - c);
+    const covered = boxes.reduce((sum, b) => sum + b.area, 0);
+    return fills[fills.length >> 1] >= 0.5 && covered >= 0.4 * w * h;
+}
+
+function half(img: Img): Img {
+    const w = img.width >> 1, h = img.height >> 1, src = img.data, data = new Uint8ClampedArray(w * h * 4);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) for (let c = 0; c < 4; c++) {
+        const i = ((2 * y) * img.width + 2 * x) * 4 + c, j = i + img.width * 4;
+        data[(y * w + x) * 4 + c] = (src[i] + src[i + 4] + src[j] + src[j + 4]) >> 2;
+    }
+    return { width: w, height: h, data };
+}
+
+function pass(img: Img, p: Pass, check: (b: Box[], w: number, h: number) => boolean): Box[] {
     const { width: w, height: h } = img;
-    if (w < 16 || h < 16) return [];
-    const mask = gutterMask(img);
+    const mask = gutterMask(img, p);
     let boxes = components(mask, w, h).filter(b => size(b) >= MIN_PANEL * w * h);
     // A component inside another's box (an inset, a balloon cut free) belongs to that panel
     const dropContained = (list: Box[]) => list.filter(b => !list.some(o => o !== b && size(o) > size(b) && overlap(o, b) > 0.8 * size(b)));
-    boxes = mergeSlivers(dropContained(boxes), w, h);
-    boxes = dropContained(boxes);
-    if (boxes.length < 2 || boxes.length > MAX_PANELS || !plausible(boxes, w, h)) return [];
-    return readingOrder(boxes, !!opts.rtl).map(b => ({ x: b.x0 / w, y: b.y0 / h, w: (b.x1 - b.x0) / w, h: (b.y1 - b.y0) / h }));
+    boxes = dropContained(mergeSlivers(dropContained(boxes), w, h));
+    return boxes.length >= 2 && boxes.length <= MAX_PANELS && check(boxes, w, h) ? boxes : [];
+}
+
+/**
+ * Panels of a page in reading order, as fractions of the page. Empty when fewer than two panels are found or the art
+ * fell apart into too many pieces — the guided view then shows the whole page. Give it the page at ~1600 px wide.
+ */
+export function detectPanels(img: Img, opts: { rtl?: boolean } = {}): Rect[] {
+    if (img.width < 16 || img.height < 16) return [];
+    const big = img.width >= 1000;
+    const small = big ? half(img) : img;
+    let boxes = pass(small, THICK, plausible);
+    let scale = { w: small.width, h: small.height };
+    if (!boxes.length && big) { boxes = pass(img, THIN, solid); scale = { w: img.width, h: img.height }; }
+    return readingOrder(boxes, !!opts.rtl).map(b => ({ x: b.x0 / scale.w, y: b.y0 / scale.h, w: (b.x1 - b.x0) / scale.w, h: (b.y1 - b.y0) / scale.h }));
 }

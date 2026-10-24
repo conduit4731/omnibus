@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { detectPanels, type Rect } from "@/lib/panel-detect"
 
 const FULL: Rect = { x: 0, y: 0, w: 1, h: 1 }
-const DETECT_WIDTH = 800       // thin gutters (3 px on a 500 px page) need this resolution
+const DETECT_WIDTH = 1600      // detectPanels works on half of it, and on all of it for hairline gutters
 const cache = new Map<string, Rect[]>()
 
 async function panelsOf(img: HTMLImageElement, src: string, rtl: boolean): Promise<Rect[]> {
@@ -46,13 +46,12 @@ export function GuidedView({ src, rtl, enterAtEnd, onNextPage, onPrevPage, onTog
     useEffect(() => {
         const el = boxRef.current
         if (!el) return
-        const ro = new ResizeObserver(() => setBox({ w: el.clientWidth, h: el.clientHeight }))
+        const measure = () => setBox({ w: el.clientWidth, h: el.clientHeight })
+        measure()
+        const ro = new ResizeObserver(measure)
         ro.observe(el)
         return () => ro.disconnect()
     }, [])
-
-    // New page: whole page until the panels are known
-    useEffect(() => { setSteps([FULL]); setStep(0); setNatural(null) }, [src])
 
     const onLoad = async () => {
         const img = imgRef.current
@@ -63,6 +62,14 @@ export function GuidedView({ src, rtl, enterAtEnd, onNextPage, onPrevPage, onTog
         setSteps(all)
         setStep(enterAtEnd ? all.length - 1 : 0)
     }
+
+    // The reader mounts one GuidedView per page (key = page). A page the browser already had (preloaded, or the one we
+    // came back to) can finish loading before React attaches onLoad — then it never fires, and the page stayed hidden.
+    useEffect(() => {
+        const img = imgRef.current
+        if (img?.complete && img.naturalWidth) onLoad()
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mounted page
+    }, [])
 
     const next = useCallback(() => { if (step < steps.length - 1) setStep(step + 1); else onNextPage() }, [step, steps.length, onNextPage])
     const prev = useCallback(() => { if (step > 0) setStep(step - 1); else onPrevPage() }, [step, onPrevPage])
