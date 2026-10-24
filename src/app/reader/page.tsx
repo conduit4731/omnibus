@@ -9,8 +9,9 @@ import {
   ChevronLeft, ChevronRight, X, Loader2, Maximize, Minimize, BookOpen,
   Settings as SettingsIcon, SkipBack, SkipForward, CheckCircle2,
   Paintbrush, LayoutTemplate, MonitorPlay, Zap, ZoomIn, ZoomOut, Search, AlignHorizontalSpaceAround,
-  Sun, Bookmark, CloudDownload, Scissors, Flag, Tag, Plus
+  Sun, Bookmark, CloudDownload, Scissors, Flag, Tag, Plus, ScanSearch
 } from "lucide-react"
+import { GuidedView } from "@/components/guided-view"
 import { useSession } from "next-auth/react"
 import PageManagerModal from "@/components/page-manager-modal"
 import { useToast } from "@/components/ui/use-toast"
@@ -191,6 +192,12 @@ function ReaderContent() {
   });
 
   const [nextIssue, setNextIssue] = useState<{ path: string, name: string } | null>(null);
+
+  // Fork: guided view (panel by panel), remembered per browser; enterAtEnd = came back from the next page
+  const [guided, setGuided] = useState(false);
+  const [guidedFromEnd, setGuidedFromEnd] = useState(false);
+  useEffect(() => { try { setGuided(localStorage.getItem('omnibus-guided') === '1') } catch { /* private mode */ } }, []);
+  const toggleGuided = () => setGuided(g => { try { localStorage.setItem('omnibus-guided', g ? '0' : '1') } catch { /* private mode */ } return !g });
 
   // Per-series reader preferences: seriesId identifies the series; prefsLoaded gates saving until the
   // saved prefs have been fetched + merged, so we never overwrite them with defaults on first load.
@@ -668,6 +675,7 @@ function ReaderContent() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (isJumping) return;
+      if (guided && settings.readingMode !== 'webtoon' && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) return;  // panel by panel: GuidedView
       if (e.key === 'ArrowRight') { if (settings.readingMode === 'rtl') prevPage(); else nextPage(); }
       if (e.key === 'ArrowLeft') { if (settings.readingMode === 'rtl') nextPage(); else prevPage(); }
       // Escape with the tag dialog open belongs to the dialog (Radix closes it) — without this
@@ -678,7 +686,7 @@ function ReaderContent() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [nextPage, prevPage, router, settings.readingMode, isFullscreen, isJumping, handleReaderClose, tagDialogOpen]);
+  }, [nextPage, prevPage, router, settings.readingMode, isFullscreen, isJumping, handleReaderClose, tagDialogOpen, guided]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
       if (zoomLevel === 100) return;
@@ -838,6 +846,12 @@ function ReaderContent() {
             <Button variant="ghost" size="icon" className="text-white hover:bg-white/20 hidden sm:flex" onClick={toggleFullscreen} title="Toggle Fullscreen">
                 {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
             </Button>
+            {settings.readingMode !== 'webtoon' && (
+                <Button variant="ghost" size="icon" className={`text-white hover:bg-white/20 ${guided ? 'bg-white/20 text-amber-300' : ''}`} onClick={toggleGuided}
+                    title={guided ? "Panel-Ansicht aus" : "Panel-Ansicht: Panel für Panel lesen"} aria-pressed={guided}>
+                    <ScanSearch className="w-5 h-5" />
+                </Button>
+            )}
             <Button variant="ghost" size="icon" className="text-white hover:bg-white/20" onClick={() => setSettingsOpen(true)} title="Reader Settings">
                 <SettingsIcon className="w-5 h-5" />
             </Button>
@@ -875,6 +889,17 @@ function ReaderContent() {
                   </div>
               )}
           </div>
+      ) : guided ? (
+          <GuidedView
+              src={getPageUrl(pages[currentIndex])}
+              rtl={settings.readingMode === 'rtl'}
+              enterAtEnd={guidedFromEnd}
+              imgStyle={imgStyle.filter ? { filter: imgStyle.filter } : undefined}
+              onToggleUI={() => setShowUI(v => !v)}
+              // one page per step, also in double-page layout; past the last page nextPage() opens the next issue
+              onNextPage={() => { setGuidedFromEnd(false); if (currentIndex < pages.length - 1) setCurrentIndex(currentIndex + 1); else nextPage(); }}
+              onPrevPage={() => { if (currentIndex > 0) { setGuidedFromEnd(true); setCurrentIndex(currentIndex - 1); } }}
+          />
       ) : (
           <div 
               ref={scrollRef}
