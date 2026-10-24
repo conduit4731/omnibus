@@ -135,9 +135,20 @@ function readingOrder(boxes: Box[], rtl: boolean, w: number, h: number, toleranc
             return parts.flatMap(p => order(p, !horizontal));
         }
         if (tried === 0) return order(list, !horizontal, 1);  // no cut this way: try the other
-        const band = 0.12 * h;
-        const cx = (b: Box) => (b.x0 + b.x1) / 2, cy = (b: Box) => (b.y0 + b.y1) / 2;
-        return [...list].sort((a, c) => Math.round(cy(a) / band) - Math.round(cy(c) / band) || (rtl ? cx(c) - cx(a) : cx(a) - cx(c)));
+        // Slanted gutters: no straight cut either way. A panel comes first when it lies above the other (reaching into
+        // it by less than a third of the smaller one's height), side by side the left one (right one for manga); take
+        // the one nothing comes before.
+        const cx = (b: Box) => (b.x0 + b.x1) / 2;
+        const above = (a: Box, c: Box) => a.y0 < c.y0 && a.y1 - c.y0 < 0.3 * Math.min(a.y1 - a.y0, c.y1 - c.y0);
+        const before = (a: Box, c: Box) => above(a, c) || (!above(c, a) && (rtl ? cx(a) > cx(c) : cx(a) < cx(c)));
+        const rest = [...list], out: Box[] = [];
+        while (rest.length) {
+            const preds = (b: Box) => rest.filter(c => c !== b && before(c, b)).length;
+            const next = rest.reduce((best, b) => preds(b) < preds(best) || (preds(b) === preds(best) && b.y0 < best.y0) ? b : best);
+            out.push(next);
+            rest.splice(rest.indexOf(next), 1);
+        }
+        return out;
     };
     return order(boxes, true);
 }

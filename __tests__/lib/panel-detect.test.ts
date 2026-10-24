@@ -85,3 +85,15 @@ describe('lib/panel-detect reading order', () => {
         expect(detectPanels(page(200, 300, layout), { rtl: true }).map(round)).toEqual([[53, 3], [50, 50], [5, 3]]);
     });
 });
+
+describe('lib/panel-detect slanted gutters', () => {
+    it('reads a big panel before the small ones beside it that start a little lower, and a column before the panel beside it', async () => {
+        const { orderRects } = await import('@/lib/panel-detect');
+        // Absolute Wonder Woman #5 p. 16: boxes of slanted panels overlap, so no straight cut separates them
+        const box = (x0: number, y0: number, x1: number, y1: number) => ({ x: x0, y: y0, w: x1 - x0, h: y1 - y0 });
+        const top = [box(0.583, 0.024, 0.959, 0.173), box(0.037, 0, 0.656, 0.44), box(0.661, 0.147, 0.959, 0.291), box(0.623, 0.291, 0.959, 0.431)];
+        expect(orderRects(top).map(b => top.indexOf(b))).toEqual([1, 0, 2, 3]);
+        const bottom = [box(0.04, 0.598, 0.475, 0.732), box(0.041, 0.819, 0.395, 0.975), box(0.04, 0.717, 0.403, 0.852), box(0.389, 0.591, 0.962, 1)];
+        expect(orderRects(bottom).map(b => bottom.indexOf(b))).toEqual([0, 2, 1, 3]);
+    });
+});

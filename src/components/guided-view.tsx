@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { detectPanels, type Rect } from "@/lib/panel-detect"
-import { buildSteps, DEFAULT_GUIDED, FULL, needsBubbles, type GuidedSettings } from "@/lib/guided-steps"
+import { buildSteps, closestStep, DEFAULT_GUIDED, FULL, needsBubbles, type GuidedSettings } from "@/lib/guided-steps"
 import { detectBubblesInBrowser } from "@/lib/bubble-detect-client"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -40,11 +40,12 @@ async function panelsOf(img: HTMLImageElement, src: string, rtl: boolean): Promi
 // The model needs ~2 s per page in the browser (WebAssembly, one thread): work out the next page while this one is
 // read, so its bubbles are ready when the reader gets there — only if the settings will use them there.
 async function prefetch(src: string, rtl: boolean, mode: GuidedSettings['mode']) {
-    if (mode === 'panels' || bubbleCache.has(src)) return
+    if (!needsBubbles(mode) || bubbleCache.has(src)) return
     const img = new Image()
     img.src = src
     try { await img.decode() } catch { return }
-    if (needsBubbles(await panelsOf(img, src, rtl), mode)) await bubblesOf(img, src)
+    await panelsOf(img, src, rtl)
+    await bubblesOf(img, src)
 }
 
 const STORAGE_KEY = 'omnibus-guided-settings'
@@ -110,7 +111,7 @@ export function GuidedView({ src, nextSrc, rtl, enterAtEnd, onNextPage, onPrevPa
         setStep(enterAtEnd ? base.length - 1 : 0)
         if (base.length > 1) peek()
         if (nextSrc) prefetch(nextSrc, rtl, settings.mode)  // queued behind this page in the worker
-        if (!needsBubbles(panels, settings.mode)) return
+        if (!needsBubbles(settings.mode)) return
         // Bubbles arrive later; they must not move the reader: the step being shown stays the current step
         setDetecting(true)
         const bubbles = await bubblesOf(img, src)
@@ -122,9 +123,8 @@ export function GuidedView({ src, nextSrc, rtl, enterAtEnd, onNextPage, onPrevPa
         setWaiting(false)
         if (all.length !== base.length || all.some((r, i) => r !== base[i])) setSteps(all)
         const s = stepRef.current, shown = base[s]
-        let at = s === base.length - 1 && enterAtEnd && !waited ? all.length - 1
-            : shown === FULL ? (s === 0 ? all.indexOf(FULL) : all.lastIndexOf(FULL)) : all.indexOf(shown)
-        if (at < 0) at = 0
+        const at = s === base.length - 1 && enterAtEnd && !waited ? all.length - 1
+            : shown === FULL ? (s === 0 ? all.indexOf(FULL) : all.lastIndexOf(FULL)) : closestStep(all, shown)
         // "Next" was pressed while the bubbles were still being found: take that step now
         if (waited && at + 1 >= all.length) { setStep(at); onNextPage() }
         else setStep(waited ? at + 1 : at)
