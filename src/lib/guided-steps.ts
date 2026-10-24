@@ -83,8 +83,12 @@ export function regions(a: Rect, bubbles: Rect[], rtl = false): Rect[] {
     let top = a.y
     while (bottom - top > MAX_ROW) {
         let cut = bestCut(top + MIN_ROW, top + MAX_ROW, top + (MIN_ROW + MAX_ROW) / 2, bs, 'y')
-        // no gap in reach: the row ends below the balloon in the way
-        if (cut === null) cut = Math.max(...bs.filter(b => b.y < top + MAX_ROW && b.y + b.h > top + MAX_ROW).map(b => b.y + b.h))
+        // no gap in reach: the row ends below the balloons in the way (always further down, so this ends)
+        if (cut === null) {
+            let c = top + MAX_ROW, through: Rect | undefined
+            while ((through = bs.find(b => b.y < c && b.y + b.h > c))) c = through.y + through.h
+            cut = c
+        }
         if (cut >= bottom - MIN_ROW * 0.6) break
         rows.push({ x: a.x, y: top, w: a.w, h: cut - top })
         top = cut

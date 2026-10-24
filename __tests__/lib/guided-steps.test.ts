@@ -121,3 +121,13 @@ describe('lib/guided-steps peek', () => {
         expect(buildSteps(p, [], { fullPage: 'peek', mode: 'panels' })).toEqual([FULL, ...p]);
     });
 });
+
+describe('lib/guided-steps balloons everywhere', () => {
+    it('ends rows below the balloons when no gap is in reach, and finishes', () => {
+        // stacked balloons with no gap between them over most of the page
+        const b = [r(0.1, 0.05, 0.3, 0.3), r(0.5, 0.3, 0.3, 0.3), r(0.1, 0.55, 0.3, 0.3)];
+        const steps = guidedSteps([], b);
+        expect(coverage(steps)).toBe(1);
+        for (const s of steps) for (const x of b) expect(cuts(s, x)).toBe(false);
+    });
+});

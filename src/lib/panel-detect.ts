@@ -176,11 +176,18 @@ function plausible(boxes: Box[], w: number, h: number): boolean {
     return boxes.reduce((sum, b) => sum + size(b), 0) - overlaps >= 0.5 * page;  // together they cover the page
 }
 
-/** Thin pass: diagonal panels overlap as boxes, so only ask that they are solid shapes and cover the page. */
+/**
+ * Thin pass: diagonal panels overlap as boxes, so only ask that they are solid shapes and their boxes tile most of the
+ * page. Art that fell apart on compression noise (the reader's WebP) leaves gaps between the pieces: 68–70 % against
+ * 79 % and more for real hairline pages (Absolute Wonder Woman #4–#6).
+ */
 function solid(boxes: Box[], w: number, h: number): boolean {
     const fills = boxes.map(b => b.area / size(b)).sort((a, c) => a - c);
     const covered = boxes.reduce((sum, b) => sum + b.area, 0);
-    return fills[fills.length >> 1] >= 0.5 && covered >= 0.4 * w * h;
+    let overlaps = 0;
+    for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) overlaps += overlap(boxes[i], boxes[j]);
+    const tiled = boxes.reduce((sum, b) => sum + size(b), 0) - overlaps;
+    return fills[fills.length >> 1] >= 0.5 && covered >= 0.4 * w * h && tiled >= 0.75 * w * h;
 }
 
 function half(img: Img): Img {
@@ -199,7 +206,10 @@ function pass(img: Img, p: Pass, check: (b: Box[], w: number, h: number) => bool
     // A component inside another's box (an inset, a balloon cut free) belongs to that panel
     const dropContained = (list: Box[]) => list.filter(b => !list.some(o => o !== b && size(o) > size(b) && overlap(o, b) > 0.8 * size(b)));
     boxes = dropContained(mergeSlivers(dropContained(boxes), w, h));
-    return boxes.length >= 2 && boxes.length <= MAX_PANELS && check(boxes, w, h) ? boxes : [];
+    // More than two pieces under 3 % of the page: art that fell apart (faces cut out by black hair, compression noise
+    // in the reader's WebP), not panels; real pages have at most two such small panels (140 test pages, 1939–2025)
+    const tiny = boxes.filter(b => size(b) < 0.03 * w * h).length;
+    return boxes.length >= 2 && boxes.length <= MAX_PANELS && tiny <= 2 && check(boxes, w, h) ? boxes : [];
 }
 
 /**
