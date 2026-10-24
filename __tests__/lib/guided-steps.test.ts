@@ -87,3 +87,10 @@ describe('lib/guided-steps settings', () => {
         expect(needsBubbles(panels, 'bubbles')).toBe(true);
     });
 });
+
+describe('lib/guided-steps peek', () => {
+    it('starts with the whole page when it is shown briefly', () => {
+        const p = [r(0, 0, 1, 0.5), r(0, 0.5, 1, 0.5)];
+        expect(buildSteps(p, [], { fullPage: 'peek', mode: 'panels' })).toEqual([FULL, ...p]);
+    });
+});

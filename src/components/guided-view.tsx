@@ -60,6 +60,7 @@ export function useGuidedSettings(): [GuidedSettings, (s: GuidedSettings) => voi
     return [settings, save]
 }
 
+const PEEK_MS = 1200
 const MARGIN = { tight: 0.99, normal: 0.96, wide: 0.86 }
 const DURATION = { smooth: 450, fast: 150, off: 0 }
 
@@ -107,6 +108,7 @@ export function GuidedView({ src, nextSrc, rtl, enterAtEnd, onNextPage, onPrevPa
         const base = buildSteps(panels, [], settings, rtl)
         setSteps(base)
         setStep(enterAtEnd ? base.length - 1 : 0)
+        if (base.length > 1) peek()
         if (nextSrc) prefetch(nextSrc, rtl, settings.mode)  // queued behind this page in the worker
         if (!needsBubbles(panels, settings.mode)) return
         // Bubbles arrive later; they must not move the reader: the step being shown stays the current step
@@ -126,6 +128,12 @@ export function GuidedView({ src, nextSrc, rtl, enterAtEnd, onNextPage, onPrevPa
         // "Next" was pressed while the bubbles were still being found: take that step now
         if (waited && at + 1 >= all.length) { setStep(at); onNextPage() }
         else setStep(waited ? at + 1 : at)
+        if (base.length === 1 && all.length > 1 && at === 0 && !waited) peek()
+    }
+    // "Kurz zeigen": the whole page for a moment, then the first panel — unless the reader moved on already
+    const peek = () => {
+        if (settings.fullPage !== 'peek' || enterAtEnd) return
+        setTimeout(() => { if (mounted.current && stepRef.current === 0) setStep(1) }, PEEK_MS)
     }
 
     // The reader mounts one GuidedView per page (key = page). A page the browser already had (preloaded, or the one we
@@ -224,7 +232,7 @@ export function GuidedSettingsSection({ value, onChange }: { value: GuidedSettin
             <p className="text-sm font-black">Panel-Ansicht (Lupe)</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {field('mode', 'Schritte', [['auto', 'Panels + Sprechblasen'], ['panels', 'Nur Panels'], ['bubbles', 'Nur Sprechblasen']])}
-                {field('fullPage', 'Ganze Seite zeigen', [['start', 'Am Anfang'], ['end', 'Am Ende'], ['both', 'Anfang und Ende'], ['never', 'Nie']])}
+                {field('fullPage', 'Ganze Seite zeigen', [['start', 'Am Anfang'], ['peek', 'Kurz am Anfang (Marvel/DC)'], ['end', 'Am Ende'], ['both', 'Anfang und Ende'], ['never', 'Nie']])}
                 {field('outside', 'Außerhalb des Ausschnitts', [['show', 'Sichtbar'], ['dim', 'Abgedunkelt'], ['black', 'Schwarz']])}
                 {field('transition', 'Übergang', [['smooth', 'Weich'], ['fast', 'Schnell'], ['off', 'Ohne Animation']])}
                 {field('margin', 'Abstand beim Zoomen', [['tight', 'Eng'], ['normal', 'Normal'], ['wide', 'Weit']])}

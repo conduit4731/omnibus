@@ -11,7 +11,7 @@ import { orderRects, type Rect } from '@/lib/panel-detect'
 
 // The settings readers know from Guided View / Panel View apps (Kindle, ComiXology, YACReader, bloopworm)
 export type GuidedSettings = {
-    fullPage: 'start' | 'end' | 'both' | 'never'   // where the whole page is a step of its own
+    fullPage: 'start' | 'peek' | 'end' | 'both' | 'never'  // where the whole page is a step; peek: briefly, then zoom in by itself (Marvel / DC)
     mode: 'auto' | 'panels' | 'bubbles'            // auto: panels, bubbles where there are none / in big panels
     outside: 'show' | 'dim' | 'black'              // the art around the current frame
     transition: 'smooth' | 'fast' | 'off'
@@ -75,5 +75,5 @@ export function buildSteps(panels: Rect[], bubbles: Rect[], s: Pick<GuidedSettin
         : s.mode === 'bubbles' ? (bubbles.length ? bubbleSteps(bubbles, rtl) : panels)
         : guidedSteps(panels, bubbles, rtl)
     if (!inner.length) return [FULL]
-    return [...(s.fullPage === 'start' || s.fullPage === 'both' ? [FULL] : []), ...inner, ...(s.fullPage === 'end' || s.fullPage === 'both' ? [FULL] : [])]
+    return [...(s.fullPage === 'start' || s.fullPage === 'peek' || s.fullPage === 'both' ? [FULL] : []), ...inner, ...(s.fullPage === 'end' || s.fullPage === 'both' ? [FULL] : [])]
 }
