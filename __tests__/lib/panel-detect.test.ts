@@ -97,3 +97,11 @@ describe('lib/panel-detect slanted gutters', () => {
         expect(orderRects(bottom).map(b => bottom.indexOf(b))).toEqual([0, 2, 1, 3]);
     });
 });
+
+describe('lib/panel-detect pieces', () => {
+    it('shows the whole page when the pieces leave most of a row empty', () => {
+        // a full-width panel and, above it, two faces cut out of a wide panel by black hair
+        const pieces: [number, number, number, number][] = [[10, 120, 190, 290], [60, 10, 90, 100], [110, 10, 140, 100]];
+        expect(detectPanels(page(200, 300, pieces))).toEqual([]);
+    });
+});

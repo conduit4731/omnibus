@@ -163,6 +163,16 @@ function plausible(boxes: Box[], w: number, h: number): boolean {
     let overlaps = 0;
     for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) overlaps += overlap(boxes[i], boxes[j]);
     if (overlaps > 0.06 * page) return false;                                    // pieces stacked on each other
+    // Panels fill their row: a line across any of them crosses panels for most of the width they take up together. Pieces of art (faces cut out by black hair, Absolute Wonder Woman #6) leave large gaps.
+    const span = Math.max(...boxes.map(b => b.x1)) - Math.min(...boxes.map(b => b.x0));
+    const across = (y: number) => {
+        const spans = boxes.filter(o => o.y0 <= y && o.y1 > y).map(o => [o.x0, o.x1]).sort((p, q) => p[0] - q[0]);
+        let covered = 0, end = 0;
+        for (const [x0, x1] of spans) { covered += Math.max(0, x1 - Math.max(x0, end)); end = Math.max(end, x1); }
+        return covered;
+    };
+    // a quarter, half and three quarters down: one of them misses the gutter beside a tall panel
+    for (const b of boxes) if (Math.max(...[0.25, 0.5, 0.75].map(t => across(b.y0 + t * (b.y1 - b.y0)))) < 0.65 * span) return false;
     return boxes.reduce((sum, b) => sum + size(b), 0) - overlaps >= 0.5 * page;  // together they cover the page
 }
 
