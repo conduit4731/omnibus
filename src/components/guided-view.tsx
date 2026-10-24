@@ -84,15 +84,30 @@ export function GuidedView({ src, nextSrc, rtl, enterAtEnd, onNextPage, onPrevPa
         setStep(enterAtEnd ? base.length - 1 : 0)
         // Speech bubbles (model in a worker, a few hundred ms): the steps of a page without panels, and of big panels.
         // Arriving later, they must not move the reader: the panel being shown stays the current step.
-        if (panels.length && !panels.some(p => p.w * p.h >= 0.3)) { if (nextSrc) prefetch(nextSrc, rtl); return }
+        const needsBubbles = !panels.length || panels.some(p => p.w * p.h >= 0.3)
+        if (nextSrc) prefetch(nextSrc, rtl)  // queued behind this page in the worker
+        if (!needsBubbles) return
+        setDetecting(true)
         const bubbles = await bubblesOf(img, src)
-        if (nextSrc) prefetch(nextSrc, rtl)
-        if (!mounted.current || !bubbles.length) return
-        const all = [FULL, ...guidedSteps(panels, bubbles, rtl)]
-        if (all.length === base.length) return
-        setSteps(all)
-        setStep(s => s === base.length - 1 && enterAtEnd ? all.length - 1 : Math.max(0, all.indexOf(base[s])))
+        if (!mounted.current) return
+        setDetecting(false)
+        const all = bubbles.length ? [FULL, ...guidedSteps(panels, bubbles, rtl)] : base
+        const waited = waitingNext.current
+        waitingNext.current = false
+        setWaiting(false)
+        if (all.length !== base.length) setSteps(all)
+        const s = stepRef.current
+        const at = s === base.length - 1 && enterAtEnd && !waited ? all.length - 1 : Math.max(0, all.indexOf(base[s]))
+        // "Next" was pressed while the bubbles were still being found: take that step now
+        if (waited && at + 1 >= all.length) { setStep(at); onNextPage() }
+        else setStep(waited ? at + 1 : at)
     }
+    // While the model works on this page, "next" on its last known step waits instead of leaving the page
+    const [detecting, setDetecting] = useState(false)
+    const [waiting, setWaiting] = useState(false)
+    const waitingNext = useRef(false)
+    const stepRef = useRef(0)
+    useEffect(() => { stepRef.current = step }, [step])
     const mounted = useRef(true)
     useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
 
@@ -104,7 +119,11 @@ export function GuidedView({ src, nextSrc, rtl, enterAtEnd, onNextPage, onPrevPa
         // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mounted page
     }, [])
 
-    const next = useCallback(() => { if (step < steps.length - 1) setStep(step + 1); else onNextPage() }, [step, steps.length, onNextPage])
+    const next = useCallback(() => {
+        if (step < steps.length - 1) setStep(step + 1)
+        else if (detecting) { waitingNext.current = true; setWaiting(true) }
+        else onNextPage()
+    }, [step, steps.length, onNextPage, detecting])
     const prev = useCallback(() => { if (step > 0) setStep(step - 1); else onPrevPage() }, [step, onPrevPage])
 
     useEffect(() => {
@@ -147,6 +166,11 @@ export function GuidedView({ src, nextSrc, rtl, enterAtEnd, onNextPage, onPrevPa
             <button type="button" aria-label="Zurück" className="absolute inset-y-0 left-0 w-[30%] z-20 bg-transparent" onClick={rtl ? next : prev} />
             <button type="button" aria-label="Menü" className="absolute inset-y-0 left-[30%] w-[40%] z-20 bg-transparent" onClick={onToggleUI} />
             <button type="button" aria-label="Weiter" className="absolute inset-y-0 right-0 w-[30%] z-20 bg-transparent" onClick={rtl ? prev : next} />
+            {waiting && (
+                <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 text-[11px] font-bold text-white/80 bg-black/60 rounded px-2 py-0.5 pointer-events-none">
+                    Sprechblasen werden erkannt…
+                </div>
+            )}
             {steps.length > 1 && (
                 <div className="absolute bottom-3 right-3 z-30 text-[11px] font-bold text-white/70 bg-black/50 rounded px-1.5 py-0.5 pointer-events-none">
                     {step === 0 ? 'Seite' : `Panel ${step}/${steps.length - 1}`}

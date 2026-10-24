@@ -42,3 +42,20 @@ describe('lib/guided-steps', () => {
         expect(v.w).toBeCloseTo(0.4); expect(v.x + v.w).toBeCloseTo(1); expect(v.y + v.h).toBeCloseTo(1);
     });
 });
+
+describe('lib/guided-steps close balloons', () => {
+    it('shows balloons that would cut each other in one step, so none is cut and skipped', () => {
+        // two balloons of one exchange right next to each other, a third far below
+        const b = [r(0.30, 0.20, 0.12, 0.06), r(0.45, 0.22, 0.12, 0.06), r(0.40, 0.80, 0.12, 0.06)];
+        const steps = guidedSteps([], b);
+        expect(steps).toHaveLength(2);
+        for (const x of b.slice(0, 2)) {
+            expect(steps[0].x).toBeLessThanOrEqual(x.x); expect(steps[0].x + steps[0].w).toBeGreaterThanOrEqual(x.x + x.w);
+        }
+    });
+
+    it('keeps far-apart balloons as their own steps', () => {
+        const b = [r(0.05, 0.05, 0.1, 0.05), r(0.80, 0.50, 0.1, 0.05), r(0.10, 0.90, 0.1, 0.05)];
+        expect(guidedSteps([], b)).toHaveLength(3);
+    });
+});

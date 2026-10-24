@@ -9,7 +9,7 @@ ort.env.wasm.wasmPaths = '/ort/'
 ort.env.wasm.numThreads = 1  // threads need cross-origin isolation, which Omnibus doesn't serve
 
 const MODEL = '/api/models/speech-bubbles-v1.onnx'
-const SIZE = 640, CONF = 0.35, IOU = 0.45
+const SIZE = 640, CONF = 0.45, IOU = 0.45
 
 let session: Promise<ort.InferenceSession> | null = null
 const getSession = () => session ??= fetch(MODEL)
@@ -54,8 +54,21 @@ async function handle({ id, pixels, scale, padX, padY, width, height }: BubbleJo
             const cx = o[j], cy = o[n + j], w = o[2 * n + j], h = o[3 * n + j]
             boxes.push([cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2, score])
         }
+        // The model also takes faces (and other round shapes) for balloons, some with high confidence. A balloon holds
+        // text: a lot of white (or, for white-on-black balloons, black) behind it. Faces are skin tones in between.
+        // Measured on Absolute Wonder Woman #4 and others: balloons ≥ 31 % light or ≥ 66 % dark, faces ≤ 8 % light, ≤ 29 % dark.
+        const lettered = ([x0, y0, x1, y1]: Box) => {
+            let light = 0, dark = 0, n = 0
+            for (let y = Math.max(0, Math.floor(y0)); y < Math.min(SIZE, Math.ceil(y1)); y++)
+                for (let x = Math.max(0, Math.floor(x0)); x < Math.min(SIZE, Math.ceil(x1)); x++) {
+                    const i = (y * SIZE + x) * 4, lum = (pixels[i] * 299 + pixels[i + 1] * 587 + pixels[i + 2] * 114) / 1000
+                    if (lum > 200) light++; else if (lum < 60) dark++
+                    n++
+                }
+            return n > 0 && (light / n >= 0.25 || dark / n >= 0.45)
+        }
         // letterbox px -> fractions of the page
-        const bubbles = nms(boxes).map(([x0, y0, x1, y1]) => {
+        const bubbles = nms(boxes).filter(lettered).map(([x0, y0, x1, y1]) => {
             const fx0 = Math.max(0, (x0 - padX) / scale / width), fy0 = Math.max(0, (y0 - padY) / scale / height)
             const fx1 = Math.min(1, (x1 - padX) / scale / width), fy1 = Math.min(1, (y1 - padY) / scale / height)
             return { x: fx0, y: fy0, w: fx1 - fx0, h: fy1 - fy0 }

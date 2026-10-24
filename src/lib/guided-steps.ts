@@ -23,11 +23,32 @@ export function aroundBubble(b: Rect): Rect {
     return { x, y, w, h }
 }
 
+const union = (a: Rect, b: Rect): Rect => {
+    const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y)
+    return { x, y, w: Math.max(a.x + a.w, b.x + b.w) - x, h: Math.max(a.y + a.h, b.y + b.h) - y }
+}
+const touches = (a: Rect, b: Rect) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+
+/**
+ * Balloons in reading order, each with its surroundings — but a balloon that the previous step's frame would cut
+ * (they sit close together) joins that step instead, so it is shown whole once rather than cut once and never again.
+ */
+function bubbleSteps(bubbles: Rect[], rtl: boolean): Rect[] {
+    const groups: Rect[] = []
+    for (const b of orderRects(bubbles, rtl)) {
+        const last = groups[groups.length - 1]
+        const joined = last && union(last, b)
+        if (last && touches(aroundBubble(last), b) && joined.w <= 0.6 && joined.h <= 0.45) groups[groups.length - 1] = joined
+        else groups.push(b)
+    }
+    return groups.map(aroundBubble)
+}
+
 /** The guided view's steps after the whole page. */
 export function guidedSteps(panels: Rect[], bubbles: Rect[], rtl = false): Rect[] {
-    if (!panels.length) return bubbles.length >= 2 ? orderRects(bubbles, rtl).map(aroundBubble) : []
+    if (!panels.length) return bubbles.length >= 2 ? bubbleSteps(bubbles, rtl) : []
     return panels.flatMap(p => {
         const mine = area(p) >= BIG_PANEL ? bubbles.filter(b => inside(b, p)) : []
-        return mine.length >= 2 ? [p, ...orderRects(mine, rtl).map(aroundBubble)] : [p]
+        return mine.length >= 2 ? [p, ...bubbleSteps(mine, rtl)] : [p]
     })
 }
