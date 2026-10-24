@@ -142,6 +142,10 @@ function CharactersContent() {
     const [letter, setLetter] = useState("All")
     const [publisher, setPublisher] = useState("All")
     const [query, setQuery] = useState("")
+    // Starred characters (any of their lists is a favorite) come first and can be shown alone
+    const [favoriteIds, setFavoriteIds] = useState<string[]>([])
+    const [favOnly, setFavOnly] = useState(false)
+    useEffect(() => { fetch('/api/reading-lists/favorites').then(r => r.ok ? r.json() : { listIds: [] }).then(d => setFavoriteIds(d.listIds || [])).catch(() => {}) }, [selected])
 
     useEffect(() => {
         fetch('/api/reading-lists').then(r => r.ok ? r.json() : []).then((all: ListSummary[]) => setLists(all.filter(l => l.category === 'Characters' && l.subject)))
@@ -193,8 +197,11 @@ function CharactersContent() {
     const letters = ["All", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"]
     const publishers = [...new Set(characters.map(c => c.publisher))]
     const q = query.trim().toLowerCase()
+    const isFav = (c: Character) => c.lists.some(l => favoriteIds.includes(l.id))
+    const favCount = characters.filter(isFav).length
     const shown = characters.filter(c => (letter === "All" || c.name.toUpperCase().startsWith(letter))
-        && (publisher === "All" || c.publisher === publisher) && (!q || c.name.toLowerCase().includes(q)))
+        && (publisher === "All" || c.publisher === publisher) && (!q || c.name.toLowerCase().includes(q)) && (!favOnly || isFav(c)))
+        .sort((a, b) => Number(isFav(b)) - Number(isFav(a)))  // stable: favorites first, otherwise the usual order
 
     return (
         <div className="container mx-auto py-10 px-6 max-w-[1400px] space-y-6">
@@ -208,6 +215,7 @@ function CharactersContent() {
                 ))}
             </div>
             <div className="flex flex-wrap items-center gap-2">
+                {favCount > 0 && <Chip active={favOnly} onClick={() => setFavOnly(v => !v)} label="★ Favoriten" count={favCount} />}
                 <Chip active={publisher === "All"} onClick={() => setPublisher("All")} label="All" count={characters.length} />
                 {publishers.map(p => <Chip key={p} active={publisher === p} onClick={() => setPublisher(p)} label={p} count={characters.filter(c => c.publisher === p).length} />)}
                 <div className="flex-1" />
@@ -221,7 +229,7 @@ function CharactersContent() {
                     <Link key={c.key} href={`/characters?c=${encodeURIComponent(c.key)}`} className="group space-y-2">
                         <Portrait c={c} className="aspect-[2/3] rounded-xl transition-transform duration-300 group-hover:scale-[1.02]" />
                         <div>
-                            <p className="font-bold leading-tight">{c.name}</p>
+                            <p className="font-bold leading-tight">{isFav(c) && <Star className="inline w-3.5 h-3.5 mr-1 -mt-0.5 fill-amber-400 text-amber-400" />}{c.name}</p>
                             <p className="text-xs text-muted-foreground">{c.publisher}</p>
                             <p className="text-xs font-bold text-primary">{c.lists.length} reading order{c.lists.length > 1 ? 's' : ''} · {c.owned}/{c.issues} owned</p>
                         </div>

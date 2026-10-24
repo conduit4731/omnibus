@@ -34,6 +34,7 @@ export function ReadingListPicker({ open, onOpenChange, lists, activeId, favorit
     title = "Choose a reading list", description = "Star your favorites: they show on the home screen, and the first one opens by default." }: Props) {
     const [query, setQuery] = useState("")
     const [publisher, setPublisher] = useState<string>("All")
+    const [favOnly, setFavOnly] = useState(false)
 
     // Publishers by list count, "Other" last
     const publishers = useMemo(() => {
@@ -46,18 +47,24 @@ export function ReadingListPicker({ open, onOpenChange, lists, activeId, favorit
     const sections = useMemo(() => {
         const q = query.trim().toLowerCase()
         const shown = lists.filter(l => (publisher === "All" || l.publisher === publisher)
-            && (!q || `${l.name} ${l.category} ${l.era} ${l.publisher}`.toLowerCase().includes(q)))
+            && (!q || `${l.name} ${l.category} ${l.era} ${l.publisher}`.toLowerCase().includes(q))
+            && (!favOnly || favoriteIds.includes(l.id)))
+        // Starred lists first, in a section of their own, so switching between them is one click
+        const favorites = shown.filter(l => favoriteIds.includes(l.id)).sort((a, b) => a.name.localeCompare(b.name))
         const byEra = new Map<string, { title: string, start: number, lists: ListSummary[] }>()
         for (const l of shown) {
+            if (favoriteIds.includes(l.id)) continue
             const group = bySubject ? (l.subject || l.name) : l.era
             const title = publisher === "All" ? `${l.publisher} · ${group}` : group
             if (!byEra.has(title)) byEra.set(title, { title, start: bySubject ? 0 : l.eraStart, lists: [] })
             byEra.get(title)!.lists.push(l)
         }
-        return [...byEra.values()]
+        const rest = [...byEra.values()]
             .sort((a, b) => a.start - b.start || a.title.localeCompare(b.title))
             .map(s => ({ ...s, lists: s.lists.sort((a, b) => a.name.localeCompare(b.name)) }))
-    }, [lists, publisher, query, bySubject])
+        return favorites.length ? [{ title: "★ Favoriten", start: -Infinity, lists: favorites }, ...rest] : rest
+    }, [lists, publisher, query, bySubject, favOnly, favoriteIds])
+    const favCount = lists.filter(l => favoriteIds.includes(l.id)).length
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
@@ -70,6 +77,12 @@ export function ReadingListPicker({ open, onOpenChange, lists, activeId, favorit
                         <Input autoFocus value={query} onChange={e => setQuery(e.target.value)} placeholder="Search lists, events, characters, eras…" className="pl-9" />
                     </div>
                     <div className="flex flex-wrap gap-1.5">
+                        {favCount > 0 && (
+                            <Button size="sm" variant={favOnly ? "default" : "outline"} className="h-7 px-3 text-xs font-bold" onClick={() => setFavOnly(v => !v)}
+                                title="Nur Favoriten zeigen">
+                                <Star className={`w-3.5 h-3.5 mr-1 ${favOnly ? '' : 'fill-amber-400 text-amber-400'}`} /> Favoriten <span className="ml-1.5 opacity-60">{favCount}</span>
+                            </Button>
+                        )}
                         {[["All", lists.length] as [string, number], ...publishers].map(([p, n]) => (
                             <Button key={p} size="sm" variant={publisher === p ? "default" : "outline"} className="h-7 px-3 text-xs font-bold" onClick={() => setPublisher(p)}>
                                 {p} <span className="ml-1.5 opacity-60">{n}</span>
