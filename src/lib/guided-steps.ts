@@ -9,6 +9,17 @@
 // the art around them, so a step is a scene, not just the text.
 import { orderRects, type Rect } from '@/lib/panel-detect'
 
+// The settings readers know from Guided View / Panel View apps (Kindle, ComiXology, YACReader, bloopworm)
+export type GuidedSettings = {
+    fullPage: 'start' | 'end' | 'both' | 'never'   // where the whole page is a step of its own
+    mode: 'auto' | 'panels' | 'bubbles'            // auto: panels, bubbles where there are none / in big panels
+    outside: 'show' | 'dim' | 'black'              // the art around the current frame
+    transition: 'smooth' | 'fast' | 'off'
+    margin: 'tight' | 'normal' | 'wide'            // room around the frame when zoomed in
+}
+export const DEFAULT_GUIDED: GuidedSettings = { fullPage: 'start', mode: 'auto', outside: 'show', transition: 'smooth', margin: 'normal' }
+export const FULL: Rect = { x: 0, y: 0, w: 1, h: 1 }
+
 const BIG_PANEL = 0.3
 const area = (r: Rect) => r.w * r.h
 const inside = (b: Rect, p: Rect) => {
@@ -33,7 +44,7 @@ const touches = (a: Rect, b: Rect) => a.x < b.x + b.w && b.x < a.x + a.w && a.y 
  * Balloons in reading order, each with its surroundings — but a balloon that the previous step's frame would cut
  * (they sit close together) joins that step instead, so it is shown whole once rather than cut once and never again.
  */
-function bubbleSteps(bubbles: Rect[], rtl: boolean): Rect[] {
+export function bubbleSteps(bubbles: Rect[], rtl: boolean): Rect[] {
     const groups: Rect[] = []
     for (const b of orderRects(bubbles, rtl)) {
         const last = groups[groups.length - 1]
@@ -51,4 +62,18 @@ export function guidedSteps(panels: Rect[], bubbles: Rect[], rtl = false): Rect[
         const mine = area(p) >= BIG_PANEL ? bubbles.filter(b => inside(b, p)) : []
         return mine.length >= 2 ? [p, ...bubbleSteps(mine, rtl)] : [p]
     })
+}
+
+/** Whether a page needs the bubble model at all for these settings. */
+export function needsBubbles(panels: Rect[], mode: GuidedSettings['mode']): boolean {
+    return mode === 'bubbles' || (mode === 'auto' && (!panels.length || panels.some(p => area(p) >= BIG_PANEL)))
+}
+
+/** All steps of a page for the settings, the whole page included where it belongs. */
+export function buildSteps(panels: Rect[], bubbles: Rect[], s: Pick<GuidedSettings, 'fullPage' | 'mode'>, rtl = false): Rect[] {
+    const inner = s.mode === 'panels' ? panels
+        : s.mode === 'bubbles' ? (bubbles.length ? bubbleSteps(bubbles, rtl) : panels)
+        : guidedSteps(panels, bubbles, rtl)
+    if (!inner.length) return [FULL]
+    return [...(s.fullPage === 'start' || s.fullPage === 'both' ? [FULL] : []), ...inner, ...(s.fullPage === 'end' || s.fullPage === 'both' ? [FULL] : [])]
 }

@@ -11,7 +11,7 @@ import {
   Paintbrush, LayoutTemplate, MonitorPlay, Zap, ZoomIn, ZoomOut, Search, AlignHorizontalSpaceAround,
   Sun, Bookmark, CloudDownload, Scissors, Flag, Tag, Plus, ScanSearch
 } from "lucide-react"
-import { GuidedView } from "@/components/guided-view"
+import { GuidedSettingsSection, GuidedView, useGuidedSettings } from "@/components/guided-view"
 import { useSession } from "next-auth/react"
 import PageManagerModal from "@/components/page-manager-modal"
 import { useToast } from "@/components/ui/use-toast"
@@ -196,6 +196,7 @@ function ReaderContent() {
   // Fork: guided view (panel by panel), remembered per browser; enterAtEnd = came back from the next page
   const [guided, setGuided] = useState(false);
   const [guidedFromEnd, setGuidedFromEnd] = useState(false);
+  const [guidedSettings, setGuidedSettings] = useGuidedSettings();
   useEffect(() => { try { setGuided(localStorage.getItem('omnibus-guided') === '1') } catch { /* private mode */ } }, []);
   const toggleGuided = () => setGuided(g => { try { localStorage.setItem('omnibus-guided', g ? '0' : '1') } catch { /* private mode */ } return !g });
 
@@ -891,7 +892,8 @@ function ReaderContent() {
           </div>
       ) : guided ? (
           <GuidedView
-              key={pages[currentIndex]}  // fresh state per page: no stale panels or zoom from the page before
+              key={`${pages[currentIndex]}|${guidedSettings.mode}|${guidedSettings.fullPage}`}  // fresh state per page (and when the steps' settings change)
+              settings={guidedSettings}
               src={getPageUrl(pages[currentIndex])}
               nextSrc={currentIndex + 1 < pages.length ? getPageUrl(pages[currentIndex + 1]) : undefined}
               rtl={settings.readingMode === 'rtl'}
@@ -1154,6 +1156,8 @@ function ReaderContent() {
                               </Select>
                           </div>
                       </div>
+
+                      {settings.readingMode !== 'webtoon' && <GuidedSettingsSection value={guidedSettings} onChange={setGuidedSettings} />}
 
                       {/* --- Image Adjustments (Brightness/Contrast) --- */}
                       <div className="grid grid-cols-[30px_1fr] items-start gap-3 pt-2 border-t border-border">

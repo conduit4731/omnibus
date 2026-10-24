@@ -1,6 +1,6 @@
 // __tests__/lib/guided-steps.test.ts
 import { describe, it, expect } from 'vitest';
-import { aroundBubble, guidedSteps } from '@/lib/guided-steps';
+import { aroundBubble, buildSteps, FULL, guidedSteps, needsBubbles } from '@/lib/guided-steps';
 
 const r = (x: number, y: number, w: number, h: number) => ({ x, y, w, h });
 // which input bubble a step shows: the one inside the step's frame closest to its centre (frames shift at page edges)
@@ -57,5 +57,33 @@ describe('lib/guided-steps close balloons', () => {
     it('keeps far-apart balloons as their own steps', () => {
         const b = [r(0.05, 0.05, 0.1, 0.05), r(0.80, 0.50, 0.1, 0.05), r(0.10, 0.90, 0.1, 0.05)];
         expect(guidedSteps([], b)).toHaveLength(3);
+    });
+});
+
+describe('lib/guided-steps settings', () => {
+    const panels = [r(0, 0, 1, 0.45), r(0, 0.5, 0.48, 0.5), r(0.52, 0.5, 0.48, 0.5)];
+    const bubbles = [r(0.1, 0.1, 0.1, 0.05), r(0.7, 0.1, 0.1, 0.05), r(0.1, 0.7, 0.1, 0.05)];
+
+    it('puts the whole page first, last, both or nowhere', () => {
+        expect(buildSteps(panels, [], { fullPage: 'start', mode: 'panels' })).toEqual([FULL, ...panels]);
+        expect(buildSteps(panels, [], { fullPage: 'end', mode: 'panels' })).toEqual([...panels, FULL]);
+        expect(buildSteps(panels, [], { fullPage: 'both', mode: 'panels' })).toEqual([FULL, ...panels, FULL]);
+        expect(buildSteps(panels, [], { fullPage: 'never', mode: 'panels' })).toEqual(panels);
+    });
+
+    it('keeps the whole page as the one step when nothing was found', () => {
+        expect(buildSteps([], [], { fullPage: 'never', mode: 'auto' })).toEqual([FULL]);
+    });
+
+    it('steps through bubbles everywhere in bubble mode, falling back to panels', () => {
+        expect(buildSteps(panels, bubbles, { fullPage: 'never', mode: 'bubbles' })).toHaveLength(3);
+        expect(buildSteps(panels, [], { fullPage: 'never', mode: 'bubbles' })).toEqual(panels);
+    });
+
+    it('asks for the model only when the settings use bubbles', () => {
+        expect(needsBubbles(panels, 'panels')).toBe(false);
+        expect(needsBubbles([r(0, 0, 0.5, 0.5), r(0.5, 0.5, 0.5, 0.5)], 'auto')).toBe(false);
+        expect(needsBubbles([], 'auto')).toBe(true);
+        expect(needsBubbles(panels, 'bubbles')).toBe(true);
     });
 });
