@@ -72,3 +72,16 @@ describe('lib/panel-detect plausibility', () => {
         expect(detectPanels(page(200, 300, ls))).toEqual([]);
     });
 });
+
+describe('lib/panel-detect reading order', () => {
+    it('reads a tall panel, then the two stacked beside it top to bottom, even when the lower one reaches further left', () => {
+        // left: one tall panel; right: two stacked, the lower starting 6 px further left (a slanted edge in real art)
+        const layout: [number, number, number, number][] = [[10, 10, 90, 290], [106, 10, 190, 140], [100, 150, 190, 290]];
+        expect(detectPanels(page(200, 300, layout)).map(round)).toEqual([[5, 3], [53, 3], [50, 50]]);
+    });
+
+    it('reads columns right to left for manga, each column top to bottom', () => {
+        const layout: [number, number, number, number][] = [[10, 10, 90, 290], [106, 10, 190, 140], [100, 150, 190, 290]];
+        expect(detectPanels(page(200, 300, layout), { rtl: true }).map(round)).toEqual([[53, 3], [50, 50], [5, 3]]);
+    });
+});

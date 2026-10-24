@@ -107,15 +107,39 @@ function mergeSlivers(boxes: Box[], w: number, h: number): Box[] {
     }
 }
 
-/** Reading order: rows of vertically overlapping boxes, top to bottom; within a row by x. */
-function readingOrder(boxes: Box[], rtl: boolean): Box[] {
-    const rows: Box[][] = [];
-    for (const b of [...boxes].sort((a, c) => a.y0 - c.y0)) {
-        const row = rows.find(r => r.some(o => Math.min(o.y1, b.y1) - Math.max(o.y0, b.y0) > 0.5 * Math.min(o.y1 - o.y0, b.y1 - b.y0)));
-        if (row) row.push(b); else rows.push([b]);
-    }
-    rows.sort((a, c) => Math.min(...a.map(b => b.y0)) - Math.min(...c.map(b => b.y0)));
-    return rows.flatMap(r => r.sort((a, c) => rtl ? c.x1 - a.x1 : a.x0 - c.x0));
+/**
+ * Reading order by recursive cuts over the boxes, the way a page is read: split into rows where a horizontal line
+ * passes between boxes (top to bottom), split a row into columns where a vertical line does (left to right, right to
+ * left for manga), and so on. Boxes may overlap by a few percent (L-shaped and slanted panels) and still count as
+ * separated. Where nothing separates them any more (diagonal panels), centres decide: higher first, then by x.
+ * The old row grouping put a tall panel and the two stacked beside it in one "row" sorted by x, so the lower of the
+ * two came first whenever its slanted edge reached further left.
+ */
+function readingOrder(boxes: Box[], rtl: boolean, w: number, h: number): Box[] {
+    const groups = (list: Box[], horizontal: boolean): Box[][] => {
+        const lo = (b: Box) => horizontal ? b.y0 : b.x0, hi = (b: Box) => horizontal ? b.y1 : b.x1;
+        const tol = 0.04 * (horizontal ? h : w);
+        const out: Box[][] = [];
+        let end = -Infinity;
+        for (const b of [...list].sort((a, c) => lo(a) - lo(c))) {
+            if (out.length && lo(b) < end - tol) { out[out.length - 1].push(b); end = Math.max(end, hi(b)); }
+            else { out.push([b]); end = hi(b); }
+        }
+        return out;
+    };
+    const order = (list: Box[], horizontal: boolean, tried = 0): Box[] => {
+        if (list.length <= 1) return list;
+        const parts = groups(list, horizontal);
+        if (parts.length > 1) {
+            if (!horizontal && rtl) parts.reverse();
+            return parts.flatMap(p => order(p, !horizontal));
+        }
+        if (tried === 0) return order(list, !horizontal, 1);  // no cut this way: try the other
+        const band = 0.12 * h;
+        const cx = (b: Box) => (b.x0 + b.x1) / 2, cy = (b: Box) => (b.y0 + b.y1) / 2;
+        return [...list].sort((a, c) => Math.round(cy(a) / band) - Math.round(cy(c) / band) || (rtl ? cx(c) - cx(a) : cx(a) - cx(c)));
+    };
+    return order(boxes, true);
 }
 
 /**
@@ -168,5 +192,5 @@ export function detectPanels(img: Img, opts: { rtl?: boolean } = {}): Rect[] {
     let boxes = pass(small, THICK, plausible);
     let scale = { w: small.width, h: small.height };
     if (!boxes.length && big) { boxes = pass(img, THIN, solid); scale = { w: img.width, h: img.height }; }
-    return readingOrder(boxes, !!opts.rtl).map(b => ({ x: b.x0 / scale.w, y: b.y0 / scale.h, w: (b.x1 - b.x0) / scale.w, h: (b.y1 - b.y0) / scale.h }));
+    return readingOrder(boxes, !!opts.rtl, scale.w, scale.h).map(b => ({ x: b.x0 / scale.w, y: b.y0 / scale.h, w: (b.x1 - b.x0) / scale.w, h: (b.y1 - b.y0) / scale.h }));
 }
