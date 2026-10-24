@@ -4,7 +4,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { ArrowLeft, Loader2, Search, User } from "lucide-react"
+import { ArrowLeft, Loader2, Search, Star, User } from "lucide-react"
 import { useSession } from "next-auth/react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -105,6 +105,33 @@ function PortraitEditor({ c, onChanged }: { c: Character, onChanged: () => void 
     )
 }
 
+// Star a character: all of its reading lists become favorites and show on the home screen under "Characters"
+function FavoriteCharacter({ c }: { c: Character }) {
+    const [ids, setIds] = useState<string[] | null>(null)
+    const [busy, setBusy] = useState(false)
+    useEffect(() => { fetch('/api/reading-lists/favorites').then(r => r.ok ? r.json() : { listIds: [] }).then(d => setIds(d.listIds || [])).catch(() => setIds([])) }, [])
+    if (ids === null) return null
+    const on = c.lists.every(l => ids.includes(l.id))
+    const toggle = async () => {
+        setBusy(true)
+        let next = ids
+        for (const l of c.lists) {
+            if (ids.includes(l.id) === !on) continue
+            const res = await fetch('/api/reading-lists/favorites', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listId: l.id, favorite: !on }) })
+            if (res.ok) next = (await res.json()).listIds || next
+        }
+        setIds(next)
+        setBusy(false)
+    }
+    return (
+        <Button variant={on ? "default" : "outline"} size="sm" className="font-bold" disabled={busy} onClick={toggle}
+            title={on ? "Von der Startseite nehmen" : "Auf der Startseite unter „Characters“ zeigen"}>
+            {busy ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Star className={`w-4 h-4 mr-1.5 ${on ? 'fill-amber-400 text-amber-400' : ''}`} />}
+            {on ? "Auf der Startseite" : "Auf die Startseite"}
+        </Button>
+    )
+}
+
 function CharactersContent() {
     const { data: session } = useSession()
     const isAdmin = (session?.user as any)?.role === 'ADMIN'
@@ -145,7 +172,10 @@ function CharactersContent() {
                     </div>
                     <div className="space-y-3">
                         <p className="text-sm font-black uppercase tracking-widest text-primary">{current.publisher}</p>
-                        <h1 className="text-4xl font-black">{current.name}</h1>
+                        <div className="flex flex-wrap items-center gap-3">
+                            <h1 className="text-4xl font-black">{current.name}</h1>
+                            <FavoriteCharacter c={current} />
+                        </div>
                         <div className="flex flex-wrap gap-6 text-sm">
                             <div><p className="text-xs uppercase text-muted-foreground">Reading orders</p><p className="font-bold">{current.lists.length}</p></div>
                             <div><p className="text-xs uppercase text-muted-foreground">Issues</p><p className="font-bold">{current.issues}</p></div>

@@ -10,8 +10,15 @@ vi.mock('@/lib/db', () => ({ prisma: {
         upsert: vi.fn(async ({ where, update }: any) => { store.set(where.key, update.value); }),
         deleteMany: vi.fn(async ({ where }: any) => { store.delete(where.key); }),
     },
-    readingList: { findFirst: vi.fn(async ({ where }: any) => visible.has(where.id) ? { id: where.id } : null) },
+    readingList: {
+        findFirst: vi.fn(async ({ where }: any) => visible.has(where.id) ? { id: where.id } : null),
+        findMany: vi.fn(async ({ where }: any) => where.id.in.map((id: string) => ({ id, name: id, description: null, updatedAt: new Date(0) }))),
+    },
 } }));
+// Category per list for the home screen's separate Characters shelf
+vi.mock('@/lib/reading-list-meta', () => ({
+    listMeta: vi.fn(async (rows: any[]) => new Map(rows.map(r => [r.id, { category: r.id === 'c' ? 'Characters' : 'Events' }]))),
+}));
 
 import { GET, PUT } from '@/app/api/reading-lists/favorites/route';
 
@@ -32,6 +39,12 @@ describe('reading list favorites (fork)', () => {
         expect((await (await put('c', true)).json()).listIds).toEqual(['a', 'b', 'c']);
         expect((await (await put('b', false)).json()).listIds).toEqual(['a', 'c']);
         expect(store.has('reading_list_main:u1')).toBe(false);
+    });
+
+    it('tells the home screen which favorites are character lists', async () => {
+        await put('a', true);
+        await put('c', true);
+        expect((await (await GET()).json()).categories).toEqual({ a: 'Events', c: 'Characters' });
     });
 
     it('refuses a list the user cannot see', async () => {

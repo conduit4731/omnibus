@@ -11,7 +11,7 @@ import { Globe, Search, Star } from "lucide-react"
 export type ListSummary = {
     id: string, name: string, isGlobal?: boolean, user?: { username: string } | null,
     itemCount: number, ownedCount: number, readCount: number,
-    publisher: string, category: string, era: string, eraStart: number,
+    publisher: string, category: string, era: string, eraStart: number, subject?: string | null,
 }
 
 type Props = {
@@ -22,11 +22,16 @@ type Props = {
     favoriteIds: string[]
     onSelect: (id: string) => void
     onToggleFavorite: (id: string) => void
+    // Characters get their own picker: grouped by character instead of era
+    bySubject?: boolean
+    title?: string
+    description?: string
 }
 
 const pct = (n: number, of: number) => (of ? Math.round(100 * n / of) : 0)
 
-export function ReadingListPicker({ open, onOpenChange, lists, activeId, favoriteIds, onSelect, onToggleFavorite }: Props) {
+export function ReadingListPicker({ open, onOpenChange, lists, activeId, favoriteIds, onSelect, onToggleFavorite, bySubject = false,
+    title = "Choose a reading list", description = "Star your favorites: they show on the home screen, and the first one opens by default." }: Props) {
     const [query, setQuery] = useState("")
     const [publisher, setPublisher] = useState<string>("All")
 
@@ -44,21 +49,22 @@ export function ReadingListPicker({ open, onOpenChange, lists, activeId, favorit
             && (!q || `${l.name} ${l.category} ${l.era} ${l.publisher}`.toLowerCase().includes(q)))
         const byEra = new Map<string, { title: string, start: number, lists: ListSummary[] }>()
         for (const l of shown) {
-            const title = publisher === "All" ? `${l.publisher} · ${l.era}` : l.era
-            if (!byEra.has(title)) byEra.set(title, { title, start: l.eraStart, lists: [] })
+            const group = bySubject ? (l.subject || l.name) : l.era
+            const title = publisher === "All" ? `${l.publisher} · ${group}` : group
+            if (!byEra.has(title)) byEra.set(title, { title, start: bySubject ? 0 : l.eraStart, lists: [] })
             byEra.get(title)!.lists.push(l)
         }
         return [...byEra.values()]
             .sort((a, b) => a.start - b.start || a.title.localeCompare(b.title))
             .map(s => ({ ...s, lists: s.lists.sort((a, b) => a.name.localeCompare(b.name)) }))
-    }, [lists, publisher, query])
+    }, [lists, publisher, query, bySubject])
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="sm:max-w-[760px] max-h-[85vh] flex flex-col bg-background border-border rounded-xl p-0 gap-0">
                 <DialogHeader className="p-5 pb-3 space-y-3">
-                    <DialogTitle>Choose a reading list</DialogTitle>
-                    <DialogDescription>Star your favorites: they show on the home screen, and the first one opens by default.</DialogDescription>
+                    <DialogTitle>{title}</DialogTitle>
+                    <DialogDescription>{description}</DialogDescription>
                     <div className="relative">
                         <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                         <Input autoFocus value={query} onChange={e => setQuery(e.target.value)} placeholder="Search lists, events, characters, eras…" className="pl-9" />

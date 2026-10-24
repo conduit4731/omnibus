@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { BookOpen, Check, Info, ListOrdered } from "lucide-react";
+import { BookOpen, Check, Info, ListOrdered, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { nextInList } from "@/lib/reading-list-next";
 import { FannedCovers, displayName } from "@/components/list-cards";
@@ -56,12 +56,13 @@ function ListTile({ list }: { list: any }) {
 /** onLoaded: file paths of the favorites' issues, so "Jump Back In" can leave them to this shelf. */
 export function ReadingListUpNext({ onLoaded }: { onLoaded?: (filePaths: Set<string>) => void }) {
     const [lists, setLists] = useState<any[] | null>(null);
+    const [categories, setCategories] = useState<Record<string, string>>({});
 
     useEffect(() => {
         fetch('/api/reading-lists/favorites')
             .then(res => res.ok ? res.json() : { listIds: [] })
-            .then(({ listIds }) => Promise.all((listIds || []).map((id: string) =>
-                fetch(`/api/reading-lists?id=${encodeURIComponent(id)}`).then(r => r.ok ? r.json() : null).catch(() => null))))
+            .then(({ listIds, categories }) => { setCategories(categories || {}); return Promise.all((listIds || []).map((id: string) =>
+                fetch(`/api/reading-lists?id=${encodeURIComponent(id)}`).then(r => r.ok ? r.json() : null).catch(() => null))) })
             .then(found => {
                 const ok = found.filter((d: any) => d?.items);
                 setLists(ok);
@@ -72,12 +73,21 @@ export function ReadingListUpNext({ onLoaded }: { onLoaded?: (filePaths: Set<str
     }, []);
 
     if (!lists?.length) return null;
-    return (
+    // Starred character lists get their own shelf under their own header
+    const characters = lists.filter(l => categories[l.id] === 'Characters');
+    const others = lists.filter(l => categories[l.id] !== 'Characters');
+    const shelf = (title: string, icon: React.ReactNode, rows: any[]) => rows.length > 0 && (
         <div className="space-y-2">
-            <h2 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2"><ListOrdered className="w-6 h-6 text-primary" /> Reading Lists</h2>
+            <h2 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">{icon} {title}</h2>
             <div className="flex overflow-x-auto gap-4 pb-4 pt-2 px-2 snap-x no-scrollbar -mx-2">
-                {lists.map(l => <ListTile key={l.id} list={l} />)}
+                {rows.map(l => <ListTile key={l.id} list={l} />)}
             </div>
+        </div>
+    );
+    return (
+        <div className="space-y-6">
+            {shelf("Reading Lists", <ListOrdered className="w-6 h-6 text-primary" />, others)}
+            {shelf("Characters", <User className="w-6 h-6 text-primary" />, characters)}
         </div>
     );
 }

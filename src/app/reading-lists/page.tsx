@@ -22,7 +22,7 @@ import {
     BookOpen, Trash2, Plus, GripVertical, Loader2, Image as ImageIcon,
     ArrowLeft, ListOrdered, Calendar, Minus, FolderOpen, CloudDownload,
     Check, DownloadCloud, Sparkles, Globe, ExternalLink, Share2, Info,
-    ChevronDown, LayoutList, List, RefreshCw, Star
+    ChevronDown, LayoutList, List, RefreshCw, Star, User as UserIcon
 } from "lucide-react"
 import Link from "next/link"
 import { Badge } from "@/components/ui/badge"
@@ -86,12 +86,16 @@ function ReadingListsContent() {
   const { toast } = useToast()
   
   const [lists, setLists] = useState<any[]>([])
+  const characterLists = lists.filter(l => l.category === 'Characters')
+  const plainLists = lists.filter(l => l.category !== 'Characters')
   const [activeListId, setActiveListId] = useState<string | null>(null)
+  const isCharacterList = !!activeListId && characterLists.some(l => l.id === activeListId)
   // The open list with its items + the user's progress; the sidebar only has names and counts (#252)
   const [activeDetail, setActiveDetail] = useState<any | null>(null)
   const [detailNonce, setDetailNonce] = useState(0)
   const [hideRead, setHideRead] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [characterPickerOpen, setCharacterPickerOpen] = useState(false)
   const [showAllSeries, setShowAllSeries] = useState(false)
   const [skipNoticeOpen, setSkipNoticeOpen] = useState(false)
   const [favoriteIds, setFavoriteIds] = useState<string[]>([])
@@ -711,11 +715,23 @@ function ReadingListsContent() {
           <div className="flex flex-wrap items-center gap-2">
               <Button variant="outline" className="h-11 font-bold border-primary/30 bg-primary/5 hover:bg-primary/10 text-primary max-w-full" onClick={() => setPickerOpen(true)}>
                   <ListOrdered className="w-4 h-4 mr-2 shrink-0" />
-                  <span className="truncate">{lists.find(l => l.id === activeListId)?.name || "Choose a reading list"}</span>
-                  {activeListId && favoriteIds.includes(activeListId) && <Star className="w-3.5 h-3.5 ml-2 fill-amber-400 text-amber-400 shrink-0" />}
+                  <span className="truncate">{plainLists.find(l => l.id === activeListId)?.name || "Choose a reading list"}</span>
+                  {activeListId && !isCharacterList && favoriteIds.includes(activeListId) && <Star className="w-3.5 h-3.5 ml-2 fill-amber-400 text-amber-400 shrink-0" />}
                   <ChevronDown className="w-4 h-4 ml-2 shrink-0" />
               </Button>
-              <span className="text-xs text-muted-foreground font-bold">{lists.length} lists</span>
+              <span className="text-xs text-muted-foreground font-bold">{plainLists.length} lists</span>
+              {/* Fork: character reading orders in their own menu (and their own shelf on the home screen) */}
+              {characterLists.length > 0 && (
+                  <>
+                      <Button variant="outline" className="h-11 font-bold max-w-full" onClick={() => setCharacterPickerOpen(true)}>
+                          <UserIcon className="w-4 h-4 mr-2 shrink-0" />
+                          <span className="truncate">{isCharacterList ? characterLists.find(l => l.id === activeListId)?.name : "Choose a character"}</span>
+                          {activeListId && isCharacterList && favoriteIds.includes(activeListId) && <Star className="w-3.5 h-3.5 ml-2 fill-amber-400 text-amber-400 shrink-0" />}
+                          <ChevronDown className="w-4 h-4 ml-2 shrink-0" />
+                      </Button>
+                      <span className="text-xs text-muted-foreground font-bold">{characterLists.length} character lists</span>
+                  </>
+              )}
               <div className="flex-1" />
               <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -734,9 +750,21 @@ function ReadingListsContent() {
               </DropdownMenu>
           </div>
           <ReadingListPicker
+              open={characterPickerOpen}
+              onOpenChange={setCharacterPickerOpen}
+              lists={characterLists}
+              activeId={activeListId}
+              favoriteIds={favoriteIds}
+              onSelect={setActiveListId}
+              onToggleFavorite={handleToggleFavorite}
+              bySubject
+              title="Choose a character"
+              description="Star a character's lists: they show on the home screen under Characters, apart from your reading lists."
+          />
+          <ReadingListPicker
               open={pickerOpen}
               onOpenChange={setPickerOpen}
-              lists={lists}
+              lists={plainLists}
               activeId={activeListId}
               favoriteIds={favoriteIds}
               onSelect={setActiveListId}

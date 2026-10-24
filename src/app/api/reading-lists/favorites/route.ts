@@ -6,6 +6,7 @@ import { prisma } from '@/lib/db';
 import { getServerSession } from 'next-auth/next';
 import { getAuthOptions } from '@/app/api/auth/[...nextauth]/options';
 import { getErrorMessage } from '@/lib/utils/error';
+import { listMeta } from '@/lib/reading-list-meta';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,10 +24,14 @@ async function load(userId: string): Promise<string[]> {
     return main?.value ? [main.value] : [];
 }
 
+// categories: list id → category ("Characters", "Events", …), so the home screen can give character lists their own shelf
 export async function GET() {
     const userId = await currentUserId();
     if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    return NextResponse.json({ listIds: await load(userId) });
+    const listIds = await load(userId);
+    const rows = await prisma.readingList.findMany({ where: { id: { in: listIds } }, select: { id: true, name: true, description: true, updatedAt: true } });
+    const meta = await listMeta(rows);
+    return NextResponse.json({ listIds, categories: Object.fromEntries(rows.map(r => [r.id, meta.get(r.id)?.category || 'Lists'])) });
 }
 
 // { listId, favorite: true | false }
