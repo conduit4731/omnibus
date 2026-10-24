@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyList, eraFor, medianYear, namedEra, normalizePublisher, subjectOf, yearFromTitle } from '@/lib/reading-list-groups';
+import { classifyList, eraFor, medianYear, namedEra, normalizePublisher, starWarsEra, subjectOf, yearFromTitle } from '@/lib/reading-list-groups';
 
 describe('reading list grouping (fork)', () => {
     it('normalizes publisher names', () => {
@@ -38,6 +38,13 @@ describe('reading list grouping (fork)', () => {
             .toEqual({ publisher: 'DC', category: 'Lists' });
         expect(classifyList({ name: '[Marvel] Civil War' }, [null])).toEqual({ publisher: 'Marvel', category: 'Lists' });
         expect(classifyList({ name: 'Mixed bag' }, [])).toEqual({ publisher: 'Other', category: 'Lists' });
+    });
+
+    it('puts Star Wars on the Events page as its own publisher, Canon and Legends as eras', () => {
+        for (const path of ['Marvel/Star Wars/[Marvel] Star Wars (WEB-CBRO).cbl', 'Dark Horse/Star Wars/[Dark Horse] Star Wars (WEB-CBRO).cbl', 'Other/Star Wars/CBRO/[Marvel] 001 The High Republic.cbl'])
+            expect(classifyList({ name: 'x', description: `comics-ro: ${path}` }, ['Marvel'])).toEqual({ publisher: 'Star Wars', category: 'Events' });
+        expect(starWarsEra('Star Wars Legends, Part 3: Rise of the Empire Era')).toEqual({ era: 'Legends (Dark Horse)', eraStart: 1991 });
+        expect(starWarsEra('Star Wars Canon, Part 4.2: Vader Down').era).toBe('Canon (Marvel)');
     });
 
     it('reads the character from the repo path', () => {

@@ -36,7 +36,10 @@ export function byEra<T extends Pick<ListSummary, 'era' | 'eraStart' | 'from' | 
         g.start = Math.min(g.start, l.eraStart); g.rows.push(l)
         groups.set(l.era, g)
     }
-    return [...groups.values()].sort((a, b) => a.start - b.start || a.era.localeCompare(b.era)).map(g => ({ ...g, rows: chronological(g.rows) }))
+    // Star Wars eras read in story order, which the list names carry ("…Complete Reading Order", "…, Part 1: …", "…, Part 4.2: …",
+    // then the events) — the publication years of the parts overlap
+    const order = (rows: T[]) => rows.every(r => r.publisher === 'Star Wars') ? [...rows].sort((a, b) => a.name.localeCompare(b.name, 'en', { numeric: true })) : chronological(rows)
+    return [...groups.values()].sort((a, b) => a.start - b.start || a.era.localeCompare(b.era)).map(g => ({ ...g, rows: order(g.rows) }))
 }
 
 const STATUS_STYLE: Record<EventStatus, string> = { Complete: 'bg-violet-600', Ongoing: 'bg-sky-600', Ended: 'bg-zinc-600' }

@@ -78,6 +78,9 @@ export function yearFromTitle(title?: string | null): number | null {
  */
 export function classifyList(list: { name: string, description?: string | null }, seriesPublishers: (string | null)[]) {
     const path = list.description?.startsWith('comics-ro: ') ? list.description.slice('comics-ro: '.length).split('/') : null;
+    // Fork: Star Wars (Marvel/Star Wars/…, Dark Horse/Star Wars/…, Other/Star Wars/…) is its own "publisher" on the
+    // Events page, apart from the superhero events; Canon vs Legends is the era (starWarsEra)
+    if (path && path[1] === 'Star Wars') return { publisher: 'Star Wars', category: 'Events' };
     let publisher = path && path.length > 1 ? normalizePublisher(path[0]) : null;
     if (!publisher) {
         const counts = new Map<string, number>();
@@ -87,6 +90,11 @@ export function classifyList(list: { name: string, description?: string | null }
     if (!publisher) publisher = normalizePublisher(list.name.match(/^\[([^\]]+)\]/)?.[1]);
     const category = path && path.length > 2 ? path[1] : 'Lists';
     return { publisher: publisher ?? 'Other', category };
+}
+
+/** Fork: era of a Star Wars list from its name (comics-ro names them "Star Wars Canon…" / "Star Wars Legends…"). */
+export function starWarsEra(name: string): { era: string, eraStart: number } {
+    return /^Star Wars Legends/.test(name) ? { era: 'Legends (Dark Horse)', eraStart: 1991 } : { era: 'Canon (Marvel)', eraStart: 2015 };
 }
 
 /** Character a "comics-ro: DC/Characters/<name>/…" list is about ("unsorted/<name>" skipped); null otherwise. */
