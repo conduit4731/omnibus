@@ -12,6 +12,7 @@ import { cachedCvGet } from '@/lib/metadata/metadata-cache';
 import { syncSeriesMetadata } from '@/lib/metadata-fetcher';
 import { followSeries } from '@/lib/follows';
 import { seriesFolderSegments } from '@/lib/utils/naming';
+import { extractIssueNumber } from '@/lib/utils/issue-parser';
 import { normIssueNumber, normSeriesName, parseBatcaveTitle, pickCvVolume } from '@/lib/batcave';
 
 export type QueueIssue = { number: string; isAnnual?: boolean };
@@ -194,4 +195,49 @@ export async function queueRequest(body: QueueBody, userId?: string | null): Pro
     if (!seriesId && body.title) seriesId = (await seriesForTitle(body.title, userId)).series.id;
     if (!seriesId) throw new Error('seriesId, cvId, title or readingListId required');
     return enqueue(seriesId, body.issues?.length ? body.issues : await missingIssues(seriesId));
+}
+
+/**
+ * Series Monitor, before its parked re-search: every AWAITING_RELEASE request (Usenet and GetComics had nothing) also
+ * goes on the Batcave queue, once — a NOT_FOUND / ERROR job is not queued again, the normal 7-day re-search goes on.
+ * A request whose job is DONE is closed COMPLETED, else the re-search would fetch the issue a second time.
+ * Series not in the library yet cost ComicVine calls: at most maxLookups new ones per run, the rest waits for the next.
+ */
+export async function queueAwaitingForBatcave(userId?: string | null, maxLookups = 40) {
+    const reqs = await prisma.request.findMany({
+        where: { status: 'AWAITING_RELEASE' },
+        select: { id: true, volumeId: true, metadataSource: true, issueNumber: true, activeDownloadName: true },
+    });
+    const seriesByKey = new Map<string, string | null>();
+    let lookups = 0, queued = 0, completed = 0;
+    for (const r of reqs) {
+        const name = (r.activeDownloadName || '').replace(/\.(cbz|cbr|zip|rar|cb7|epub)$/i, '');
+        const hasId = !!r.volumeId && r.volumeId !== '0';
+        const key = hasId ? `${r.metadataSource}:${r.volumeId}` : normSeriesName(name.replace(/\s*#\S+/, ''));
+        if (!key) continue;
+        if (!seriesByKey.has(key)) {
+            const known = hasId
+                ? await prisma.series.findFirst({ where: { OR: [{ metadataSource: r.metadataSource, metadataId: r.volumeId }, { id: r.volumeId }] }, select: { id: true } })
+                : null;
+            if (known) seriesByKey.set(key, known.id);
+            else if (hasId && r.metadataSource !== 'COMICVINE') seriesByKey.set(key, null); // Metron: only via Subscribe
+            else if (lookups >= maxLookups) continue;
+            else {
+                lookups++;
+                const s = await (hasId ? seriesForCvId(r.volumeId, userId) : seriesForTitle(name.replace(/\s*#\S+/, ''), userId).then(x => x.series))
+                    .catch(e => { Logger.log(`[Batcave] awaiting ${name}: ${e instanceof Error ? e.message : e}`, 'warn'); return null; });
+                seriesByKey.set(key, s?.id || null);
+            }
+        }
+        const seriesId = seriesByKey.get(key);
+        const number = normIssueNumber(r.issueNumber || extractIssueNumber(name));
+        if (!seriesId || !number) continue;
+        const job = await prisma.batcaveJob.findUnique({ where: { seriesId_number_isAnnual: { seriesId, number, isAnnual: false } } });
+        if (!job) { await prisma.batcaveJob.create({ data: { seriesId, number } }); queued++; }
+        else if (job.status === 'DONE') {
+            await prisma.request.update({ where: { id: r.id }, data: { status: 'COMPLETED', progress: 100 } });
+            completed++;
+        }
+    }
+    return { queued, completed, lookups, waiting: reqs.length };
 }

@@ -103,6 +103,10 @@ function RequestRow({ req, getStatusColor, onCancel, onRetry, isAdmin, isSelecti
   const [isCancelling, setIsCancelling] = useState(false);
   const cancellable = CANCELLABLE.includes(req.status);
   const name = (req.seriesName || "Unknown Request").replace(COMIC_EXT_REGEX, '');
+  // no volume id (unmatched download): the title "Name #1 (2015)" minus the number finds the series on ComicVine
+  const batcaveBody = { ...(req.volumeId && req.volumeId !== "0" ? { cvId: req.volumeId, metadataSource: req.metadataSource } : { title: name.replace(/\s*#\S+/, '') }),
+    // never empty: no issues would queue every missing issue of the series
+    issues: [req, ...sameLink].map(x => String(x.issueNumber || (String(x.seriesName || '').match(/#\s*([^\s(]+)/) || [])[1] || '')).filter(Boolean).map(number => ({ number })) };
   return (
     <tr className={`border-b border-border text-sm ${isSelected && isSelectionMode ? 'bg-primary/10' : needsAction(req) ? 'bg-amber-500/10 hover:bg-amber-500/15' : 'hover:bg-muted/40'} ${isSelectionMode && cancellable ? 'cursor-pointer' : ''}`}
         onClick={() => { if (isSelectionMode && cancellable) onToggleSelect(req.id); }}>
@@ -119,11 +123,10 @@ function RequestRow({ req, getStatusColor, onCancel, onRetry, isAdmin, isSelecti
         {needsAction(req) ? (
           <div className="inline-flex gap-1.5">
             <GetComicsButton title="GetComics erneut versuchen" onClick={() => [req, ...sameLink].forEach(x => onRetry(x.id))} />
-            {/* no volume id (unmatched download): the title "Name #1 (2015)" minus the number finds the series on ComicVine */}
-            <BatcaveButton body={{ ...(req.volumeId && req.volumeId !== "0" ? { cvId: req.volumeId, metadataSource: req.metadataSource } : { title: name.replace(/\s*#\S+/, '') }),
-              issues: [req, ...sameLink].filter(x => x.issueNumber).map(x => ({ number: String(x.issueNumber) })) }} />
+            <BatcaveButton body={batcaveBody} />
           </div>
         ) : (<>
+        {req.status === 'AWAITING_RELEASE' && <BatcaveButton body={batcaveBody} className="h-7 w-7 min-h-7 min-w-7 mr-1 align-middle" />}
         {req.seriesPath && <Button size="icon" variant="ghost" asChild className="h-7 w-7" title="Go to series"><Link href={`/library/series?path=${encodeURIComponent(req.seriesPath)}`}><Library className="w-3.5 h-3.5" /></Link></Button>}
         {req.volumeId && req.volumeId !== "0" && (
           <Button size="icon" variant="ghost" asChild className="h-7 w-7" title={`View on ${req.metadataSource === 'METRON' ? 'Metron' : 'ComicVine'}`}>

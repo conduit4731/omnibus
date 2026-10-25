@@ -17,6 +17,7 @@ import { issueNumberOf, settleDuplicateOnLink } from '@/lib/request-dedupe';
 import { processPageSweepChunk } from '@/lib/pages/page-sweep';
 import { SCHEDULE_SEED_KEY, newScheduleSeed, scheduleOffsetMs } from '@/lib/schedule-jitter';
 import { SCHEDULE_KEYS, scheduleValue } from '@/lib/schedule-defaults';
+import { queueAwaitingForBatcave } from '@/lib/batcave-queue';
 
 function isNewerVersion(latest: string, current: string): boolean {
     const cleanLatest = latest.replace(/^v/, '');
@@ -1032,6 +1033,14 @@ export function initWorker() {
                                 }
                             }
                         }
+                    }
+
+                    // Fork: Awaiting = Usenet and GetComics had nothing; also try Batcave (src/lib/batcave-queue.ts)
+                    try {
+                        const bc = await queueAwaitingForBatcave(admin?.id);
+                        details += `[BATCAVE] ${bc.queued} awaiting queued, ${bc.completed} closed (Batcave had them), ${bc.lookups} series looked up.\n`;
+                    } catch (e) {
+                        details += `[BATCAVE] Failed: ${getErrorMessage(e)}\n`; // never fail the monitor over it
                     }
 
                     // Phase 3b -- dead-request re-search sweep. Parked states are re-searched on a slow,
