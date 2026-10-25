@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useMemo } from "react"
 import Link from "next/link"
-import { BatcaveButton, GetComicsButton } from "@/components/batcave-button"
+import { AllSources, BatcaveButton, GetComicsButton } from "@/components/batcave-button"
 import { useSession } from "next-auth/react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input"
 import { 
   Loader2, Search, RefreshCw, Clock, CheckCircle2, Calendar, FileText, 
   ChevronLeft, ChevronRight, Info, List, ImageIcon, Server, XCircle, Library,
-  CheckSquare, Square, ExternalLink
+  CheckSquare, Square, ExternalLink, ChevronDown
 } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { COMIC_EXT_REGEX } from "@/lib/utils/formats"
@@ -46,7 +46,18 @@ const SORTS: Record<string, { label: string, cmp: (a: any, b: any) => number }> 
   oldest: { label: "Oldest", cmp: (a, b) => +new Date(a.createdAt) - +new Date(b.createdAt) },
   name: { label: "Name", cmp: (a, b) => (a.seriesName || '').localeCompare(b.seriesName || '', undefined, { numeric: true }) },
   status: { label: "Status", cmp: (a, b) => (a.status || '').localeCompare(b.status || '') },
+  series: { label: "Group by series", cmp: (a, b) => (a.seriesName || '').localeCompare(b.seriesName || '', undefined, { numeric: true }) },
 };
+// Fork: "Batman (1940) #708.cbz" → its series; the volume id when known, else the name without the issue number
+const seriesKeyOf = (r: any) => r.volumeId && r.volumeId !== "0" ? `v:${r.volumeId}` : 'n:' + String(r.seriesName || '').replace(COMIC_EXT_REGEX, '').replace(/\s*#\S+/, '').toLowerCase();
+// Batcave queue body for one request plus others of the same series. No volume id (unmatched download): the title
+// "Name #1 (2015)" minus the number finds the series on ComicVine.
+function batcaveBodyOf(req: any, others: any[] = []) {
+  const name = (req.seriesName || '').replace(COMIC_EXT_REGEX, '');
+  return { ...(req.volumeId && req.volumeId !== "0" ? { cvId: req.volumeId, metadataSource: req.metadataSource } : { title: name.replace(/\s*#\S+/, '') }),
+    // never empty: no issues would queue every missing issue of the series
+    issues: [req, ...others].map(x => String(x.issueNumber || (String(x.seriesName || '').match(/#\s*([^\s(]+)/) || [])[1] || '')).filter(Boolean).map(number => ({ number })) };
+}
 const CANCELLABLE = ['PENDING_APPROVAL', 'PENDING', 'DOWNLOADING', 'MANUAL_DDL', 'UNRELEASED', 'AWAITING_RELEASE'];
 const statusLabel = (status: string) => status === 'PENDING_APPROVAL' ? 'Needs Approval' : status === 'NEEDS_REVIEW' ? 'Needs review' : status === 'MANUAL_DDL' ? 'GETCOMICS' : status === 'AWAITING_RELEASE' ? 'Awaiting' : status === 'IMPORTING' ? 'Importing…' : status;
 
@@ -103,10 +114,7 @@ function RequestRow({ req, getStatusColor, onCancel, onRetry, isAdmin, isSelecti
   const [isCancelling, setIsCancelling] = useState(false);
   const cancellable = CANCELLABLE.includes(req.status);
   const name = (req.seriesName || "Unknown Request").replace(COMIC_EXT_REGEX, '');
-  // no volume id (unmatched download): the title "Name #1 (2015)" minus the number finds the series on ComicVine
-  const batcaveBody = { ...(req.volumeId && req.volumeId !== "0" ? { cvId: req.volumeId, metadataSource: req.metadataSource } : { title: name.replace(/\s*#\S+/, '') }),
-    // never empty: no issues would queue every missing issue of the series
-    issues: [req, ...sameLink].map(x => String(x.issueNumber || (String(x.seriesName || '').match(/#\s*([^\s(]+)/) || [])[1] || '')).filter(Boolean).map(number => ({ number })) };
+  const batcaveBody = batcaveBodyOf(req, sameLink);
   return (
     <tr className={`border-b border-border text-sm ${isSelected && isSelectionMode ? 'bg-primary/10' : needsAction(req) ? 'bg-amber-500/10 hover:bg-amber-500/15' : 'hover:bg-muted/40'} ${isSelectionMode && cancellable ? 'cursor-pointer' : ''}`}
         onClick={() => { if (isSelectionMode && cancellable) onToggleSelect(req.id); }}>
@@ -140,6 +148,37 @@ function RequestRow({ req, getStatusColor, onCancel, onRetry, isAdmin, isSelecti
           </Button>
         )}
         </>)}
+      </td>
+    </tr>
+  );
+}
+
+// What no source delivered: not finished, cancelled, or on its way right now — worth a try on Batcave
+const batcaveWorthy = (r: any) => ['AWAITING_RELEASE', 'MANUAL_DDL', 'NEEDS_REVIEW', 'FAILED', 'STALLED', 'ERROR'].includes(r.status);
+// One queue entry per series for all of them ("All" above the table)
+function batcaveBatchOf(reqs: any[]) {
+  const byKey = new Map<string, any[]>();
+  for (const r of reqs.filter(batcaveWorthy)) byKey.set(seriesKeyOf(r), [...(byKey.get(seriesKeyOf(r)) || []), r]);
+  return { batch: [...byKey.values()].map(([first, ...rest]) => batcaveBodyOf(first, rest)) };
+}
+
+// Fork: "Group by series" — one row per series with a status summary and one Batcave button for its open issues
+function SeriesGroupRow({ reqs, open, onToggle, colSpan }: { reqs: any[], open: boolean, onToggle: () => void, colSpan: number }) {
+  const counts = new Map<string, number>();
+  for (const r of reqs) counts.set(statusLabel(r.status), (counts.get(statusLabel(r.status)) || 0) + 1);
+  const pending = reqs.filter(batcaveWorthy);
+  const name = String(reqs[0].seriesName || '').replace(COMIC_EXT_REGEX, '').replace(/\s*#\S+/, '');
+  return (
+    <tr className="border-b border-border text-sm bg-muted/40 hover:bg-muted/60 cursor-pointer" onClick={onToggle}>
+      <td colSpan={colSpan} className="px-3 py-2">
+        <button type="button" aria-expanded={open} className="flex items-center gap-2 w-full text-left min-w-0">
+          <ChevronDown className={`w-4 h-4 shrink-0 transition-transform ${open ? '' : '-rotate-90'}`} />
+          <span className="font-bold truncate">{name}</span>
+          <span className="text-xs text-muted-foreground shrink-0">{reqs.length} issue{reqs.length === 1 ? '' : 's'} · {[...counts].map(([l, n]) => `${n} ${l}`).join(' · ')}</span>
+        </button>
+      </td>
+      <td className="px-2 py-1 whitespace-nowrap text-right" onClick={e => e.stopPropagation()}>
+        {pending.length > 0 && <BatcaveButton title={`${pending.length} offene Hefte über Batcave laden`} body={batcaveBodyOf(pending[0], pending.slice(1))} />}
       </td>
     </tr>
   );
@@ -371,6 +410,7 @@ export default function RequestsPage() {
   const [pageSize, setPageSize] = useState("50")
   const [viewMode, setViewMode] = useState<"table" | "cards">("table")
   const [sortMode, setSortMode] = useState("action")
+  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set())
   
   // Selection / Bulk Actions
   const [isSelectionMode, setIsSelectionMode] = useState(false)
@@ -496,13 +536,23 @@ export default function RequestsPage() {
       }
       return [...byLink.values()].map(([req, ...sameLink]) => ({ req, sameLink }));
   }, [activeTab, filteredRequests]);
+  // Group by series: one entry per series, paged by series
+  const seriesGroups = useMemo(() => {
+      if (sortMode !== "series") return null;
+      const byKey = new Map<string, any[]>();
+      for (const req of filteredRequests) byKey.set(seriesKeyOf(req), [...(byKey.get(seriesKeyOf(req)) || []), req]);
+      return [...byKey].map(([key, reqs]) => ({ key, reqs }));
+  }, [sortMode, filteredRequests]);
+  const toggleGroup = (key: string) => setOpenGroups(prev => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n; });
   const limit = parseInt(pageSize);
-  const totalPages = Math.ceil((actionRows?.length ?? filteredRequests.length) / limit) || 1;
+  const totalPages = Math.ceil((seriesGroups?.length ?? actionRows?.length ?? filteredRequests.length) / limit) || 1;
   const paginatedRequests = filteredRequests.slice((page - 1) * limit, page * limit);
   const tableRows = actionRows ? actionRows.slice((page - 1) * limit, page * limit) : paginatedRequests.map(req => ({ req, sameLink: [] as any[] }));
   
   // Calculate which of the currently visible requests are eligible for cancellation
-  const cancellableRequests = useMemo(() => paginatedRequests.filter(r => CANCELLABLE.includes(r.status)), [paginatedRequests]);
+  // grouped: only the issues of expanded series on this page are visible
+  const visibleRequests = seriesGroups ? seriesGroups.slice((page - 1) * limit, page * limit).flatMap(g => openGroups.has(g.key) ? g.reqs : []) : paginatedRequests;
+  const cancellableRequests = useMemo(() => visibleRequests.filter(r => CANCELLABLE.includes(r.status)), [visibleRequests]);
 
   return (
     <div className="container mx-auto py-10 px-6 space-y-6 max-w-5xl transition-colors duration-300">
@@ -567,11 +617,24 @@ export default function RequestsPage() {
         </TabsList>
       </Tabs>
 
+      {/* Fork: everything shown in these tabs (search applies) onto the Batcave queue in one press */}
+      {["NEEDS_ACTION", "REVIEW", "AWAITING"].includes(activeTab) && filteredRequests.some(batcaveWorthy) && (
+          <AllSources label={`Alle ${filteredRequests.filter(batcaveWorthy).length} über Batcave`}>
+              <BatcaveButton title={`Alle ${filteredRequests.filter(batcaveWorthy).length} angezeigten Hefte über Batcave laden`} body={() => batcaveBatchOf(filteredRequests)} />
+          </AllSources>
+      )}
+
       {viewMode === "table" && paginatedRequests.length > 0 && (
           <div className="rounded-xl border border-border bg-background/80 overflow-hidden">
               <table className="w-full table-fixed sm:table-auto">
                   <tbody>
-                      {tableRows.map(({ req, sameLink }) => (
+                      {seriesGroups ? seriesGroups.slice((page - 1) * limit, page * limit).flatMap(({ key, reqs }) => [
+                          <SeriesGroupRow key={key} reqs={reqs} open={openGroups.has(key)} onToggle={() => toggleGroup(key)} colSpan={isSelectionMode ? 6 : 5} />,
+                          ...(openGroups.has(key) ? reqs.map(req => (
+                              <RequestRow key={req.id} req={req} getStatusColor={getStatusColor} onCancel={handleCancelRequest} onRetry={handleRetry} isAdmin={isAdmin}
+                                  isSelectionMode={isSelectionMode} isSelected={selectedRequests.has(req.id)} onToggleSelect={toggleRequestSelection} />
+                          )) : []),
+                      ]) : tableRows.map(({ req, sameLink }) => (
                           <RequestRow key={req.id} req={req} sameLink={sameLink} getStatusColor={getStatusColor} onCancel={handleCancelRequest} onRetry={handleRetry} isAdmin={isAdmin}
                               isSelectionMode={isSelectionMode} isSelected={selectedRequests.has(req.id)} onToggleSelect={toggleRequestSelection} />
                       ))}
