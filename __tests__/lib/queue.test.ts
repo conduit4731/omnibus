@@ -39,6 +39,7 @@ const mocks = vi.hoisted(() => ({
 
 // 2. Mock Dependencies
 vi.mock('@/lib/backfill-wanted', () => ({ backfillWantedGaps: vi.fn(async () => []) })); // fork: tested on its own
+vi.mock('@/lib/batcave-queue', () => ({ queueAwaitingForBatcave: vi.fn(async () => ({ queued: 0, completed: 0, lookups: 0, waiting: 0 })) })); // fork: tested on its own
 vi.mock('@/lib/db', () => ({
     prisma: {
         $transaction: mocks.transaction,
