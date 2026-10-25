@@ -8,6 +8,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { validateApiKey } from '@/lib/api-auth';
 import { normIssueNumber } from '@/lib/batcave';
+import { closeDeliveredRequests } from '@/lib/batcave-queue';
+import { Logger } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,6 +46,8 @@ export async function GET(req: NextRequest) {
         if (out.length < limit) out.push({ id: j.id, seriesId: j.seriesId, seriesName: s.name, year: s.year, number: j.number, isAnnual: j.isAnnual, newsId: map[j.seriesId] || null });
     }
     const queued = await prisma.batcaveJob.count({ where: { status: 'QUEUED' } });
+    // Requests whose issue Batcave delivered leave "Needs action" / Awaiting (the tab polls every few minutes)
+    await closeDeliveredRequests().catch(e => Logger.log(`[Batcave] closing delivered requests: ${e}`, 'warn'));
     return NextResponse.json({ jobs: out, queued });
 }
 

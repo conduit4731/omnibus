@@ -13,7 +13,7 @@ import { syncSeriesMetadata } from '@/lib/metadata-fetcher';
 import { followSeries } from '@/lib/follows';
 import { seriesFolderSegments } from '@/lib/utils/naming';
 import { extractIssueNumber } from '@/lib/utils/issue-parser';
-import { normIssueNumber, normSeriesName, parseBatcaveTitle, pickCvVolume } from '@/lib/batcave';
+import { normIssueNumber, normSeriesName, parseBatcaveTitle, pickCvVolume, pickSeries } from '@/lib/batcave';
 
 export type QueueIssue = { number: string; isAnnual?: boolean };
 export type QueueBody = {
@@ -200,7 +200,7 @@ export async function queueRequest(body: QueueBody, userId?: string | null): Pro
 /**
  * Series Monitor, before its parked re-search: every AWAITING_RELEASE request (Usenet and GetComics had nothing) also
  * goes on the Batcave queue, once — a NOT_FOUND / ERROR job is not queued again, the normal 7-day re-search goes on.
- * A request whose job is DONE is closed COMPLETED, else the re-search would fetch the issue a second time.
+ * Closing the ones Batcave delivered is closeDeliveredRequests' job.
  * Series not in the library yet cost ComicVine calls: at most maxLookups new ones per run, the rest waits for the next.
  */
 export async function queueAwaitingForBatcave(userId?: string | null, maxLookups = 40) {
@@ -209,7 +209,7 @@ export async function queueAwaitingForBatcave(userId?: string | null, maxLookups
         select: { id: true, volumeId: true, metadataSource: true, issueNumber: true, activeDownloadName: true },
     });
     const seriesByKey = new Map<string, string | null>();
-    let lookups = 0, queued = 0, completed = 0;
+    let lookups = 0, queued = 0;
     for (const r of reqs) {
         const name = (r.activeDownloadName || '').replace(/\.(cbz|cbr|zip|rar|cb7|epub)$/i, '');
         const hasId = !!r.volumeId && r.volumeId !== '0';
@@ -234,10 +234,40 @@ export async function queueAwaitingForBatcave(userId?: string | null, maxLookups
         if (!seriesId || !number) continue;
         const job = await prisma.batcaveJob.findUnique({ where: { seriesId_number_isAnnual: { seriesId, number, isAnnual: false } } });
         if (!job) { await prisma.batcaveJob.create({ data: { seriesId, number } }); queued++; }
-        else if (job.status === 'DONE') {
-            await prisma.request.update({ where: { id: r.id }, data: { status: 'COMPLETED', progress: 100 } });
-            completed++;
-        }
     }
-    return { queued, completed, lookups, waiting: reqs.length };
+    return { queued, lookups, waiting: reqs.length };
+}
+
+/**
+ * Open requests (Awaiting, GetComics hold, Needs review, failed) whose issue Batcave delivered (job DONE) or that is
+ * in the library by now are closed COMPLETED — else they stay "action needed" and the parked re-search fetches the
+ * issue a second time. No ComicVine calls: a request without volume id finds its series by name + year (pickSeries).
+ * Runs on every worker poll and in the Series Monitor.
+ */
+export async function closeDeliveredRequests(): Promise<number> {
+    const reqs = await prisma.request.findMany({
+        where: { status: { in: ['AWAITING_RELEASE', 'MANUAL_DDL', 'NEEDS_REVIEW', 'STALLED', 'FAILED', 'ERROR'] } },
+        select: { id: true, volumeId: true, metadataSource: true, issueNumber: true, activeDownloadName: true },
+    });
+    if (!reqs.length) return 0;
+    const series = await prisma.series.findMany({ select: { id: true, name: true, year: true, folderPath: true, metadataId: true, metadataSource: true } });
+    const byMeta = new Map(series.map(s => [`${s.metadataSource}:${s.metadataId}`, s.id]));
+    const targets = reqs.map(r => {
+        const name = (r.activeDownloadName || '').replace(/\.(cbz|cbr|zip|rar|cb7|epub)$/i, '');
+        const seriesId = r.volumeId && r.volumeId !== '0'
+            ? byMeta.get(`${r.metadataSource}:${r.volumeId}`) || series.find(s => s.id === r.volumeId)?.id
+            : pickSeries(series, name.replace(/\s*#\S+/, ''))?.id;
+        return { id: r.id, seriesId, number: normIssueNumber(r.issueNumber || extractIssueNumber(name)) };
+    }).filter(t => t.seriesId && t.number);
+    const seriesIds = [...new Set(targets.map(t => t.seriesId!))];
+    const delivered = new Set([
+        ...(await prisma.batcaveJob.findMany({ where: { seriesId: { in: seriesIds }, status: 'DONE', isAnnual: false }, select: { seriesId: true, number: true } })),
+        ...(await prisma.issue.findMany({ where: { seriesId: { in: seriesIds }, status: 'DOWNLOADED', isAnnual: false }, select: { seriesId: true, number: true } })),
+    ].map(x => `${x.seriesId}|${normIssueNumber(x.number)}`));
+    const done = targets.filter(t => delivered.has(`${t.seriesId}|${t.number}`)).map(t => t.id);
+    if (done.length) {
+        await prisma.request.updateMany({ where: { id: { in: done } }, data: { status: 'COMPLETED', progress: 100 } });
+        Logger.log(`[Batcave] Closed ${done.length} delivered request(s)`, 'info');
+    }
+    return done.length;
 }

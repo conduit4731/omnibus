@@ -17,7 +17,7 @@ import { issueNumberOf, settleDuplicateOnLink } from '@/lib/request-dedupe';
 import { processPageSweepChunk } from '@/lib/pages/page-sweep';
 import { SCHEDULE_SEED_KEY, newScheduleSeed, scheduleOffsetMs } from '@/lib/schedule-jitter';
 import { SCHEDULE_KEYS, scheduleValue } from '@/lib/schedule-defaults';
-import { queueAwaitingForBatcave } from '@/lib/batcave-queue';
+import { closeDeliveredRequests, queueAwaitingForBatcave } from '@/lib/batcave-queue';
 
 function isNewerVersion(latest: string, current: string): boolean {
     const cleanLatest = latest.replace(/^v/, '');
@@ -1037,8 +1037,9 @@ export function initWorker() {
 
                     // Fork: Awaiting = Usenet and GetComics had nothing; also try Batcave (src/lib/batcave-queue.ts)
                     try {
+                        const closed = await closeDeliveredRequests();
                         const bc = await queueAwaitingForBatcave(admin?.id);
-                        details += `[BATCAVE] ${bc.queued} awaiting queued, ${bc.completed} closed (Batcave had them), ${bc.lookups} series looked up.\n`;
+                        details += `[BATCAVE] ${closed} delivered request(s) closed, ${bc.queued} awaiting queued, ${bc.lookups} series looked up.\n`;
                     } catch (e) {
                         details += `[BATCAVE] Failed: ${getErrorMessage(e)}\n`; // never fail the monitor over it
                     }

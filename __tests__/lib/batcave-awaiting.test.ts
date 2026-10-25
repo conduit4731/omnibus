@@ -1,6 +1,6 @@
 // __tests__/lib/batcave-awaiting.test.ts
-// Fork: queueAwaitingForBatcave puts AWAITING_RELEASE requests on the Batcave queue once, closes the ones Batcave
-// already downloaded, leaves NOT_FOUND alone and spends at most maxLookups ComicVine lookups per run.
+// Fork: queueAwaitingForBatcave puts AWAITING_RELEASE requests on the Batcave queue once, leaves DONE / NOT_FOUND
+// alone and spends at most maxLookups ComicVine lookups per run; closeDeliveredRequests closes what was delivered.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const m = vi.hoisted(() => ({
@@ -15,18 +15,24 @@ vi.mock('@/lib/db', () => ({
     prisma: {
         request: {
             findMany: vi.fn(async () => m.requests),
-            update: vi.fn(async (a: any) => { m.updated.push(a); return a; }),
+            updateMany: vi.fn(async (a: any) => { m.updated.push(a); return a; }),
         },
         series: {
             findFirst: vi.fn(async ({ where }: any) => where.OR[0].metadataId === '100' ? { id: 's100' } : null),
             findUnique: vi.fn(async () => null),
+            findMany: vi.fn(async () => [
+                { id: 's100', name: 'Flash', year: 2010, folderPath: '/c/Flash', metadataId: '100', metadataSource: 'COMICVINE' },
+                { id: 's7', name: 'Detective Comics: Endgame', year: 2015, folderPath: '/c/DE', metadataId: '7', metadataSource: 'COMICVINE' },
+            ]),
         },
+        issue: { findMany: vi.fn(async () => [{ seriesId: 's7', number: '1' }]) },
         batcaveJob: {
             findUnique: vi.fn(async ({ where }: any) => {
                 const k = where.seriesId_number_isAnnual;
                 return m.jobs.get(`${k.seriesId}|${k.number}`) || null;
             }),
             create: vi.fn(async (a: any) => { m.created.push(a.data); return a.data; }),
+            findMany: vi.fn(async () => [{ seriesId: 's100', number: '2' }]),
         },
         systemSetting: { findUnique: vi.fn(async () => ({ value: 'cv-key' })) },
     },
@@ -36,7 +42,7 @@ vi.mock('@/lib/metadata-fetcher', () => ({ syncSeriesMetadata: vi.fn() }));
 vi.mock('@/lib/follows', () => ({ followSeries: vi.fn() }));
 vi.mock('@/lib/logger', () => ({ Logger: { log: vi.fn() } }));
 
-import { queueAwaitingForBatcave } from '@/lib/batcave-queue';
+import { closeDeliveredRequests, queueAwaitingForBatcave } from '@/lib/batcave-queue';
 
 describe('queueAwaitingForBatcave', () => {
     beforeEach(() => {
@@ -44,7 +50,7 @@ describe('queueAwaitingForBatcave', () => {
         m.cvGet.mockReset().mockResolvedValue({ data: { results: [] } }); // ComicVine finds nothing
     });
 
-    it('queues new ones, closes DONE ones, keeps NOT_FOUND, caps lookups', async () => {
+    it('queues new ones, leaves DONE / NOT_FOUND alone, caps lookups', async () => {
         m.jobs.set('s100|2', { status: 'DONE' });
         m.jobs.set('s100|3', { status: 'NOT_FOUND' });
         m.requests = [
@@ -56,8 +62,17 @@ describe('queueAwaitingForBatcave', () => {
         ];
         const r = await queueAwaitingForBatcave(null, 1);
         expect(m.created).toEqual([{ seriesId: 's100', number: '1' }]);
-        expect(m.updated.map(u => u.where.id)).toEqual(['b']);
-        expect(r).toMatchObject({ queued: 1, completed: 1, lookups: 1, waiting: 5 });
+        expect(r).toMatchObject({ queued: 1, lookups: 1, waiting: 5 });
         expect(m.cvGet).toHaveBeenCalledTimes(1); // Steel looked up (and not found), Batgirl waits for the next run
+    });
+
+    it('closes requests whose issue Batcave delivered or that is in the library, found by id or name + year', async () => {
+        m.requests = [
+            { id: 'b', volumeId: '100', metadataSource: 'COMICVINE', issueNumber: '2', activeDownloadName: 'Flash #2' },         // job DONE
+            { id: 'c', volumeId: '100', metadataSource: 'COMICVINE', issueNumber: '3', activeDownloadName: 'Flash #3' },         // nothing yet
+            { id: 'r', volumeId: '0', metadataSource: 'COMICVINE', issueNumber: '1', activeDownloadName: 'Detective Comics – Endgame #1 (2015).zip' }, // on disk
+        ];
+        expect(await closeDeliveredRequests()).toBe(2);
+        expect(m.updated[0].where.id.in).toEqual(['b', 'r']);
     });
 });
