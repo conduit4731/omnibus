@@ -119,9 +119,9 @@ function RequestRow({ req, getStatusColor, onCancel, onRetry, isAdmin, isSelecti
         {needsAction(req) ? (
           <div className="inline-flex gap-1.5">
             <GetComicsButton title="GetComics erneut versuchen" onClick={() => [req, ...sameLink].forEach(x => onRetry(x.id))} />
-            {req.volumeId && req.volumeId !== "0" && (
-              <BatcaveButton body={{ cvId: req.volumeId, metadataSource: req.metadataSource, issues: [req, ...sameLink].filter(x => x.issueNumber).map(x => ({ number: String(x.issueNumber) })) }} />
-            )}
+            {/* no volume id (unmatched download): the title "Name #1 (2015)" minus the number finds the series on ComicVine */}
+            <BatcaveButton body={{ ...(req.volumeId && req.volumeId !== "0" ? { cvId: req.volumeId, metadataSource: req.metadataSource } : { title: name.replace(/\s*#\S+/, '') }),
+              issues: [req, ...sameLink].filter(x => x.issueNumber).map(x => ({ number: String(x.issueNumber) })) }} />
           </div>
         ) : (<>
         {req.seriesPath && <Button size="icon" variant="ghost" asChild className="h-7 w-7" title="Go to series"><Link href={`/library/series?path=${encodeURIComponent(req.seriesPath)}`}><Library className="w-3.5 h-3.5" /></Link></Button>}

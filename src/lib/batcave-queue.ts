@@ -12,12 +12,13 @@ import { cachedCvGet } from '@/lib/metadata/metadata-cache';
 import { syncSeriesMetadata } from '@/lib/metadata-fetcher';
 import { followSeries } from '@/lib/follows';
 import { seriesFolderSegments } from '@/lib/utils/naming';
-import { normIssueNumber } from '@/lib/batcave';
+import { normIssueNumber, normSeriesName, parseBatcaveTitle, pickCvVolume } from '@/lib/batcave';
 
 export type QueueIssue = { number: string; isAnnual?: boolean };
 export type QueueBody = {
     seriesId?: string | null;
     cvId?: number | string | null;
+    title?: string;              // no id at all (unmatched download): "Name (Year)", resolved via ComicVine
     metadataSource?: string;
     issues?: QueueIssue[];       // absent = every missing, released issue
     readingListId?: string;      // a whole reading list / event
@@ -76,6 +77,39 @@ async function seriesForCvId(cvId: string, userId?: string | null) {
     const vol = res.data?.results;
     if (!vol?.id) throw new Error(`ComicVine volume ${cvId} not found`);
     return (await addSeriesFromCv(vol, userId)).series;
+}
+
+/**
+ * "Detective Comics – Endgame (2015)" → the ComicVine volume it means (pickCvVolume), added like addSeriesFromCv.
+ * Throws with the closest hits when ComicVine has no unambiguous match.
+ */
+export async function seriesForTitle(title: string, userId?: string | null) {
+    const key = await cvKey();
+    const parsed = parseBatcaveTitle(title);
+    const res = await cachedCvGet('https://comicvine.gamespot.com/api/search/', {
+        params: { api_key: key, format: 'json', query: parsed?.name || title, resources: 'volume', limit: 50, field_list: 'id,name,start_year,publisher,count_of_issues' },
+        headers: { 'User-Agent': 'Omnibus/1.0' }, timeout: 10000,
+    });
+    let hits = res.data?.results || [];
+    let vol = pickCvVolume(hits, title);
+    const name = normSeriesName(parsed?.name || title);
+    const same = hits.filter((h: { name: string }) => normSeriesName(h.name) === name);
+    if (!vol && same.length > 1) {
+        // The search answers count_of_issues with 0 at times ("Invincible" 2003: two hits, both 0) — the
+        // volume list has the real counts, which separate the series from its same-named TPBs.
+        const counts = await cachedCvGet('https://comicvine.gamespot.com/api/volumes/', {
+            params: { api_key: key, format: 'json', filter: `id:${same.slice(0, 50).map((h: { id: number }) => h.id).join('|')}`, field_list: 'id,count_of_issues', limit: 50 },
+            headers: { 'User-Agent': 'Omnibus/1.0' }, timeout: 10000,
+        });
+        const byId = new Map<number, number>((counts.data?.results || []).map((r: { id: number; count_of_issues: number }) => [r.id, Number(r.count_of_issues) || 0]));
+        hits = hits.map((h: { id: number; count_of_issues?: number }) => byId.has(h.id) ? { ...h, count_of_issues: byId.get(h.id) } : h);
+        vol = pickCvVolume(hits, title);
+    }
+    if (!vol) {
+        const near = hits.slice(0, 5).map((h: { name: string; start_year: unknown; count_of_issues?: number }) => `${h.name} (${h.start_year}, ${h.count_of_issues ?? '?'} Hefte)`);
+        throw new Error(`${title}: bei ComicVine nicht eindeutig gefunden` + (near.length ? '. Treffer: ' + near.join('; ') : ', keine Treffer'));
+    }
+    return addSeriesFromCv(vol, userId, parsed?.year);
 }
 
 /** Released issues of a series that are not on disk. */
@@ -157,6 +191,7 @@ export async function queueRequest(body: QueueBody, userId?: string | null): Pro
             seriesId = (await seriesForCvId(String(body.cvId), userId)).id;
         }
     }
-    if (!seriesId) throw new Error('seriesId, cvId or readingListId required');
+    if (!seriesId && body.title) seriesId = (await seriesForTitle(body.title, userId)).series.id;
+    if (!seriesId) throw new Error('seriesId, cvId, title or readingListId required');
     return enqueue(seriesId, body.issues?.length ? body.issues : await missingIssues(seriesId));
 }
