@@ -30,6 +30,7 @@ function ReaderContent() {
   const filePath = searchParams.get('path');
   const seriesPath = searchParams.get('series');
   const pageParam = searchParams.get('page'); // Support linking directly to a bookmarked page
+  const listId = searchParams.get('list'); // Opened from a reading list: "next issue" follows the list, not the series
   const { toast } = useToast();
 
   const [pages, setPages] = useState<string[]>([]);
@@ -191,7 +192,9 @@ function ReaderContent() {
       cropMargins: false
   });
 
-  const [nextIssue, setNextIssue] = useState<{ path: string, name: string } | null>(null);
+  const [nextIssue, setNextIssue] = useState<{ path: string, name: string, series: string } | null>(null);
+  const nextIssueHref = (n: { path: string, series: string }) =>
+    `/reader?path=${encodeURIComponent(n.path)}&series=${encodeURIComponent(n.series)}${listId ? `&list=${encodeURIComponent(listId)}` : ''}`;
 
   // Fork: guided view (panel by panel), remembered per browser; enterAtEnd = came back from the next page
   const [guided, setGuided] = useState(false);
@@ -272,9 +275,10 @@ function ReaderContent() {
       fetch(`/api/reader/pages?path=${encodeURIComponent(filePath)}`).then(res => res.json()),
       fetch(`/api/progress?path=${encodeURIComponent(filePath)}`, { headers: getAuthHeaders() }).then(res => res.json()),
       fetch(`/api/progress/bookmark?path=${encodeURIComponent(filePath)}`, { headers: getAuthHeaders() }).then(res => res.ok ? res.json() : { bookmarks: [] }),
-      seriesPath ? fetch(`/api/library/series?path=${encodeURIComponent(seriesPath)}`, { headers: getAuthHeaders() }).then(res => res.json()) : Promise.resolve(null)
+      seriesPath ? fetch(`/api/library/series?path=${encodeURIComponent(seriesPath)}`, { headers: getAuthHeaders() }).then(res => res.json()) : Promise.resolve(null),
+      listId ? fetch(`/api/reading-lists?id=${encodeURIComponent(listId)}`).then(res => res.ok ? res.json() : null).catch(() => null) : Promise.resolve(null)
     ])
-      .then(([pageData, progressData, bookmarkData, seriesData]) => {
+      .then(([pageData, progressData, bookmarkData, seriesData, listData]) => {
         if (pageData.error) throw new Error(pageData.error);
         setPages(pageData.pages);
         
@@ -290,12 +294,19 @@ function ReaderContent() {
                 (((a as any).isAnnual ? 1 : 0) - ((b as any).isAnnual ? 1 : 0)) || ((a.parsedNum ?? 0) - (b.parsedNum ?? 0)));
             const currentIdx = sortedIssues.findIndex((issue: any) => issue.fullPath === filePath);
             if (currentIdx > -1 && currentIdx < sortedIssues.length - 1) {
-                setNextIssue({ path: sortedIssues[currentIdx + 1].fullPath, name: sortedIssues[currentIdx + 1].name });
+                setNextIssue({ path: sortedIssues[currentIdx + 1].fullPath, name: sortedIssues[currentIdx + 1].name, series: seriesPath! });
             } else {
                 setNextIssue(null); // Ensure we clear it if it's the last issue
             }
         } else {
             setNextIssue(null);
+        }
+        // Reading list: the next entry after this one that has a file, whatever its series
+        const listItems: any[] = listData?.items || [];
+        const listIdx = listItems.findIndex(i => i.issue?.filePath === filePath);
+        if (listIdx > -1) {
+            const next = listItems.slice(listIdx + 1).find(i => i.issue?.filePath && i.issue.series?.folderPath);
+            setNextIssue(next ? { path: next.issue.filePath, name: `${next.issue.series.name} #${next.issue.number}`, series: next.issue.series.folderPath } : null);
         }
 
         // Load this user's saved reader preferences for the series (overriding the isManga RTL default
@@ -515,7 +526,7 @@ function ReaderContent() {
     } else if (currentIndex < pages.length - 1) {
         setCurrentIndex(pages.length - 1);
         if (!showUI) triggerPageToast();
-    } else if (nextIssue && seriesPath) {
+    } else if (nextIssue) {
         // Force sync the current issue as 100% complete before moving on
         fetch('/api/progress', {
             method: 'POST',
@@ -528,9 +539,10 @@ function ReaderContent() {
         }).catch(() => {});
 
         toast({ title: "Loading Next Issue...", description: nextIssue.name });
-        router.replace(`/reader?path=${encodeURIComponent(nextIssue.path)}&series=${encodeURIComponent(seriesPath)}`);
+        router.replace(nextIssueHref(nextIssue));
     }
-  }, [currentIndex, pages.length, nextIssue, seriesPath, router, toast, getStep, showUI, triggerPageToast, filePath, getAuthHeaders]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- nextIssueHref only reads listId from the URL
+  }, [currentIndex, pages.length, nextIssue, router, toast, getStep, showUI, triggerPageToast, filePath, getAuthHeaders]);
 
   const prevPage = useCallback(() => {
     if (currentIndex > 0) {
@@ -592,7 +604,7 @@ function ReaderContent() {
           setIsMarkedRead(true);
           await fetch('/api/progress', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ filePath, currentPage: pages.length, totalPages: pages.length }) });
       }
-      if (goNext && nextIssue && seriesPath) router.replace(`/reader?path=${encodeURIComponent(nextIssue.path)}&series=${encodeURIComponent(seriesPath)}`);
+      if (goNext && nextIssue) router.replace(nextIssueHref(nextIssue));
       else handleReaderClose();
   };
 
@@ -876,7 +888,7 @@ function ReaderContent() {
               {pages.length > 0 && (
                   <div className="w-full max-w-4xl px-6 py-16 flex flex-col items-center gap-4 text-white" onClick={e => e.stopPropagation()}>
                       <p className="text-sm uppercase tracking-widest text-white/60 font-bold">End of {issueName || 'issue'}</p>
-                      {nextIssue && seriesPath && (
+                      {nextIssue && (
                           <Button className="w-full max-w-md h-14 text-base font-bold bg-primary hover:bg-primary/90 text-primary-foreground" onClick={() => finishIssue(true)}>
                               <CheckCircle2 className="w-5 h-5 mr-2" /> Finished · Next: {nextIssue.name}
                           </Button>

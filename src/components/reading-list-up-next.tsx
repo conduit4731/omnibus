@@ -23,7 +23,7 @@ function ListTile({ list }: { list: any }) {
     const finished = !next && skipped.length === 0;
     // The next issue in front, the ones after it in reading order fanned out behind
     const stack = next ? [next, ...list.items.slice(index + 1, index + 3)] : skipped.length ? skipped.slice(0, 3) : list.items.slice(-3);
-    const open = (item: any) => router.push(`/reader?path=${encodeURIComponent(item.issue.filePath)}&series=${encodeURIComponent(item.issue.series.folderPath)}`);
+    const open = (item: any) => router.push(`/reader?path=${encodeURIComponent(item.issue.filePath)}&series=${encodeURIComponent(item.issue.series.folderPath)}&list=${encodeURIComponent(list.id)}`);
     return (
         <div className="flex-none w-[88%] sm:w-[calc(50%-0.5rem)] lg:w-[calc(33.333%-0.667rem)] 2xl:w-[calc(25%-0.75rem)] snap-start rounded-xl border border-border bg-card/60 p-3 flex gap-3">
             <button className="w-40 shrink-0 py-1" onClick={() => next && open(next)} title={next ? `Read ${label(next)}` : undefined}>

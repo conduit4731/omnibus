@@ -695,7 +695,7 @@ function ReadingListsContent() {
       const rank = (items: any[]) => ownedOf(items) === 0 ? 0 : ownedOf(items) < items.length ? 1 : 2;
       return [...m].map(([name, items]) => ({ name, items })).sort((a, b) => rank(a.items) - rank(b.items) || b.items.length - a.items.length);
   })();
-  const readerHref = (issue: any) => `/reader?path=${encodeURIComponent(issue.filePath)}&series=${encodeURIComponent(issue.series.folderPath)}`;
+  const readerHref = (issue: any) => `/reader?path=${encodeURIComponent(issue.filePath)}&series=${encodeURIComponent(issue.series.folderPath)}&list=${encodeURIComponent(activeListId || '')}`;
 
   return (
     <div className="container mx-auto py-10 px-6 max-w-[1400px] space-y-8 transition-colors duration-300">

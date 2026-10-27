@@ -54,7 +54,7 @@ function ReadButton({ l }: { l: ListSummary }) {
         const d = await fetch(`/api/reading-lists?id=${encodeURIComponent(l.id)}`).then(r => r.ok ? r.json() : null).catch(() => null)
         setBusy(false)
         const { item } = nextInList<any>(d?.items || [])
-        if (item?.issue?.filePath) router.push(`/reader?path=${encodeURIComponent(item.issue.filePath)}&series=${encodeURIComponent(item.issue.series.folderPath)}`)
+        if (item?.issue?.filePath) router.push(`/reader?path=${encodeURIComponent(item.issue.filePath)}&series=${encodeURIComponent(item.issue.series.folderPath)}&list=${encodeURIComponent(l.id)}`)
         else toast({ title: displayName(l.name), description: d ? "Nothing left to read that you own." : "Could not load the list." })
     }
     return (
