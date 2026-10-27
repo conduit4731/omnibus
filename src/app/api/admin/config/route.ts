@@ -7,7 +7,8 @@ import { Logger } from '@/lib/logger';
 import { getErrorMessage } from '@/lib/utils/error';
 import { AuditLogger } from '@/lib/audit-logger';
 import { syncSchedules } from '@/lib/queue';
-import { CACHE_DIR, LOGS_DIR, BACKUPS_DIR, WATCHED_DIR, UNMATCHED_DIR, serverPathProblem } from '@/lib/utils/paths';
+import { CACHE_DIR, LOGS_DIR, BACKUPS_DIR, WATCHED_DIR, UNMATCHED_DIR, serverPathProblem, trimFolder, trimFolderRows } from '@/lib/utils/paths';
+import { setupGate } from '@/lib/api-auth';
 import { encryptSecret, decryptSecret } from '@/lib/encryption';
 import { SECRET_SETTING_KEYS } from '@/lib/secret-keys';
 import { testAnnasArchiveKey } from '@/lib/annas-test';
@@ -102,19 +103,12 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const setupStatus = await prisma.systemSetting.findUnique({ where: { key: 'setup_complete' } });
-    const isSetupComplete = setupStatus?.value === 'true';
+    const gate = await setupGate();
+    const isSetupComplete = gate.setupComplete;
+    if (!gate.allowed) return NextResponse.json({ error: "Unauthorized." }, { status: 403 });
+    const userId: string | null = isSetupComplete ? (gate.session?.user as any)?.id ?? null : null;
 
-    let userId: string | null = null;
-
-    if (isSetupComplete) {
-        const authOptions = await getAuthOptions();
-        const session = await getServerSession(authOptions);
-        if (session?.user?.role !== 'ADMIN') {
-            return NextResponse.json({ error: "Unauthorized." }, { status: 403 });
-        }
-        userId = (session.user as any).id;
-    } else {
+    if (!isSetupComplete) {
         const userCount = await prisma.user.count();
         if (userCount === 0) {
              return NextResponse.json({ error: "Admin account must be created first." }, { status: 400 });
@@ -124,18 +118,11 @@ export async function POST(request: Request) {
     const body = await request.json();
 
     // Folders are stored exactly as they are checked below (beta.018 follow-up): serverPathProblem
-    // trims, so a folder typed with a space around it passed, was stored raw, and " /data/comics" is
-    // a RELATIVE path. Every value the check sees is the value that's written.
-    const trimmed = (v: unknown) => (typeof v === 'string' ? v.trim() : v);
-    const isRow = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
-    if (Array.isArray(body?.libraries)) {
-        body.libraries = body.libraries.map((lib: unknown) => (isRow(lib) ? { ...lib, path: trimmed(lib.path) } : lib));
-    }
-    if (Array.isArray(body?.downloadClients)) {
-        body.downloadClients = body.downloadClients.map((c: unknown) => (isRow(c) && 'localPath' in c ? { ...c, localPath: trimmed(c.localPath) } : c));
-    }
+    // trims, so a folder typed with a space around it passed and was stored raw. Every value the
+    // check sees is the value that's written.
+    if (body && typeof body === 'object') trimFolderRows(body);
     if (body?.settings && typeof body.settings === 'object' && 'download_path' in body.settings) {
-        body.settings = { ...body.settings, download_path: trimmed(body.settings.download_path) };
+        body.settings = { ...body.settings, download_path: trimFolder(body.settings.download_path) };
     }
 
     const {

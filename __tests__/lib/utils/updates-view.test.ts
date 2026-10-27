@@ -16,7 +16,8 @@ describe('dayKeyOf / dayLabel', () => {
         const now = new Date(2026, 6, 31, 12, 0);
         expect(dayLabel('2026-07-31', now)).toBe('Today');
         expect(dayLabel('2026-07-30', now)).toBe('Yesterday');
-        expect(dayLabel('2026-07-28', now)).toMatch(/July 28/);
+        // The runtime's own locale ("Tuesday, July 28" in CI, "Dienstag, 28. Juli" on a German machine)
+        expect(dayLabel('2026-07-28', now)).toBe(new Date(2026, 6, 28).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }));
     });
 
     it('handles Yesterday across a month boundary', () => {

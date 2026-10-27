@@ -62,6 +62,21 @@ export function serverPathProblem(
  * slips past a naive string `startsWith`. Shared by every endpoint that serves a file
  * from a client-supplied path (reader image/pages, library download).
  */
+/**
+ * Library and download-client folders as they are checked and stored, by Settings and Restore alike:
+ * " /data/comics" (a stray space) is a RELATIVE path (beta.018 follow-up).
+ */
+export const trimFolder = (v: unknown) => (typeof v === 'string' ? v.trim() : v);
+export function trimFolderRows<T extends { libraries?: unknown; downloadClients?: unknown }>(data: T): void {
+  const isRow = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
+  if (Array.isArray(data.libraries)) {
+    data.libraries = data.libraries.map((lib: unknown) => (isRow(lib) ? { ...lib, path: trimFolder(lib.path) } : lib));
+  }
+  if (Array.isArray(data.downloadClients)) {
+    data.downloadClients = data.downloadClients.map((c: unknown) => (isRow(c) && 'localPath' in c ? { ...c, localPath: trimFolder(c.localPath) } : c));
+  }
+}
+
 export function isPathWithinRoots(filePath: string, roots: string[]): boolean {
   const target = path.normalize(filePath).toLowerCase();
   return roots.some((r) => {

@@ -110,6 +110,22 @@ describe('Security: NextAuth OIDC Single Sign-On', () => {
         }));
     });
 
+    it('refuses an email the identity provider calls unverified, even when it matches an existing admin', async () => {
+        mocks.systemSettingFindMany.mockResolvedValue([{ key: 'oidc_enabled', value: 'true' }]);
+        mocks.queryRaw.mockResolvedValue([{ id: 'admin_1', email: 'admin@home.lan', role: 'ADMIN', isApproved: true }]);
+        mocks.userUpdate.mockClear();
+
+        const options = await getAuthOptions();
+        const signInCallback = options.callbacks!.signIn as any;
+        const result = await signInCallback({
+            user: { email: 'admin@home.lan', name: 'Not The Admin', emailVerifiedClaim: false, groups: [] },
+            account: { provider: 'oidc' }
+        });
+
+        expect(result).toBe(false);
+        expect(mocks.userUpdate).not.toHaveBeenCalled();
+    });
+
     it('should reject the login if group mapping is enforced and the user lacks required groups', async () => {
         // Simulate DB settings: Strict group mapping enforced
         mocks.systemSettingFindMany.mockResolvedValue([

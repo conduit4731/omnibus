@@ -17,10 +17,7 @@ export async function GET(request: Request) {
 
   Logger.log(`[Reader Debug] Page extraction requested for physical path: ${filePath}`, 'debug');
 
-  if (!filePath || !fs.existsSync(filePath)) {
-    Logger.log(`[Reader Debug] File not found on disk.`, 'debug');
-    return NextResponse.json({ error: "File not found" }, { status: 404 });
-  }
+  if (!filePath) return NextResponse.json({ error: "File not found" }, { status: 404 });
 
   try {
     const libraries = await prisma.library.findMany();
@@ -39,6 +36,12 @@ export async function GET(request: Request) {
     const accessiblePaths = await getAccessibleLibraryPaths((session?.user as any)?.id, (session?.user as any)?.role);
     if (!canAccessPath(accessiblePaths, filePath)) {
       return NextResponse.json({ error: "You don't have access to this library." }, { status: 403 });
+    }
+
+    // Only after the access checks: a 404 before them told any signed-in user which paths exist on the server
+    if (!fs.existsSync(filePath)) {
+      Logger.log(`[Reader Debug] File not found on disk.`, 'debug');
+      return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
 
     const isZip = filePath.toLowerCase().match(/\.(cbz|epub|zip)$/);

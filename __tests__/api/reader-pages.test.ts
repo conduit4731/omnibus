@@ -52,4 +52,10 @@ describe('GET /api/reader/pages (zip)', () => {
         expect(res.status).toBe(500);
         expect(await res.json()).toEqual({ error: 'Failed to read archive' });
     });
+
+    it('answers 403 for a path outside the libraries without checking whether it exists', async () => {
+        const res = await GET(req('/etc/shadow'));
+        expect(res.status).toBe(403);
+        expect(mocks.existsSync).not.toHaveBeenCalled();
+    });
 });

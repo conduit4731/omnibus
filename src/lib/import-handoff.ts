@@ -206,7 +206,7 @@ function tallyOf(rows: HandoffRow[]): HandoffTally {
 
 /** "issue #37" when the request names one, "the pack" when it does not. */
 function whatArrived(issueNumber: string | null, tally: HandoffTally): string {
-  if (issueNumber) return `issue #${issueNumber}`;
+  if (issueNumber) return `issue #${issueNumber} is`;
   const files = tally.imported;
   return files === 1 ? 'one file from this download is' : `${files} files from this download are`;
 }
@@ -215,7 +215,7 @@ function whatArrived(issueNumber: string | null, tally: HandoffTally): string {
  * The COMPLETED half of the verdict: the issue is in the library, so the request is done — one
  * "available" alert, and `notified: false` so the web bell lines up with it.
  */
-async function closeAsCompleted(req: ImportingRequest, tally: HandoffTally): Promise<void> {
+export async function closeAsCompleted(req: ImportingRequest, tally: HandoffTally): Promise<void> {
   const issueNumber = issueNumberOf(req);
   const label = req.activeDownloadName || (issueNumber ? `Issue #${issueNumber}` : 'Download');
   // A batch serves every request on the link, so the pack's title is the same string for all of

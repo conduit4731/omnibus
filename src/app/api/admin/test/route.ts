@@ -7,8 +7,7 @@ import { decryptSecret } from '@/lib/encryption';
 import { Logger } from '@/lib/logger';
 import { Mailer } from '@/lib/mailer';
 import { testAnnasArchiveKey } from '@/lib/annas-test';
-import { getServerSession } from 'next-auth/next';
-import { getAuthOptions } from '@/app/api/auth/[...nextauth]/options';
+import { setupGate } from '@/lib/api-auth';
 import { authFromSettings, metronGet } from '@/lib/metron/client';
 
 export async function POST(request: Request) {
@@ -16,13 +15,8 @@ export async function POST(request: Request) {
 
   try {
     // --- SECURITY ENFORCEMENT ---
-    const setupStatus = await prisma.systemSetting.findUnique({ where: { key: 'setup_complete' } });
-    if (setupStatus?.value === 'true') {
-        const authOptions = await getAuthOptions();
-        const session = await getServerSession(authOptions);
-        if (session?.user?.role !== 'ADMIN') {
-            return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
-        }
+    if (!(await setupGate()).allowed) {
+        return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
     }
 
     const body = await request.json();

@@ -12,7 +12,8 @@ import { cachedCvGet } from '@/lib/metadata/metadata-cache';
 import { syncSeriesMetadata } from '@/lib/metadata-fetcher';
 import { followSeries } from '@/lib/follows';
 import { seriesFolderSegments } from '@/lib/utils/naming';
-import { extractIssueNumber } from '@/lib/utils/issue-parser';
+import { issueNumberOf } from '@/lib/request-dedupe';
+import { closeAsCompleted } from '@/lib/import-handoff';
 import { normIssueNumber, normSeriesName, parseBatcaveTitle, pickCvVolume, pickSeries } from '@/lib/batcave';
 
 export type QueueIssue = { number: string; isAnnual?: boolean };
@@ -26,6 +27,21 @@ export type QueueBody = {
     listItemIds?: string[];      // or some of its items
     batch?: QueueBody[];         // several of the above in one press ("request all shown")
 };
+
+/** ComicVine lookups one button press may spend: ComicVine allows about 200 calls per hour per resource. */
+const LOOKUPS_PER_PRESS = 40;
+type Budget = { left: number };
+function spend(budget?: Budget) {
+    if (!budget) return;
+    if (budget.left <= 0) throw new Error(`ComicVine-Limit (${LOOKUPS_PER_PRESS} neue Serien pro Klick) erreicht: den Rest beim nächsten Klick`);
+    budget.left--;
+}
+
+/** The issue a request is for. A pack's name ("X-Men #1-50") names none — issueNumberOf would read it as #1. */
+function requestIssue(r: { issueNumber: string | null; activeDownloadName: string | null }): string {
+    if (!r.issueNumber && /#\s*[\d.]+\s*[-–]\s*#?\d/.test(r.activeDownloadName || '')) return '';
+    return normIssueNumber(issueNumberOf(r) || '');
+}
 
 async function cvKey(): Promise<string> {
     const key = (await prisma.systemSetting.findUnique({ where: { key: 'cv_api_key' } }))?.value;
@@ -68,9 +84,10 @@ export async function addSeriesFromCv(
     return { series, created: true };
 }
 
-async function seriesForCvId(cvId: string, userId?: string | null) {
+async function seriesForCvId(cvId: string, userId?: string | null, budget?: Budget) {
     const existing = await prisma.series.findUnique({ where: { metadataSource_metadataId: { metadataSource: 'COMICVINE', metadataId: cvId } } });
     if (existing) return existing;
+    spend(budget);
     const res = await cachedCvGet(`https://comicvine.gamespot.com/api/volume/4050-${cvId}/`, {
         params: { api_key: await cvKey(), format: 'json', field_list: 'id,name,start_year,publisher' },
         headers: { 'User-Agent': 'Omnibus/1.0' }, timeout: 10000,
@@ -84,7 +101,8 @@ async function seriesForCvId(cvId: string, userId?: string | null) {
  * "Detective Comics – Endgame (2015)" → the ComicVine volume it means (pickCvVolume), added like addSeriesFromCv.
  * Throws with the closest hits when ComicVine has no unambiguous match.
  */
-export async function seriesForTitle(title: string, userId?: string | null) {
+export async function seriesForTitle(title: string, userId?: string | null, budget?: Budget) {
+    spend(budget);
     const key = await cvKey();
     const parsed = parseBatcaveTitle(title);
     const res = await cachedCvGet('https://comicvine.gamespot.com/api/search/', {
@@ -137,7 +155,7 @@ export async function enqueue(seriesId: string, issues: QueueIssue[]): Promise<n
 }
 
 /** Reading-list items → series + issue numbers; items not in the library are resolved through ComicVine in batches of 100. */
-async function listTargets(readingListId?: string, listItemIds?: string[], userId?: string | null) {
+async function listTargets(readingListId: string | undefined, listItemIds: string[] | undefined, userId: string | null | undefined, budget: Budget) {
     const items = await prisma.readingListItem.findMany({
         where: listItemIds?.length ? { id: { in: listItemIds } } : { listId: readingListId },
         select: { cvIssueId: true, metadataSource: true, issue: { select: { seriesId: true, number: true, isAnnual: true, status: true } } },
@@ -158,7 +176,7 @@ async function listTargets(readingListId?: string, listItemIds?: string[], userI
         for (const r of res.data?.results || []) {
             if (!r.volume?.id || r.issue_number == null) continue;
             try {
-                const s = await seriesForCvId(String(r.volume.id), userId);
+                const s = await seriesForCvId(String(r.volume.id), userId, budget);
                 add(s.id, { number: String(r.issue_number) });
             } catch (e) {
                 Logger.log(`[Batcave] list item cv:${r.id}: ${e}`, 'warn');
@@ -169,15 +187,20 @@ async function listTargets(readingListId?: string, listItemIds?: string[], userI
 }
 
 /** Handles one button press. Returns the number of queued issues. */
-export async function queueRequest(body: QueueBody, userId?: string | null): Promise<number> {
+export async function queueRequest(body: QueueBody, userId?: string | null, budget: Budget = { left: LOOKUPS_PER_PRESS }): Promise<number> {
     if (body.batch?.length) {
         let n = 0;
-        for (const b of body.batch.slice(0, 500)) n += await queueRequest({ ...b, batch: undefined }, userId).catch(() => 0);
+        for (const b of body.batch.slice(0, 500)) {
+            n += await queueRequest({ ...b, batch: undefined }, userId, budget).catch(e => {
+                Logger.log(`[Batcave] queue ${b.title || b.seriesId || b.cvId || b.readingListId}: ${e instanceof Error ? e.message : e}`, 'warn');
+                return 0;
+            });
+        }
         return n;
     }
     if (body.readingListId || body.listItemIds?.length) {
         let n = 0;
-        for (const [seriesId, issues] of await listTargets(body.readingListId, body.listItemIds, userId)) n += await enqueue(seriesId, issues);
+        for (const [seriesId, issues] of await listTargets(body.readingListId, body.listItemIds, userId, budget)) n += await enqueue(seriesId, issues);
         return n;
     }
     let seriesId = body.seriesId;
@@ -189,10 +212,10 @@ export async function queueRequest(body: QueueBody, userId?: string | null): Pro
             if (!s) throw new Error('Serie ist noch nicht in Omnibus: erst abonnieren, dann über Batcave laden');
             seriesId = s.id;
         } else {
-            seriesId = (await seriesForCvId(String(body.cvId), userId)).id;
+            seriesId = (await seriesForCvId(String(body.cvId), userId, budget)).id;
         }
     }
-    if (!seriesId && body.title) seriesId = (await seriesForTitle(body.title, userId)).series.id;
+    if (!seriesId && body.title) seriesId = (await seriesForTitle(body.title, userId, budget)).series.id;
     if (!seriesId) throw new Error('seriesId, cvId, title or readingListId required');
     return enqueue(seriesId, body.issues?.length ? body.issues : await missingIssues(seriesId));
 }
@@ -230,7 +253,7 @@ export async function queueAwaitingForBatcave(userId?: string | null, maxLookups
             }
         }
         const seriesId = seriesByKey.get(key);
-        const number = normIssueNumber(r.issueNumber || extractIssueNumber(name));
+        const number = requestIssue(r);
         if (!seriesId || !number) continue;
         const job = await prisma.batcaveJob.findUnique({ where: { seriesId_number_isAnnual: { seriesId, number, isAnnual: false } } });
         if (!job) { await prisma.batcaveJob.create({ data: { seriesId, number } }); queued++; }
@@ -247,27 +270,37 @@ export async function queueAwaitingForBatcave(userId?: string | null, maxLookups
 export async function closeDeliveredRequests(): Promise<number> {
     const reqs = await prisma.request.findMany({
         where: { status: { in: ['AWAITING_RELEASE', 'MANUAL_DDL', 'NEEDS_REVIEW', 'STALLED', 'FAILED', 'ERROR'] } },
-        select: { id: true, volumeId: true, metadataSource: true, issueNumber: true, activeDownloadName: true },
+        select: { id: true, volumeId: true, metadataSource: true, issueNumber: true, activeDownloadName: true, imageUrl: true, updatedAt: true, user: { select: { username: true, email: true } } },
     });
     if (!reqs.length) return 0;
     const series = await prisma.series.findMany({ select: { id: true, name: true, year: true, folderPath: true, metadataId: true, metadataSource: true } });
     const byMeta = new Map(series.map(s => [`${s.metadataSource}:${s.metadataId}`, s.id]));
+    const ids = new Set(series.map(s => s.id));
+    // pickSeries only ever looks at series of the same normalized name: group them once, not once per request
+    const byName = new Map<string, typeof series>();
+    for (const s of series) {
+        const k = normSeriesName(s.name);
+        byName.set(k, [...(byName.get(k) || []), s]);
+    }
+    const byTitle = (title: string) => {
+        const t = parseBatcaveTitle(title);
+        return pickSeries(byName.get(normSeriesName(t ? t.name : title)) || [], title);
+    };
     const targets = reqs.map(r => {
         const name = (r.activeDownloadName || '').replace(/\.(cbz|cbr|zip|rar|cb7|epub)$/i, '');
         const seriesId = r.volumeId && r.volumeId !== '0'
-            ? byMeta.get(`${r.metadataSource}:${r.volumeId}`) || series.find(s => s.id === r.volumeId)?.id
-            : pickSeries(series, name.replace(/\s*#\S+/, ''))?.id;
-        return { id: r.id, seriesId, number: normIssueNumber(r.issueNumber || extractIssueNumber(name)) };
+            ? byMeta.get(`${r.metadataSource}:${r.volumeId}`) || (ids.has(r.volumeId) ? r.volumeId : undefined)
+            : byTitle(name.replace(/\s*#\S+/, ''))?.id;
+        return { req: r, seriesId, number: requestIssue(r) };
     }).filter(t => t.seriesId && t.number);
     const seriesIds = [...new Set(targets.map(t => t.seriesId!))];
     const delivered = new Set([
         ...(await prisma.batcaveJob.findMany({ where: { seriesId: { in: seriesIds }, status: 'DONE', isAnnual: false }, select: { seriesId: true, number: true } })),
         ...(await prisma.issue.findMany({ where: { seriesId: { in: seriesIds }, status: 'DOWNLOADED', isAnnual: false }, select: { seriesId: true, number: true } })),
     ].map(x => `${x.seriesId}|${normIssueNumber(x.number)}`));
-    const done = targets.filter(t => delivered.has(`${t.seriesId}|${t.number}`)).map(t => t.id);
-    if (done.length) {
-        await prisma.request.updateMany({ where: { id: { in: done } }, data: { status: 'COMPLETED', progress: 100 } });
-        Logger.log(`[Batcave] Closed ${done.length} delivered request(s)`, 'info');
-    }
+    const done = targets.filter(t => delivered.has(`${t.seriesId}|${t.number}`)).map(t => t.req);
+    // The same close as an import that landed: COMPLETED, notified: false and one "available" alert
+    for (const r of done) await closeAsCompleted(r, { imported: 1, unmatched: 0, reason: 'handoff' });
+    if (done.length) Logger.log(`[Batcave] Closed ${done.length} delivered request(s)`, 'info');
     return done.length;
 }

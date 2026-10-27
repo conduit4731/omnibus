@@ -43,7 +43,7 @@ jobs:
       - uses: actions/setup-node@v4
         if: env.NEW == '1' || inputs.test_only
         with:
-          node-version: '22'
+          node-version: '26'  # same as the Docker image (node:26-slim)
 
       - name: Type-check and test the merge
         if: env.NEW == '1' || inputs.test_only

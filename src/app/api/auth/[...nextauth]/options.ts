@@ -73,19 +73,32 @@ export async function getAuthOptions(): Promise<NextAuthOptions> {
         totpCode: { label: "2FA Code", type: "text" },
         remember: { label: "Keep me logged in", type: "checkbox" }
       },
-      async authorize(credentials) {
+      async authorize(credentials, req) {
           if (!credentials?.username || !credentials?.password) return null;
           const input = credentials.username.toLowerCase();
+          // 5 failures lock this username for the caller's IP only; a lock on the username alone let anyone lock the
+          // admin out with 5 wrong passwords. X-Forwarded-For can be forged, so 50 failures from anywhere still lock
+          // the username for everyone: that caps guessing while making a lockout cost far more than 5 requests.
+          const headers = (req?.headers || {}) as Record<string, string | undefined>;
+          const ip = String(headers['x-forwarded-for'] || headers['x-real-ip'] || 'unknown').split(',')[0].trim();
+          const ipKey = `${ip}|${input}`;
+          const ipData = loginAttempts.get(ipKey) || { count: 0, lockoutUntil: 0 };
           const attemptData = loginAttempts.get(input) || { count: 0, lockoutUntil: 0 };
-          if (Date.now() < attemptData.lockoutUntil) {
-              const remainingMinutes = Math.ceil((attemptData.lockoutUntil - Date.now()) / 60000);
+          const lockoutUntil = Math.max(ipData.lockoutUntil, attemptData.lockoutUntil);
+          if (Date.now() < lockoutUntil) {
+              const remainingMinutes = Math.ceil((lockoutUntil - Date.now()) / 60000);
               throw new Error(`Account locked due to too many failed attempts. Try again in ${remainingMinutes} minutes.`);
           }
           const users: any[] = await prisma.$queryRaw`SELECT * FROM "User" WHERE LOWER(username) = ${input} OR LOWER(email) = ${input} LIMIT 1`;
           const user = users[0];
           const handleFailedAttempt = () => {
+              // Forged IPs and made-up usernames each add an entry: drop the ones no longer locking anything
+              if (loginAttempts.size > 10000) for (const [k, d] of loginAttempts) if (d.lockoutUntil < Date.now()) loginAttempts.delete(k);
+              ipData.count += 1;
+              if (ipData.count >= 5) ipData.lockoutUntil = Date.now() + 15 * 60 * 1000;
               attemptData.count += 1;
-              if (attemptData.count >= 5) attemptData.lockoutUntil = Date.now() + 15 * 60 * 1000;
+              if (attemptData.count >= 50) attemptData.lockoutUntil = Date.now() + 15 * 60 * 1000;
+              loginAttempts.set(ipKey, ipData);
               loginAttempts.set(input, attemptData);
               throw new Error("Invalid username or password");
           };
@@ -104,6 +117,7 @@ export async function getAuthOptions(): Promise<NextAuthOptions> {
               if (!isValid) throw new Error("2FA_INVALID");
           }
           loginAttempts.delete(input);
+          loginAttempts.delete(ipKey);
           // Every tier flag, like the SSO path below: the browser's request buttons read canRequest
           // from the session, and a password sign-in without it showed every Hero "Requests not enabled".
           return { id: user.id, name: user.username, email: user.email, role: user.role, canRequest: user.canRequest, autoApproveRequests: user.autoApproveRequests, canDownload: user.canDownload, canCreateGlobalLists: user.canCreateGlobalLists, image: user.avatar, sessionVersion: user.sessionVersion, remember: credentials.remember === "true" };
@@ -131,6 +145,7 @@ export async function getAuthOptions(): Promise<NextAuthOptions> {
           id: profile.sub, 
           name: profile.name || profile.preferred_username || profile.nickname || profile.email?.split('@')[0] || "SSO User", 
           email: profile.email,
+          emailVerifiedClaim: profile.email_verified,
           groups: profile.groups || profile.roles || [] 
         };
       },
@@ -145,6 +160,13 @@ export async function getAuthOptions(): Promise<NextAuthOptions> {
         if (account?.provider === "credentials") return true;
         if (account?.provider === "oidc") {
           if (!user.email) return false;
+          // Accounts are matched by email: an address the IdP itself calls unverified could be anyone's, the admin's
+          // included. Explicit false only, so IdPs that leave the claim out keep working.
+          const verified = (user as any).emailVerifiedClaim;
+          if (verified === false || verified === 'false') {
+              Logger.log(`[SSO] Login rejected for ${user.email}: the identity provider reports this email as unverified.`, 'warn');
+              return false;
+          }
           Logger.log(`[SSO Debug] Processing sign in for: ${user.email}`, 'debug');
           const inputEmail = user.email.toLowerCase();
           const dbUsers: any[] = await prisma.$queryRaw`SELECT * FROM "User" WHERE LOWER(email) = ${inputEmail} LIMIT 1`;

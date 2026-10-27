@@ -1,8 +1,8 @@
 // src/app/api/admin/restore/route.ts
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { getServerSession } from 'next-auth/next';
-import { getAuthOptions } from '@/app/api/auth/[...nextauth]/options';
+import { setupGate } from '@/lib/api-auth';
+import { trimFolder, trimFolderRows } from '@/lib/utils/paths';
 import { Logger } from '@/lib/logger';
 import crypto from 'crypto';
 import { getErrorMessage } from '@/lib/utils/error';
@@ -11,19 +11,9 @@ import { storedFolderProblem } from '@/lib/utils/stored-folder';
 
 export async function POST(request: Request) {
     try {
-        // 1. Fetch the session unconditionally so it is available globally in this function
-        const authOptions = await getAuthOptions();
-        const session = await getServerSession(authOptions);
-
-        // 2. Check if the initial setup is complete
-        const setupStatus = await prisma.systemSetting.findUnique({ where: { key: 'setup_complete' } });
-        
-        // 3. Enforce security ONLY if setup is complete
-        if (setupStatus?.value === 'true') {
-            if (session?.user?.role !== 'ADMIN') {
-                return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-            }
-        }
+        // Open during the setup wizard, admins only after; the session is also the audit log's actor
+        const { session, allowed } = await setupGate();
+        if (!allowed) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
         const formData = await request.formData();
         const file = formData.get('file') as File;
@@ -66,17 +56,10 @@ export async function POST(request: Request) {
         // The folders Settings trims are trimmed here too, before anything is written (beta.018
         // follow-up): a backup made before Settings trimmed them can carry " /data/comics", which is
         // a relative path.
-        const trimmed = (v: unknown) => (typeof v === 'string' ? v.trim() : v);
-        const isRow = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
         const data = backup.data;
-        if (Array.isArray(data.libraries)) {
-            data.libraries = data.libraries.map((lib: unknown) => (isRow(lib) ? { ...lib, path: trimmed(lib.path) } : lib));
-        }
-        if (Array.isArray(data.downloadClients)) {
-            data.downloadClients = data.downloadClients.map((c: unknown) => (isRow(c) && 'localPath' in c ? { ...c, localPath: trimmed(c.localPath) } : c));
-        }
+        trimFolderRows(data);
         if (Array.isArray(data.settings)) {
-            data.settings = data.settings.map((s: unknown) => (isRow(s) && s.key === 'download_path' ? { ...s, value: trimmed(s.value) } : s));
+            data.settings = data.settings.map((s: any) => (s?.key === 'download_path' ? { ...s, value: trimFolder(s.value) } : s));
         }
 
         await prisma.$transaction(async (tx) => {
@@ -143,7 +126,7 @@ export async function POST(request: Request) {
             const problem = storedFolderProblem(lib?.path, { example: '/data/comics' });
             if (problem) warnings.push(`Root Path of library "${lib?.name || 'Unnamed'}": ${problem}`);
         }
-        const downloadPath = (Array.isArray(data.settings) ? data.settings : []).find((s: unknown) => isRow(s) && s.key === 'download_path')?.value;
+        const downloadPath = (Array.isArray(data.settings) ? data.settings : []).find((s: any) => s?.key === 'download_path')?.value;
         if (typeof downloadPath === 'string' && downloadPath.trim()) {
             const problem = storedFolderProblem(downloadPath, { example: '/data/downloads' });
             if (problem) warnings.push(`Download Scan Root: ${problem}`);

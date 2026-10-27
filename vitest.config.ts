@@ -23,6 +23,9 @@ export default defineConfig({
     // Replaces ~99 per-file beforeEach(vi.clearAllMocks) blocks. This is mockClear (call history
     // only) — implementations like setup-global's mockResolvedValue defaults survive every test.
     clearMocks: true,
+    // Node 25+ ships its own global localStorage (empty without --localstorage-file), which hides
+    // jsdom's: component suites then fail on localStorage.getItem/clear. The Docker image runs Node 26.
+    execArgv: Number(process.versions.node.split('.')[0]) >= 25 ? ['--no-experimental-webstorage'] : [],
     // Global mocks for logger/audit/auth-options/notifications/next-cache — the per-file copies
     // these replace lived in ~130 files. See __tests__/helpers/setup-global.ts.
     setupFiles: ['./__tests__/helpers/setup-global.ts'],

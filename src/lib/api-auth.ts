@@ -2,6 +2,16 @@
 import { prisma } from './db';
 import crypto from 'crypto';
 import { Logger } from './logger';
+import { getServerSession } from 'next-auth/next';
+import { getAuthOptions } from '@/app/api/auth/[...nextauth]/options';
+
+/** Routes the setup wizard calls before anyone can sign in: open until setup is complete, then admins only. */
+export async function setupGate() {
+    const setupStatus = await prisma.systemSetting.findUnique({ where: { key: 'setup_complete' } });
+    const setupComplete = setupStatus?.value === 'true';
+    const session = await getServerSession(await getAuthOptions());
+    return { setupComplete, session, allowed: !setupComplete || session?.user?.role === 'ADMIN' };
+}
 
 /// Constant-time equality for shared secrets. Guards length first (timingSafeEqual throws on unequal
 /// buffer lengths), then compares in constant time so the endpoint can't be used as a byte-by-byte

@@ -8,6 +8,7 @@ const m = vi.hoisted(() => ({
     jobs: new Map<string, any>(),
     updated: [] as any[],
     created: [] as any[],
+    closed: [] as string[],
     cvGet: vi.fn(),
 }));
 
@@ -41,12 +42,13 @@ vi.mock('@/lib/metadata/metadata-cache', () => ({ cachedCvGet: m.cvGet }));
 vi.mock('@/lib/metadata-fetcher', () => ({ syncSeriesMetadata: vi.fn() }));
 vi.mock('@/lib/follows', () => ({ followSeries: vi.fn() }));
 vi.mock('@/lib/logger', () => ({ Logger: { log: vi.fn() } }));
+vi.mock('@/lib/import-handoff', () => ({ closeAsCompleted: vi.fn(async (r: any) => { m.closed.push(r.id); }) }));
 
-import { closeDeliveredRequests, queueAwaitingForBatcave } from '@/lib/batcave-queue';
+import { closeDeliveredRequests, queueAwaitingForBatcave, queueRequest } from '@/lib/batcave-queue';
 
 describe('queueAwaitingForBatcave', () => {
     beforeEach(() => {
-        m.jobs.clear(); m.updated = []; m.created = [];
+        m.jobs.clear(); m.updated = []; m.created = []; m.closed = [];
         m.cvGet.mockReset().mockResolvedValue({ data: { results: [] } }); // ComicVine finds nothing
     });
 
@@ -71,8 +73,23 @@ describe('queueAwaitingForBatcave', () => {
             { id: 'b', volumeId: '100', metadataSource: 'COMICVINE', issueNumber: '2', activeDownloadName: 'Flash #2' },         // job DONE
             { id: 'c', volumeId: '100', metadataSource: 'COMICVINE', issueNumber: '3', activeDownloadName: 'Flash #3' },         // nothing yet
             { id: 'r', volumeId: '0', metadataSource: 'COMICVINE', issueNumber: '1', activeDownloadName: 'Detective Comics – Endgame #1 (2015).zip' }, // on disk
+            // A pack and a whole-title request name no issue: #1 being on disk must not close them
+            { id: 'p', volumeId: '7', metadataSource: 'COMICVINE', issueNumber: null, activeDownloadName: 'Detective Comics: Endgame #1-6 (2015)' },
+            { id: 'v', volumeId: '7', metadataSource: 'COMICVINE', issueNumber: null, activeDownloadName: 'Detective Comics: Endgame (2015)' },
         ];
         expect(await closeDeliveredRequests()).toBe(2);
-        expect(m.updated[0].where.id.in).toEqual(['b', 'r']);
+        expect(m.closed).toEqual(['b', 'r']);
+    });
+
+    it('a pack request is never queued as its first issue', async () => {
+        m.requests = [{ id: 'p', volumeId: '100', metadataSource: 'COMICVINE', issueNumber: null, activeDownloadName: 'Flash #12-50' }];
+        await queueAwaitingForBatcave(null, 1);
+        expect(m.created).toEqual([]);
+    });
+
+    it('one "Alle über Batcave" press spends at most 40 ComicVine lookups', async () => {
+        const batch = Array.from({ length: 45 }, (_, i) => ({ title: `Unknown ${i} (2020)` }));
+        expect(await queueRequest({ batch })).toBe(0);
+        expect(m.cvGet).toHaveBeenCalledTimes(40); // every search finds nothing; the last 5 are refused before calling
     });
 });

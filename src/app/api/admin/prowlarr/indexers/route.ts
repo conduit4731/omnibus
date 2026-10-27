@@ -2,21 +2,15 @@
 import { NextResponse } from 'next/server';
 import axios from 'axios';
 import { prisma } from '@/lib/db';
-import { getServerSession } from 'next-auth/next';
-import { getAuthOptions } from '@/app/api/auth/[...nextauth]/options';
+import { setupGate } from '@/lib/api-auth';
 import { Logger } from '@/lib/logger'; 
 import { getErrorMessage } from '@/lib/utils/error';
 
 export async function POST(request: Request) {
   try {
     // --- SECURITY ENFORCEMENT ---
-    const setupStatus = await prisma.systemSetting.findUnique({ where: { key: 'setup_complete' } });
-    if (setupStatus?.value === 'true') {
-        const authOptions = await getAuthOptions();
-        const session = await getServerSession(authOptions);
-        if (session?.user?.role !== 'ADMIN') {
-            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-        }
+    if (!(await setupGate()).allowed) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const { url, apiKey, headers } = await request.json();
@@ -31,7 +25,12 @@ export async function POST(request: Request) {
 
     const extraHeaders: Record<string, string> = {};
     if (headers && Array.isArray(headers)) {
-        headers.forEach((h: any) => { if (h.key && h.value) extraHeaders[h.key] = h.value; });
+        // Settings shows saved header values masked; '********' means "the saved value" (as in admin/test)
+        const saved = headers.some((h: any) => h.value === '********') ? await prisma.customHeader.findMany() : [];
+        headers.forEach((h: any) => {
+            const value = h.value === '********' ? saved.find(s => s.id === h.id)?.value : h.value;
+            if (h.key && value) extraHeaders[h.key] = value;
+        });
     }
 
     Logger.log(`[Prowlarr] Fetching indexers from: ${cleanUrl}`, 'info'); 
