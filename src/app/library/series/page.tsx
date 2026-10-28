@@ -182,10 +182,8 @@ function SeriesContent() {
   const unmatchedIssues = downloadedIssues.filter(i => i.matchState === 'UNMATCHED' || i.metadataId?.startsWith('unmatched'));
   const matchedDownloadedIssues = downloadedIssues.filter(i => i.matchState !== 'UNMATCHED' && !i.metadataId?.startsWith('unmatched'));
 
-  const [reviews, setReviews] = useState<any[]>([]);
   const [communityRating, setCommunityRating] = useState<{avg: number, total: number}>({ avg: 0, total: 0 });
-  const [userReview, setUserReview] = useState({ rating: 0, text: "" });
-  const [submittingReview, setSubmittingReview] = useState(false);
+  const [myRating, setMyRating] = useState(0);
 
   const { toast } = useToast();
 
@@ -391,10 +389,8 @@ function SeriesContent() {
           .then(res => res.json())
           .then(data => {
               if (data.reviews) {
-                  setReviews(data.reviews);
                   setCommunityRating({ avg: data.avgRating, total: data.total });
-                  const myReview = data.reviews.find((r: any) => r.userId === (session?.user as any)?.id);
-                  if (myReview) setUserReview({ rating: myReview.rating, text: myReview.text || "" });
+                  setMyRating(data.reviews.find((r: any) => r.userId === (session?.user as any)?.id)?.rating || 0);
               }
           });
   }, [seriesInfo.id, session]);
@@ -1129,23 +1125,22 @@ function SeriesContent() {
       }
   }
 
-  const submitReview = async () => {
-    setSubmittingReview(true);
+  // A star click saves straight away
+  const rate = async (rating: number) => {
+    const before = myRating;
+    setMyRating(rating);
     try {
-        await fetch('/api/reviews', {
+        const res = await fetch('/api/reviews', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ seriesId: seriesInfo.id, rating: userReview.rating, text: userReview.text })
+            body: JSON.stringify({ seriesId: seriesInfo.id, rating })
         });
-        toast({ title: "Review Saved!" });
-        const res = await fetch(`/api/reviews?seriesId=${seriesInfo.id}`);
-        const data = await res.json();
-        setReviews(data.reviews);
+        if (!res.ok) throw new Error();
+        const data = await (await fetch(`/api/reviews?seriesId=${seriesInfo.id}`)).json();
         setCommunityRating({ avg: data.avgRating, total: data.total });
-    } catch (e) {
-        toast({ title: "Failed to save review", variant: "destructive" });
-    } finally {
-        setSubmittingReview(false);
+    } catch {
+        setMyRating(before);
+        toast({ title: "Failed to save rating", variant: "destructive" });
     }
   }
 
@@ -1578,61 +1573,19 @@ function SeriesContent() {
                   </div>
               </div>
 
-              {/* --- COMMUNITY REVIEWS SECTION --- */}
-              <div className="space-y-6 mt-8 pt-8 border-t border-border">
-                  <div className="flex items-center justify-between">
-                      <h4 className="font-black text-xl text-foreground tracking-tight">Community Reviews</h4>
-                      {communityRating.total > 0 && (
-                          <div className="flex items-center gap-2">
-                              <Star className="w-5 h-5 fill-yellow-500 text-yellow-500" />
-                              <span className="font-bold text-lg">{communityRating.avg} / 5</span>
-                              <span className="text-sm text-muted-foreground">({communityRating.total} ratings)</span>
-                          </div>
-                      )}
-                  </div>
-
-                  {/* Review Form */}
-                  <div className="bg-muted/30 p-4 rounded-xl border border-border space-y-4">
-                      <h5 className="text-sm font-bold">Leave a Review</h5>
-                      <div className="flex gap-1">
-                          {[1, 2, 3, 4, 5].map(star => (
-                              <Star 
-                                  key={star} 
-                                  className={cn("w-6 h-6 cursor-pointer transition-colors", userReview.rating >= star ? 'fill-yellow-500 text-yellow-500' : 'text-muted-foreground')}
-                                  onClick={() => setUserReview({ ...userReview, rating: star })}
-                              />
-                          ))}
-                      </div>
-                      <Textarea 
-                          placeholder="Write your thoughts here (optional)..." 
-                          value={userReview.text}
-                          onChange={(e) => setUserReview({ ...userReview, text: e.target.value })}
-                          className="bg-background"
-                      />
-                      <Button onClick={submitReview} disabled={submittingReview || userReview.rating === 0}>
-                          {submittingReview ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null} Submit Review
-                      </Button>
-                  </div>
-
-                  {/* Review List */}
-                  <div className="space-y-4">
-                      {reviews.map(r => (
-                          <div key={r.id} className="p-4 border border-border rounded-lg bg-background shadow-sm">
-                              <div className="flex items-center justify-between mb-2">
-                                  <div className="flex items-center gap-2">
-                                      <div className="w-6 h-6 bg-primary/20 rounded-full flex items-center justify-center font-bold text-[10px] text-primary">
-                                          {r.user.username.charAt(0).toUpperCase()}
-                                      </div>
-                                      <span className="font-bold text-sm">{r.user.username}</span>
-                                  </div>
-                                  <div className="flex gap-0.5">
-                                      {[...Array(r.rating)].map((_, i) => <Star key={i} className="w-3 h-3 fill-yellow-500 text-yellow-500" />)}
-                                  </div>
-                              </div>
-                              {r.text && <p className="text-sm text-muted-foreground">{r.text}</p>}
-                          </div>
+              {/* --- RATING (fork: stars only, no review texts) --- */}
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-8 pt-8 border-t border-border">
+                  <h4 className="font-black text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Your Rating</h4>
+                  <div className="flex gap-1" role="radiogroup" aria-label="Your rating">
+                      {[1, 2, 3, 4, 5].map(star => (
+                          <button key={star} type="button" role="radio" aria-checked={myRating === star} aria-label={`${star} star${star > 1 ? 's' : ''}`} onClick={() => rate(star)}>
+                              <Star className={cn("w-6 h-6 transition-colors", myRating >= star ? 'fill-yellow-500 text-yellow-500' : 'text-muted-foreground hover:text-yellow-500')} />
+                          </button>
                       ))}
                   </div>
+                  {communityRating.total > 1 && (
+                      <span className="text-sm text-muted-foreground">Ø {communityRating.avg} / 5 ({communityRating.total} ratings)</span>
+                  )}
               </div>
 
             </>) }, { value: 'issues', label: 'Issues', content: (<>

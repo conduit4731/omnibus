@@ -6,10 +6,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import localforage from "localforage"
 import {
-  ChevronLeft, ChevronRight, X, Loader2, Maximize, Minimize, BookOpen,
-  Settings as SettingsIcon, SkipBack, SkipForward, CheckCircle2,
-  Paintbrush, LayoutTemplate, MonitorPlay, Zap, ZoomIn, ZoomOut, Search, AlignHorizontalSpaceAround,
-  Sun, Bookmark, CloudDownload, Scissors, Flag, Tag, Plus, ScanSearch
+  ChevronLeft, ChevronRight, X, Loader2, Maximize, Minimize, Check,
+  Settings as SettingsIcon, Bookmark, CloudDownload, Flag, Tag, Plus, ScanSearch
 } from "lucide-react"
 import { GuidedSettingsSection, GuidedView, useGuidedSettings } from "@/components/guided-view"
 import { useSession } from "next-auth/react"
@@ -18,7 +16,42 @@ import { useToast } from "@/components/ui/use-toast"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
+
+// Fork: Batcave's reader look — top bar height, magnifier size and power
+const BAR_H = 54;
+const LENS_SIZE = 240;
+const LENS_ZOOM = 2.5;
+
+function SegLabel({ children }: { children: React.ReactNode }) {
+  return <div className="px-1 text-[11px] font-semibold uppercase tracking-[0.77px] text-[rgba(235,235,245,0.4)]">{children}</div>;
+}
+
+// A settings row: small-caps label over a segmented control, the chosen segment in orange
+function Seg<T extends string>({ label, value, options, onChange }: { label: string, value: T, options: [T, string][], onChange: (v: T) => void }) {
+  return (
+    <div className="space-y-2">
+      <SegLabel>{label}</SegLabel>
+      <div role="radiogroup" aria-label={label} className="flex h-[38px] p-[2px] rounded-[10px] bg-[rgba(118,118,128,0.24)]">
+        {options.map(([v, l]) => (
+          <button key={v} type="button" role="radio" aria-checked={v === value} onClick={() => onChange(v)}
+            className={`flex-1 h-[34px] rounded-[8px] text-[13px] transition-colors ${v === value ? 'bg-[#ffa332] text-black font-semibold shadow-[0_2px_8px_rgba(255,163,50,0.35)]' : 'text-[rgba(235,235,245,0.6)] font-medium hover:text-[rgba(235,235,245,0.87)]'}`}>
+            {l}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// A top-bar tool: icon plus label (label from xl up), orange while on
+function ToolBtn({ icon, label, active, className, ...rest }: { icon: React.ReactNode, label?: string, active?: boolean } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button type="button" title={label} aria-label={rest.title || label} {...rest}
+      className={`flex shrink-0 items-center gap-1.5 font-medium disabled:opacity-40 hover:text-white [&_svg]:size-4 pointer-coarse:[&_svg]:size-5 pointer-coarse:min-w-9 pointer-coarse:h-9 justify-center ${active ? 'text-[#ffa332]' : 'text-[rgba(235,235,245,0.87)]'} ${className || ''}`}>
+      {icon}{label && <span className="hidden xl:inline">{label}</span>}
+    </button>
+  );
+}
 
 function ReaderContent() {
   if (typeof document !== 'undefined') {
@@ -143,21 +176,17 @@ function ReaderContent() {
   // UI States
   const [showUI, setShowUI] = useState(false); 
   const [hoverTop, setHoverTop] = useState(false);
-  const [hoverBottom, setHoverBottom] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   // New Reader Features State
   const [zoomLevel, setZoomLevel] = useState(100);
-  const [jumpInput, setJumpInput] = useState("");
-  const [isJumping, setIsJumping] = useState(false);
   const [pageLoadError, setPageLoadError] = useState(false);
 
   // Mouse Panning State
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 });
-  const [dragDistance, setDragDistance] = useState(0);
 
   // TOUCH/SWIPE STATE
   const touchStartX = useRef(0);
@@ -179,20 +208,30 @@ function ReaderContent() {
   const [isIdle, setIsIdle] = useState(false);
   const idleTimeout = useRef<NodeJS.Timeout | null>(null);
 
-  // Settings State (Added Brightness, Contrast & Cropping)
+  // Settings (fork: Batcave's reader settings). readingMode/pageLayout keep their saved names; Batcave's
+  // Paginated / Spread / Web / Infinite map onto them plus `infinite`.
   const [settings, setSettings] = useState({
-      readingMode: 'ltr', 
-      animateTransitions: 'true', 
-      backgroundColor: 'black', 
-      scaleType: 'fit-height', 
+      readingMode: 'ltr',
       pageLayout: 'single',
-      spreadGap: 'none',
+      infinite: false,
+      topBar: 'scroll' as 'scroll' | 'hidden',
+      magnifier: false,
+      clickNav: 'both' as 'both' | 'forward',
+      autoMarkRead: true,
+      autoBookmark: true,
+      imageWidth: 'auto' as 'auto' | 'manual' | 'at-least' | 'fit-height',
+      widthPx: 900,
       brightness: 100,
-      contrast: 100,
       cropMargins: false
   });
+  const [tocOpen, setTocOpen] = useState(false);
+  const [scrolledDown, setScrolledDown] = useState(false);
+  const lastScrollY = useRef(0);
+  const zHeld = useRef(false);
+  const [lens, setLens] = useState<{ x: number, y: number, src: string, w: number, h: number, bx: number, by: number } | null>(null);
 
   const [nextIssue, setNextIssue] = useState<{ path: string, name: string, series: string } | null>(null);
+  const [prevIssue, setPrevIssue] = useState<{ path: string, name: string, series: string } | null>(null);
   const nextIssueHref = (n: { path: string, series: string }) =>
     `/reader?path=${encodeURIComponent(n.path)}&series=${encodeURIComponent(n.series)}${listId ? `&list=${encodeURIComponent(listId)}` : ''}`;
 
@@ -298,8 +337,10 @@ function ReaderContent() {
             } else {
                 setNextIssue(null); // Ensure we clear it if it's the last issue
             }
+            setPrevIssue(currentIdx > 0 ? { path: sortedIssues[currentIdx - 1].fullPath, name: sortedIssues[currentIdx - 1].name, series: seriesPath! } : null);
         } else {
             setNextIssue(null);
+            setPrevIssue(null);
         }
         // Reading list: the next unread entry after this one that has a file, whatever its series
         const listItems: any[] = listData?.items || [];
@@ -307,6 +348,8 @@ function ReaderContent() {
         if (listIdx > -1) {
             const next = listItems.slice(listIdx + 1).find(i => i.issue?.filePath && i.issue.series?.folderPath && !i.progress?.isCompleted);
             setNextIssue(next ? { path: next.issue.filePath, name: `${next.issue.series.name} #${next.issue.number}`, series: next.issue.series.folderPath } : null);
+            const prev = listItems.slice(0, listIdx).reverse().find(i => i.issue?.filePath && i.issue.series?.folderPath);
+            setPrevIssue(prev ? { path: prev.issue.filePath, name: `${prev.issue.series.name} #${prev.issue.number}`, series: prev.issue.series.folderPath } : null);
         }
 
         // Load this user's saved reader preferences for the series (overriding the isManga RTL default
@@ -348,17 +391,19 @@ function ReaderContent() {
     if (loading || !isReadyToSync || pages.length === 0) return;
     if (unmarkedAtPage.current !== currentIndex) unmarkedAtPage.current = null; // a page turn ends the unmark
     
+    // Automatic bookmark off: no resume position; the last page still finishes the issue when auto-read is on
+    if (!settings.autoBookmark && !(settings.autoMarkRead && currentIndex >= pages.length - 2)) return;
     const timer = setTimeout(() => {
         if (unmarkedAtPage.current === currentIndex) return; // unmarked while this save was pending: stays unread
         fetch('/api/progress', {
             method: 'POST',
             headers: getAuthHeaders(),
-            body: JSON.stringify({ filePath, currentPage: currentIndex, totalPages: pages.length, keepCompleted: true })
+            body: JSON.stringify({ filePath, currentPage: currentIndex, totalPages: pages.length, keepCompleted: true, noComplete: !settings.autoMarkRead })
         });
     }, 1500);
 
     return () => clearTimeout(timer);
-  }, [currentIndex, pages.length, filePath, loading, isReadyToSync, getAuthHeaders]);
+  }, [currentIndex, pages.length, filePath, loading, isReadyToSync, getAuthHeaders, settings.autoBookmark, settings.autoMarkRead]);
 
   // Persist reader settings per series (debounced). Gated on prefsLoaded so the defaults/merge on
   // first load don't overwrite the user's saved prefs before they've been fetched.
@@ -421,6 +466,8 @@ function ReaderContent() {
           if (settings.pageLayout.includes('double')) preloadImage(currentIndex + (step * i) + 1);
       }
   }, [currentIndex, pages, filePath, getStep, settings.pageLayout, loadCachedPage, getPageUrl]);
+
+  useEffect(() => { if (settings.readingMode !== 'webtoon') if (scrollRef.current) scrollRef.current.scrollTop = 0; }, [currentIndex, settings.readingMode]);
 
   // Clear the page-load error overlay whenever the page changes or the pages reload.
   useEffect(() => { setPageLoadError(false); }, [currentIndex, pages]);
@@ -528,7 +575,7 @@ function ReaderContent() {
         if (!showUI) triggerPageToast();
     } else if (nextIssue) {
         // Force sync the current issue as 100% complete before moving on
-        fetch('/api/progress', {
+        if (settings.autoMarkRead) fetch('/api/progress', {
             method: 'POST',
             headers: getAuthHeaders(),
             body: JSON.stringify({ 
@@ -542,7 +589,7 @@ function ReaderContent() {
         router.replace(nextIssueHref(nextIssue));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- nextIssueHref only reads listId from the URL
-  }, [currentIndex, pages.length, nextIssue, router, toast, getStep, showUI, triggerPageToast, filePath, getAuthHeaders]);
+  }, [currentIndex, pages.length, nextIssue, router, toast, getStep, showUI, triggerPageToast, filePath, getAuthHeaders, settings.autoMarkRead]);
 
   const prevPage = useCallback(() => {
     if (currentIndex > 0) {
@@ -552,16 +599,6 @@ function ReaderContent() {
         if (!showUI) triggerPageToast();
     }
   }, [currentIndex, settings.pageLayout, showUI, triggerPageToast]);
-
-  const handlePageJump = (e: React.FormEvent) => {
-      e.preventDefault();
-      let target = parseInt(jumpInput) - 1;
-      if (isNaN(target)) return;
-      target = Math.max(0, Math.min(target, pages.length - 1));
-      setCurrentIndex(target);
-      setIsJumping(false);
-      setJumpInput("");
-  };
 
   const toggleReadStatus = async () => {
       const newStatus = !isMarkedRead;
@@ -607,6 +644,21 @@ function ReaderContent() {
       if (goNext && nextIssue) router.replace(nextIssueHref(nextIssue));
       else handleReaderClose();
   };
+
+  // Fork (Batcave "Infinite"): reaching the end of the issue opens the next one
+  const endRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+      const el = endRef.current;
+      if (!el || !settings.infinite || settings.readingMode !== 'webtoon' || !nextIssue || loading) return;
+      const obs = new IntersectionObserver(([e]) => {
+          if (!e.isIntersecting) return;
+          obs.disconnect();
+          if (settings.autoMarkRead) finishIssue(true); else router.replace(nextIssueHref(nextIssue));
+      });
+      const t = setTimeout(() => obs.observe(el), 1500);  // not while the pages are still loading in at the top
+      return () => { clearTimeout(t); obs.disconnect(); };
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- finishIssue/nextIssueHref read current state
+  }, [settings.infinite, settings.readingMode, settings.autoMarkRead, nextIssue, loading]);
 
   // NATIVE TOUCH GESTURE LOGIC
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -682,29 +734,28 @@ function ReaderContent() {
       };
   }, [loading, settings.readingMode]);
 
-  const handleLeftClick = (e: React.MouseEvent) => { e.stopPropagation(); if (settings.readingMode === 'rtl') nextPage(); else prevPage(); };
-  const handleRightClick = (e: React.MouseEvent) => { e.stopPropagation(); if (settings.readingMode === 'rtl') prevPage(); else nextPage(); };
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isJumping) return;
       if (guided && settings.readingMode !== 'webtoon' && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) return;  // panel by panel: GuidedView
       if (e.key === 'ArrowRight') { if (settings.readingMode === 'rtl') prevPage(); else nextPage(); }
       if (e.key === 'ArrowLeft') { if (settings.readingMode === 'rtl') nextPage(); else prevPage(); }
       // Escape with the tag dialog open belongs to the dialog (Radix closes it) — without this
       // guard the same keypress would also save-and-exit the whole reader.
-      if (e.key === 'Escape') { if (tagDialogOpen) return; if (isFullscreen) document.exitFullscreen(); else handleReaderClose(); }
+      if (e.key === 'Escape') { if (tagDialogOpen) return; if (settingsOpen) { setSettingsOpen(false); return; } if (tocOpen) { setTocOpen(false); return; } if (isFullscreen) document.exitFullscreen(); else handleReaderClose(); }
       if (e.key === '=' || e.key === '+') setZoomLevel(z => Math.min(z + 10, 300));
       if (e.key === '-') setZoomLevel(z => Math.max(z - 10, 50));
+      if (e.key === 'z' || e.key === 'Z') zHeld.current = true;
     };
+    const handleKeyUp = (e: KeyboardEvent) => { if (e.key === 'z' || e.key === 'Z') { zHeld.current = false; setLens(null); } };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [nextPage, prevPage, router, settings.readingMode, isFullscreen, isJumping, handleReaderClose, tagDialogOpen, guided]);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => { window.removeEventListener('keydown', handleKeyDown); window.removeEventListener('keyup', handleKeyUp); };
+  }, [nextPage, prevPage, router, settings.readingMode, isFullscreen, handleReaderClose, tagDialogOpen, guided, settingsOpen, tocOpen]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
       if (zoomLevel === 100) return;
       setIsDragging(true);
-      setDragDistance(0);
       if (scrollRef.current) {
           setDragStart({ x: e.pageX, y: e.pageY, scrollLeft: scrollRef.current.scrollLeft, scrollTop: scrollRef.current.scrollTop });
       }
@@ -715,189 +766,170 @@ function ReaderContent() {
       e.preventDefault(); 
       const dx = e.pageX - dragStart.x;
       const dy = e.pageY - dragStart.y;
-      if (Math.abs(dx) > 5 || Math.abs(dy) > 5) setDragDistance(10);
       scrollRef.current.scrollLeft = dragStart.scrollLeft - dx;
       scrollRef.current.scrollTop = dragStart.scrollTop - dy;
   };
 
   const handleMouseUp = () => setIsDragging(false);
 
+  // Fork (Batcave): a click on the page turns it — left half back, right half forward (mirrored for RTL);
+  // "Forward only" turns forward wherever you click. Zoomed pages pan instead.
   const handleClickCanvas = (e: React.MouseEvent) => {
-      if (zoomLevel !== 100 && dragDistance > 5) return;
-      setShowUI(!showUI);
+      if (zoomLevel !== 100) return;
+      const leftHalf = e.clientX < window.innerWidth / 2;
+      if (settings.clickNav === 'both' && leftHalf !== (settings.readingMode === 'rtl')) prevPage(); else nextPage();
+  };
+
+  // Top bar "Show on scroll up": hides while scrolling down, comes back on the first scroll up
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+      const y = e.currentTarget.scrollTop;
+      if (Math.abs(y - lastScrollY.current) < 8) return;
+      setScrolledDown(y > lastScrollY.current && y > BAR_H);
+      lastScrollY.current = y;
+  };
+
+  // Magnifier: hold Z over a page
+  const handleLens = (e: React.MouseEvent) => {
+      if (!settings.magnifier || !zHeld.current) return;
+      const img = (e.target as HTMLElement).closest('img');
+      if (!img) { setLens(null); return; }
+      const r = img.getBoundingClientRect();
+      setLens({ x: e.clientX, y: e.clientY, src: img.currentSrc || img.src, w: r.width * LENS_ZOOM, h: r.height * LENS_ZOOM,
+          bx: LENS_SIZE / 2 - (e.clientX - r.left) * LENS_ZOOM, by: LENS_SIZE / 2 - (e.clientY - r.top) * LENS_ZOOM });
   };
 
   if (error) return <div className="p-10 text-center text-red-500 font-bold">Error: {error}</div>;
   if (loading) return <div className="flex h-screen w-screen items-center justify-center bg-black"><Loader2 className="w-10 h-10 animate-spin text-white" /></div>;
 
-  const uiVisible = showUI || hoverTop || hoverBottom || settingsOpen;
-  const hideCursor = isIdle && !uiVisible;
-  const currentBg = settings.backgroundColor === 'white' ? 'bg-[#f0f0f0]' : settings.backgroundColor === 'grey' ? 'bg-[#1e1e1e]' : 'bg-black';
-
+  const isWeb = settings.readingMode === 'webtoon';
+  const mode = isWeb ? (settings.infinite ? 'infinite' : 'web') : settings.pageLayout === 'single' ? 'paginated' : 'spread';
+  const setMode = (m: string) => setSettings(s => ({ ...s,
+      readingMode: m === 'web' || m === 'infinite' ? 'webtoon' : s.readingMode === 'webtoon' ? 'ltr' : s.readingMode,
+      pageLayout: m === 'spread' ? 'double-no-cover' : 'single',
+      infinite: m === 'infinite' }));
+  const set = <K extends keyof typeof settings>(k: K, v: (typeof settings)[K]) => setSettings(s => ({ ...s, [k]: v }));
+  const barVisible = settingsOpen || tocOpen || hoverTop || (settings.topBar === 'scroll' ? !scrolledDown : showUI);
+  const pad = settings.topBar === 'scroll' ? BAR_H : 0;
+  const hideCursor = isIdle && !barVisible;
   const isZoomed = zoomLevel !== 100;
-  const isDouble = settings.pageLayout === 'double' || (settings.pageLayout === 'double-no-cover' && currentIndex !== 0);
-  
-  let imgClass = `shadow-2xl ${settings.animateTransitions === 'true' ? 'transition-all duration-300' : ''}`;
-  
-  if (!isZoomed) {
-      if (settings.scaleType === 'screen') imgClass += ' w-full h-full object-contain';
-      if (settings.scaleType === 'fit-height') imgClass += isDouble ? ' h-full max-w-[50%] object-contain' : ' h-full max-w-full object-contain';
-      if (settings.scaleType === 'fit-width') imgClass += ' w-full h-auto object-contain';
-      if (settings.scaleType === 'original') imgClass += ' w-auto h-auto max-w-none max-h-none';
-  }
+  const isDouble = !isWeb && (settings.pageLayout === 'double' || (settings.pageLayout === 'double-no-cover' && currentIndex !== 0));
+  const filter = settings.brightness !== 100 ? `brightness(${settings.brightness}%)` : undefined;
 
-  // Combine scaling style with CSS Image Filters for Brightness/Contrast
-  const imgStyle: React.CSSProperties = isZoomed ? {
-      height: (settings.scaleType === 'fit-height' || settings.scaleType === 'screen' || settings.scaleType === 'original') ? `${zoomLevel}vh` : 'auto',
-      width: settings.scaleType === 'fit-width' ? (isDouble ? `${zoomLevel / 2}vw` : `${zoomLevel}vw`) : 'auto',
-  } : {};
-
-  if (settings.brightness !== 100 || settings.contrast !== 100) {
-      imgStyle.filter = `brightness(${settings.brightness}%) contrast(${settings.contrast}%)`;
-  }
-
-  const gapClass = settings.spreadGap === 'small' ? 'gap-2' : settings.spreadGap === 'large' ? 'gap-8' : 'gap-0';
+  // Image width (Batcave): Auto = the page up to the screen width, Manual = exactly N px, At Least = N px or
+  // wider up to the screen, Fit Height = the whole page on screen. Zoom (pinch, +/-) scales on top.
+  const widthStyle = (share: number): React.CSSProperties => {
+      if (settings.imageWidth === 'manual') return { width: settings.widthPx * zoomLevel / 100 / share, maxWidth: 'none' };
+      if (isZoomed) return { width: `${zoomLevel / share}vw`, maxWidth: 'none' };
+      if (settings.imageWidth === 'at-least') return { minWidth: `min(${settings.widthPx / share}px, ${100 / share}%)`, maxWidth: `${100 / share}%` };
+      if (settings.imageWidth === 'fit-height') return { height: `calc(100dvh - ${pad}px)`, width: 'auto', maxWidth: `${100 / share}%`, objectFit: 'contain' };
+      return { maxWidth: `${100 / share}%` };
+  };
+  const pageStyle = { ...widthStyle(isDouble ? 2 : 1), filter };
+  const wide = isZoomed || settings.imageWidth === 'manual';  // may be wider than the screen: scroll sideways
+  const jumpTo = (i: number) => {
+      setTocOpen(false);
+      if (isWeb) webtoonRef.current?.querySelector(`[data-page="${i}"]`)?.scrollIntoView();
+      else setCurrentIndex(i);
+  };
 
   return (
-    <div className={`relative h-screen w-screen ${currentBg} overflow-hidden flex flex-col items-center justify-center select-none ${hideCursor ? 'cursor-none' : ''}`}>
-      
-      {/* TRIGGER ZONES */}
-      <div className="absolute top-0 left-0 w-full h-20 z-40" onMouseEnter={() => setHoverTop(true)} onMouseLeave={() => setHoverTop(false)} />
-      <div className="absolute bottom-0 left-0 w-full h-24 z-40" onMouseEnter={() => setHoverBottom(true)} onMouseLeave={() => setHoverBottom(false)} />
+    <div className={`relative h-screen w-screen bg-black overflow-hidden flex flex-col items-center justify-center select-none ${hideCursor ? 'cursor-none' : ''}`}>
 
-      {/* TOP BAR */}
-      <div 
-        className={`absolute top-0 left-0 w-full p-4 flex justify-between items-center bg-gradient-to-b from-black/90 to-transparent transition-all duration-300 z-50 pointer-coarse:[&_button]:h-12 pointer-coarse:[&_button]:min-w-12 pointer-coarse:[&_svg]:size-6 ${uiVisible ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0'}`}
-        onMouseEnter={() => setHoverTop(true)} 
+      {/* Mouse at the top edge (or a tap there) brings the bar back */}
+      <div className="absolute top-0 left-0 w-full h-5 z-40" onMouseEnter={() => setHoverTop(true)} onMouseLeave={() => setHoverTop(false)} onClick={() => setShowUI(v => !v)} />
+
+      {/* TOP BAR (Batcave): back + series · table of contents · tools */}
+      <header
+        className={`fixed top-0 inset-x-0 z-50 h-[54px] flex items-center gap-3 px-4 text-[13px] font-bold text-[#f2f2f7] bg-[rgba(30,30,30,0.72)] backdrop-blur-[12px] backdrop-saturate-[1.6] transition-transform duration-300 ${barVisible ? 'translate-y-0' : '-translate-y-full'}`}
+        onMouseEnter={() => setHoverTop(true)}
         onMouseLeave={() => setHoverTop(false)}
       >
-        <div className="flex items-center gap-2">
-            <Button variant="ghost" className="text-white hover:bg-white/20 font-bold" onClick={handleReaderClose} disabled={isSavingTags}>
-                {isSavingTags ? <Loader2 className="w-5 h-5 md:mr-2 animate-spin" /> : <X className="w-5 h-5 md:mr-2" />} <span className="hidden md:inline">Close</span>
-            </Button>
-            
-            {/* Zoom Controls */}
-            {settings.readingMode !== 'webtoon' && (
-                <div className="hidden md:flex items-center bg-white/10 rounded-md border border-white/20 p-0.5 ml-4">
-                    <Button variant="ghost" size="icon" aria-label="Zoom out" className="h-8 w-8 text-white hover:bg-white/20" onClick={() => setZoomLevel(z => Math.max(z - 10, 50))}><ZoomOut className="w-4 h-4" /></Button>
-                    <span className="text-white text-xs font-mono w-12 text-center">{zoomLevel}%</span>
-                    <Button variant="ghost" size="icon" aria-label="Reset zoom" className="h-8 w-8 text-white hover:bg-white/20" onClick={() => setZoomLevel(100)}><Search className="w-3.5 h-3.5" /></Button>
-                    <Button variant="ghost" size="icon" aria-label="Zoom in" className="h-8 w-8 text-white hover:bg-white/20" onClick={() => setZoomLevel(z => Math.min(z + 10, 300))}><ZoomIn className="w-4 h-4" /></Button>
-                </div>
-            )}
+        <button type="button" aria-label="Close" onClick={handleReaderClose} disabled={isSavingTags} className="flex flex-1 items-center gap-2 min-w-0 text-left hover:opacity-80">
+            {isSavingTags ? <Loader2 className="w-5 h-5 shrink-0 animate-spin text-[#ffa332]" /> : <ChevronLeft className="w-5 h-5 shrink-0 text-[#ffa332]" strokeWidth={3} />}
+            <span className="truncate text-[15px] hidden sm:inline">{seriesName}</span>
+        </button>
+
+        <div className="flex items-center h-[38px] max-w-[46vw] sm:max-w-[34vw] rounded-[10px] bg-[rgba(118,118,128,0.24)] px-1">
+            <button type="button" aria-label="Previous issue" title={prevIssue?.name} disabled={!prevIssue} onClick={() => prevIssue && router.replace(nextIssueHref(prevIssue))} className="p-1.5 text-[#ffa332] disabled:opacity-30">
+                <ChevronLeft className="w-4 h-4" strokeWidth={3} />
+            </button>
+            <button type="button" onClick={() => setTocOpen(o => !o)} className="flex flex-col items-center min-w-0 px-2 leading-tight">
+                <span className="text-[9px] font-semibold uppercase tracking-[0.77px] text-[rgba(235,235,245,0.4)]">Table of contents</span>
+                <span className="truncate max-w-full">{issueName}</span>
+            </button>
+            <button type="button" aria-label="Next issue" title={nextIssue?.name} disabled={!nextIssue} onClick={() => nextIssue && router.replace(nextIssueHref(nextIssue))} className="p-1.5 text-[#ffa332] disabled:opacity-30">
+                <ChevronRight className="w-4 h-4" strokeWidth={3} />
+            </button>
         </div>
-        
-        <div className="flex flex-col items-center text-white text-center max-w-[50%] absolute left-1/2 -translate-x-1/2">
-          <span className="font-bold text-sm md:text-base truncate w-full tracking-tight">{seriesName}</span>
-          <span className="opacity-70 text-xs truncate w-full">{issueName}</span>
-        </div>
-        
-        <div className="flex gap-1 md:gap-2 items-center">
-            <Button 
-                variant="ghost" 
-                className="text-white hover:bg-white/20 hidden sm:flex font-bold text-xs" 
-                onClick={handleMakeOffline} 
-                disabled={isCaching}
-                title="Download issue for offline reading"
-            >
-                {isCaching ? (
-                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> {cacheProgress}%</>
-                ) : (
-                    <><CloudDownload className="w-4 h-4 mr-2" /> Offline</>
-                )}
-            </Button>
-            <Button
-                variant="ghost"
-                size="icon"
-                className={`text-white hover:bg-white/20 ${bookmarks.includes(currentIndex) ? 'text-yellow-400' : ''}`}
-                onClick={toggleBookmark}
-                title="Bookmark Page"
-            >
-                <Bookmark className={`w-5 h-5 ${bookmarks.includes(currentIndex) ? 'fill-current' : ''}`} />
-            </Button>
+
+        <nav className="flex flex-1 items-center justify-end gap-3 xl:gap-5 min-w-0">
+            <ToolBtn icon={<Check strokeWidth={3} />} label="Read" active={isMarkedRead} onClick={toggleReadStatus} />
+            <ToolBtn icon={<Bookmark className={bookmarks.includes(currentIndex) ? 'fill-current' : ''} />} label="Bookmark" active={bookmarks.includes(currentIndex)} onClick={toggleBookmark} />
             {isAdmin && issueId && (
-                <Button
-                    variant="ghost"
-                    size="icon"
-                    className={`text-white hover:bg-white/20 ${flaggedPages.has(pages[currentIndex]) ? 'text-red-400' : ''}`}
-                    onClick={toggleFlagCurrentPage}
-                    title="Flag page for removal (reviewed before anything is deleted)"
-                >
-                    <Flag className={`w-5 h-5 ${flaggedPages.has(pages[currentIndex]) ? 'fill-current' : ''}`} />
-                </Button>
+                <ToolBtn icon={<Flag className={flaggedPages.has(pages[currentIndex]) ? 'fill-current' : ''} />} label="Report" active={flaggedPages.has(pages[currentIndex])} onClick={toggleFlagCurrentPage}
+                    title="Flag page for removal (reviewed before anything is deleted)" />
             )}
             {isAdmin && issueId && flaggedPages.size > 0 && (
-                <Button
-                    variant="ghost"
-                    className="text-red-300 hover:bg-white/20 font-bold text-xs px-2"
-                    onClick={() => setPageManagerOpen(true)}
-                    title="Review flagged pages in the Page Manager"
-                >
+                <button type="button" className="shrink-0 font-semibold text-[#ff7b7b] hover:opacity-80" onClick={() => setPageManagerOpen(true)} title="Review flagged pages in the Page Manager">
                     Review {flaggedPages.size} flagged
-                </Button>
+                </button>
             )}
             {isAdmin && issueId && (
-                <Button
-                    variant="ghost"
-                    size="icon"
-                    className={`relative text-white hover:bg-white/20 ${pendingTagCount > 0 ? 'text-primary' : ''}`}
-                    onClick={() => setTagDialogOpen(true)}
-                    disabled={isSavingTags}
-                    title="Add a character, team, location or credit spotted while reading (saved when you leave the reader)"
-                >
-                    {isSavingTags ? <Loader2 className="w-5 h-5 animate-spin" /> : <Tag className="w-5 h-5" />}
-                    {pendingTagCount > 0 && !isSavingTags && (
-                        <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
-                            {pendingTagCount}
-                        </span>
-                    )}
-                </Button>
+                <ToolBtn icon={<Tag />} label={pendingTagCount > 0 ? `Tags (${pendingTagCount})` : 'Tags'} active={pendingTagCount > 0} onClick={() => setTagDialogOpen(true)} disabled={isSavingTags}
+                    title="Add a character, team, location or credit spotted while reading (saved when you leave the reader)" />
             )}
-            <Button variant="ghost" size="icon" className={`text-white hover:bg-white/20 ${isMarkedRead ? 'text-green-500' : ''}`} onClick={toggleReadStatus} title="Mark as Read">
-                <CheckCircle2 className="w-5 h-5" />
-            </Button>
-            <Button variant="ghost" size="icon" className="text-white hover:bg-white/20 hidden sm:flex" onClick={toggleFullscreen} title="Toggle Fullscreen">
-                {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
-            </Button>
-            {settings.readingMode !== 'webtoon' && (
-                <Button variant="ghost" size="icon" className={`text-white hover:bg-white/20 ${guided ? 'bg-white/20 text-amber-300' : ''}`} onClick={toggleGuided}
-                    title={guided ? "Panel-Ansicht aus" : "Panel-Ansicht: Panel für Panel lesen"} aria-pressed={guided}>
-                    <ScanSearch className="w-5 h-5" />
-                </Button>
-            )}
-            <Button variant="ghost" size="icon" className="text-white hover:bg-white/20" onClick={() => setSettingsOpen(true)} title="Reader Settings">
-                <SettingsIcon className="w-5 h-5" />
-            </Button>
-        </div>
-      </div>
+            <ToolBtn icon={isCaching ? <Loader2 className="animate-spin" /> : <CloudDownload />} label={isCaching ? `${cacheProgress}%` : 'Offline'} onClick={handleMakeOffline} disabled={isCaching}
+                title="Download issue for offline reading" className="hidden sm:flex" />
+            {!isWeb && <ToolBtn icon={<ScanSearch />} label="Panels" active={guided} onClick={toggleGuided} title={guided ? "Panel-Ansicht aus" : "Panel-Ansicht: Panel für Panel lesen"} />}
+            <ToolBtn icon={isFullscreen ? <Minimize /> : <Maximize />} onClick={toggleFullscreen} title="Fullscreen" className="hidden sm:flex" />
+            <ToolBtn icon={<SettingsIcon />} label="Settings" onClick={() => setSettingsOpen(true)} />
+        </nav>
+      </header>
+
+      {/* TABLE OF CONTENTS: the issue's pages (outside the header — its backdrop blur would trap position:fixed) */}
+      {tocOpen && (
+          <>
+              <div className="fixed inset-0 z-[55]" onClick={() => setTocOpen(false)} />
+              <div className="fixed top-[58px] left-1/2 -translate-x-1/2 z-[56] w-64 max-h-[60vh] overflow-y-auto rounded-xl p-1 bg-[rgba(28,28,30,0.95)] backdrop-blur-[16px] shadow-2xl">
+                  {pages.map((_, i) => (
+                      <button key={i} type="button" onClick={() => jumpTo(i)}
+                          className={`w-full flex justify-between px-3 py-2 rounded-lg text-[13px] text-left ${i === currentIndex ? 'bg-[#ffa332] text-black font-semibold' : 'text-[rgba(235,235,245,0.87)] font-medium hover:bg-white/10'}`}>
+                          <span>Page {i + 1} / {pages.length}</span>
+                          {bookmarks.includes(i) && <Bookmark className="w-3.5 h-3.5 fill-current" />}
+                      </button>
+                  ))}
+              </div>
+          </>
+      )}
 
       {/* CANVAS */}
-      {settings.readingMode === 'webtoon' ? (
-          <div ref={webtoonRef} className={`w-full h-full overflow-y-auto flex flex-col items-center z-10 ${hideCursor ? 'cursor-none' : ''}`} onClick={() => setShowUI(!showUI)}>
+      {isWeb ? (
+          <div ref={webtoonRef} onScroll={handleScroll} onMouseMove={handleLens} onMouseLeave={() => setLens(null)}
+              className={`absolute inset-0 z-10 overflow-auto flex flex-col ${wide ? 'items-start' : 'items-center'}`} style={{ paddingTop: pad }}>
               {pages.map((p, i) => (
-                  <img 
-                      key={p} 
+                  <img
+                      key={p}
                       data-page={i}
-                      src={getPageUrl(p)} 
-                      style={settings.brightness !== 100 || settings.contrast !== 100 ? { filter: `brightness(${settings.brightness}%) contrast(${settings.contrast}%)` } : undefined}
-                      className="w-full max-w-4xl h-auto block m-0 p-0 [aspect-ratio:auto_2/3]" 
-                      loading="lazy" 
-                      alt="Page" 
+                      src={getPageUrl(p)}
+                      style={settings.imageWidth === 'auto' && !isZoomed ? { filter } : { ...widthStyle(1), filter }}
+                      className={`${settings.imageWidth === 'auto' && !isZoomed ? 'w-full max-w-4xl' : ''} h-auto block m-0 p-0 [aspect-ratio:auto_2/3] ${wide ? 'mx-auto' : ''}`}
+                      loading="lazy"
+                      alt={`Page ${i + 1}`}
                   />
               ))}
               {pages.length > 0 && (
-                  <div className="w-full max-w-4xl px-6 py-16 flex flex-col items-center gap-4 text-white" onClick={e => e.stopPropagation()}>
+                  <div ref={endRef} className="w-full max-w-4xl mx-auto px-6 py-16 flex flex-col items-center gap-4 text-white">
                       <p className="text-sm uppercase tracking-widest text-white/60 font-bold">End of {issueName || 'issue'}</p>
                       {nextIssue && (
-                          <Button className="w-full max-w-md h-14 text-base font-bold bg-primary hover:bg-primary/90 text-primary-foreground" onClick={() => finishIssue(true)}>
-                              <CheckCircle2 className="w-5 h-5 mr-2" /> Finished · Next: {nextIssue.name}
-                          </Button>
+                          <button type="button" className="w-full max-w-md h-14 rounded-[10px] text-base font-semibold bg-[#ffa332] text-black shadow-[0_2px_8px_rgba(255,163,50,0.35)]" onClick={() => finishIssue(true)}>
+                              {settings.infinite ? 'Loading next: ' : 'Finished · Next: '}{nextIssue.name}
+                          </button>
                       )}
-                      <Button variant="secondary" className="w-full max-w-md h-14 text-base font-bold" onClick={() => finishIssue(false)}>
+                      <button type="button" className="w-full max-w-md h-14 rounded-[10px] text-base font-semibold bg-[rgba(118,118,128,0.24)] text-[#f2f2f7]" onClick={() => finishIssue(false)}>
                           {isMarkedRead ? 'Back to series' : 'Mark as read & back to series'}
-                      </Button>
+                      </button>
                       {isMarkedRead && (
-                          <Button variant="ghost" className="h-12 text-white/70 hover:bg-white/10 hover:text-white" onClick={toggleReadStatus}>Mark as unread</Button>
+                          <button type="button" className="h-12 text-white/70 hover:text-white" onClick={toggleReadStatus}>Mark as unread</button>
                       )}
                   </div>
               )}
@@ -910,312 +942,123 @@ function ReaderContent() {
               nextSrc={currentIndex + 1 < pages.length ? getPageUrl(pages[currentIndex + 1]) : undefined}
               rtl={settings.readingMode === 'rtl'}
               enterAtEnd={guidedFromEnd}
-              imgStyle={imgStyle.filter ? { filter: imgStyle.filter } : undefined}
+              imgStyle={filter ? { filter } : undefined}
               onToggleUI={() => setShowUI(v => !v)}
               // one page per step, also in double-page layout; past the last page nextPage() opens the next issue
               onNextPage={() => { setGuidedFromEnd(false); if (currentIndex < pages.length - 1) setCurrentIndex(currentIndex + 1); else nextPage(); }}
               onPrevPage={() => { if (currentIndex > 0) { setGuidedFromEnd(true); setCurrentIndex(currentIndex - 1); } }}
           />
       ) : (
-          <div 
+          <div
               ref={scrollRef}
-              className={`w-full h-full relative z-10 flex ${isZoomed ? 'overflow-auto cursor-grab active:cursor-grabbing items-start justify-start' : 'overflow-hidden items-center justify-center'}`}
+              onScroll={handleScroll}
+              className={`absolute inset-0 z-10 overflow-auto ${isZoomed ? 'cursor-grab active:cursor-grabbing' : ''}`}
+              style={{ paddingTop: pad }}
               onMouseDown={isZoomed ? handleMouseDown : undefined}
-              onMouseMove={isZoomed ? handleMouseMove : undefined}
+              onMouseMove={e => { if (isZoomed) handleMouseMove(e); handleLens(e); }}
               onMouseUp={isZoomed ? handleMouseUp : undefined}
-              onMouseLeave={isZoomed ? handleMouseUp : undefined}
+              onMouseLeave={() => { handleMouseUp(); setLens(null); }}
               onTouchStart={handleTouchStart}
               onTouchMove={handleTouchMove}
               onTouchEnd={handleTouchEnd}
           >
-              <div 
-                  className={`flex ${settings.readingMode === 'rtl' ? 'flex-row-reverse' : 'flex-row'} ${gapClass} ${isZoomed ? 'm-auto w-max h-max p-8 min-w-full min-h-full items-center justify-center' : 'w-full h-full items-center justify-center'}`}
+              <div
+                  className={`flex min-h-full ${settings.readingMode === 'rtl' ? 'flex-row-reverse' : 'flex-row'} justify-center ${settings.imageWidth === 'fit-height' ? 'items-center' : 'items-start'} ${wide ? 'w-max min-w-full' : 'w-full'}`}
                   onClick={handleClickCanvas}
               >
-                  {/* Current Page */}
                   <img
                       key={`p1-${currentIndex}`}
                       src={getPageUrl(pages[currentIndex])}
-                      style={imgStyle}
-                      className={imgClass}
+                      style={pageStyle}
+                      className="block h-auto"
                       alt={`Page ${currentIndex + 1}`}
                       draggable={false}
                       onLoad={() => setPageLoadError(false)}
                       onError={() => setPageLoadError(true)}
                   />
-                  
-                  {/* Optional Second Page */}
                   {isDouble && currentIndex + 1 < pages.length && (
-                      <img 
-                          key={`p2-${currentIndex+1}`} 
-                          src={getPageUrl(pages[currentIndex + 1])} 
-                          style={imgStyle} 
-                          className={imgClass} 
-                          alt="Page 2" 
-                          draggable={false} 
+                      <img
+                          key={`p2-${currentIndex + 1}`}
+                          src={getPageUrl(pages[currentIndex + 1])}
+                          style={pageStyle}
+                          className="block h-auto"
+                          alt={`Page ${currentIndex + 2}`}
+                          draggable={false}
                       />
                   )}
               </div>
-              
-              {/* HOVER CLICK ZONES (Disabled when zooming to not interfere with panning) */}
-              {!isZoomed && (
-                  <>
-                      <button type="button" aria-label={settings.readingMode === 'rtl' ? "Next page" : "Previous page"} className={`absolute inset-y-0 left-0 w-[25%] z-20 bg-transparent border-0 p-0 ${hideCursor ? 'cursor-none' : 'cursor-pointer'}`} onClick={handleLeftClick} title={settings.readingMode === 'rtl' ? "Next" : "Previous"} />
-                      <button type="button" aria-label={settings.readingMode === 'rtl' ? "Previous page" : "Next page"} className={`absolute inset-y-0 right-0 w-[25%] z-20 bg-transparent border-0 p-0 ${hideCursor ? 'cursor-none' : 'cursor-pointer'}`} onClick={handleRightClick} title={settings.readingMode === 'rtl' ? "Previous" : "Next"} />
-                  </>
-              )}
 
               {/* PAGE LOAD ERROR OVERLAY */}
               {pageLoadError && (
                   <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 bg-black/70 text-white p-6 text-center">
                       <p className="font-bold text-sm max-w-sm">This page couldn&apos;t be loaded — it may be missing or corrupt in the archive.</p>
                       {currentIndex < pages.length - 1 && (
-                          <Button className="bg-primary text-primary-foreground font-bold" onClick={() => nextPage()}>Skip Page</Button>
+                          <button type="button" className="h-10 px-4 rounded-[10px] bg-[#ffa332] text-black font-semibold" onClick={() => nextPage()}>Skip Page</button>
                       )}
                   </div>
               )}
           </div>
       )}
 
-      {/* TRANSIENT PAGE INDICATOR */}
-      {!uiVisible && settings.readingMode !== 'webtoon' && (
-          <div className={`absolute bottom-6 right-6 z-40 bg-black/80 backdrop-blur-md text-white px-3 py-1.5 rounded-full text-xs font-bold tracking-widest uppercase transition-opacity duration-300 pointer-events-none ${showPageToast ? 'opacity-100' : 'opacity-0'}`}>
+      {/* MAGNIFIER (hold Z) */}
+      {lens && (
+          <div className="fixed z-[45] pointer-events-none rounded-full border-2 border-white/80 shadow-2xl bg-no-repeat"
+              style={{ left: lens.x - LENS_SIZE / 2, top: lens.y - LENS_SIZE / 2, width: LENS_SIZE, height: LENS_SIZE, filter,
+                  backgroundImage: `url("${lens.src}")`, backgroundSize: `${lens.w}px ${lens.h}px`, backgroundPosition: `${lens.bx}px ${lens.by}px` }} />
+      )}
+
+      {/* PAGE INDICATOR: with the bar, and briefly after each page turn */}
+      {!isWeb && (
+          <div className={`fixed bottom-4 right-4 z-40 px-3 py-1.5 rounded-lg bg-[rgba(28,28,30,0.85)] backdrop-blur-[16px] text-[13px] font-bold text-[#f2f2f7] pointer-events-none transition-opacity duration-300 ${barVisible || showPageToast ? 'opacity-100' : 'opacity-0'}`}>
               Page {currentIndex + 1} / {pages.length}
           </div>
       )}
 
-      {/* BOTTOM BAR / SCRUBBER */}
-      {settings.readingMode !== 'webtoon' && (
-          <div 
-            className={`absolute bottom-0 left-0 w-full p-4 flex flex-col bg-gradient-to-t from-black/90 to-transparent transition-all z-50 pointer-coarse:[&_button]:h-12 pointer-coarse:[&_button]:min-w-12 ${uiVisible ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0'}`}
-            onMouseEnter={() => setHoverBottom(true)} 
-            onMouseLeave={() => setHoverBottom(false)}
-          >
-            <div className="flex justify-between items-center gap-2 md:gap-4 max-w-5xl mx-auto w-full pb-2 md:pb-0">
-                <Button variant="ghost" size="icon" className="text-white hover:bg-white/20 shrink-0 hidden sm:flex" onClick={() => setCurrentIndex(0)} disabled={currentIndex === 0}><SkipBack className="w-5 h-5" /></Button>
-                
-                <Button variant="ghost" size="icon" className="text-white hover:bg-white/20 shrink-0" onClick={prevPage} disabled={currentIndex === 0}>
-                    {settings.readingMode === 'rtl' ? <ChevronRight className="w-8 h-8" /> : <ChevronLeft className="w-8 h-8" />}
-                </Button>
-                
-                <div className="flex flex-col flex-1 items-center gap-2 mx-2 relative">
-                    {/* Render Bookmarks on the scrubber timeline */}
-                    <div className="absolute w-full h-2 md:h-1.5 top-[22px] pointer-events-none z-10" style={{ direction: settings.readingMode === 'rtl' ? 'rtl' : 'ltr' }}>
-                        {bookmarks.map(b => (
-                            <div 
-                                key={b} 
-                                className="absolute h-full w-1.5 bg-yellow-400 rounded-full shadow-[0_0_4px_#facc15]" 
-                                style={{ left: `${(b / (pages.length - 1)) * 100}%`, transform: 'translateX(-50%)' }} 
-                            />
-                        ))}
-                    </div>
-
-                    {/* Interactive Page Jumper */}
-                    {isJumping ? (
-                        <form onSubmit={handlePageJump} className="flex items-center gap-2 bg-black/50 p-1.5 rounded-md z-20">
-                            <Input 
-                                autoFocus
-                                type="number" 
-                                min="1" max={pages.length} 
-                                value={jumpInput} 
-                                onChange={(e) => setJumpInput(e.target.value)}
-                                className="h-8 w-16 text-center text-sm bg-white text-black font-bold" 
-                            />
-                            <span className="text-white text-[10px] sm:text-xs font-bold opacity-80 uppercase">of {pages.length}</span>
-                            <Button type="submit" size="sm" className="h-8 px-3 bg-primary hover:bg-primary/90 text-primary-foreground font-bold">Go</Button>
-                            <Button type="button" size="sm" variant="ghost" className="h-8 w-8 p-0 text-white" onClick={() => setIsJumping(false)}><X className="w-4 h-4"/></Button>
-                        </form>
-                    ) : (
-                        <span 
-                            className="text-white text-[11px] sm:text-xs font-bold opacity-80 uppercase tracking-widest cursor-pointer hover:text-primary hover:bg-white/10 px-3 py-1 rounded transition-colors z-20"
-                            onClick={() => { setIsJumping(true); setJumpInput((currentIndex + 1).toString()); }}
-                            title="Click to jump to page"
-                        >
-                            Page {currentIndex + 1} <span className="text-white/50">of</span> {pages.length}
-                        </span>
-                    )}
-
-                    <input 
-                        type="range" 
-                        min={0} 
-                        max={pages.length - 1} 
-                        value={currentIndex} 
-                        onChange={(e) => setCurrentIndex(parseInt(e.target.value))} 
-                        className="w-full h-2 md:h-1.5 bg-slate-700/50 rounded-lg appearance-none cursor-pointer accent-white hover:accent-primary transition-colors relative z-0"
-                        style={{ direction: settings.readingMode === 'rtl' ? 'rtl' : 'ltr' }}
-                    />
-                </div>
-
-                {currentIndex >= pages.length - 1 && nextIssue ? (
-                    <Button variant="default" className="bg-primary hover:bg-primary/90 text-primary-foreground font-bold shadow-lg shrink-0 gap-2 text-xs sm:text-sm border-0" onClick={nextPage}>Next Issue <BookOpen className="w-4 h-4 hidden sm:block" /></Button>
-                ) : (
-                    <>
-                        <Button variant="ghost" size="icon" className="text-white hover:bg-white/20 shrink-0" onClick={nextPage} disabled={currentIndex >= pages.length - 1}>
-                             {settings.readingMode === 'rtl' ? <ChevronLeft className="w-8 h-8" /> : <ChevronRight className="w-8 h-8" />}
-                        </Button>
-                        <Button variant="ghost" size="icon" className="text-white hover:bg-white/20 shrink-0 hidden sm:flex" onClick={() => setCurrentIndex(pages.length - 1)} disabled={currentIndex >= pages.length - 1}><SkipForward className="w-5 h-5" /></Button>
-                    </>
-                )}
-            </div>
-          </div>
+      {/* SETTINGS (Batcave): a sheet from the right over the blurred page */}
+      {settingsOpen && (
+          <>
+              <div className="fixed inset-0 z-[60] bg-black/20 backdrop-blur-md" onClick={() => setSettingsOpen(false)} />
+              <aside className="fixed inset-y-0 right-0 z-[61] w-[400px] max-w-full overflow-y-auto text-[13px] font-bold text-[#f2f2f7] bg-[rgba(28,28,30,0.85)] backdrop-blur-[16px] backdrop-saturate-[1.8]" aria-label="Settings">
+                  <div className="sticky top-0 z-10 h-[54px] flex items-center justify-center px-[10px] text-[16px] text-[rgba(235,235,245,0.87)] bg-[rgba(28,28,30,0.85)]">
+                      Settings
+                      <button type="button" onClick={() => setSettingsOpen(false)} className="absolute right-[10px] h-8 px-2.5 rounded-[10px] text-[17px] font-normal text-[#ffa332] hover:bg-white/5">Done</button>
+                  </div>
+                  <div className="px-4 pt-2 pb-8 space-y-[22px]">
+                      <Seg label="Reading Mode" value={mode} onChange={setMode} options={[['paginated', 'Paginated'], ['spread', 'Spread'], ['web', 'Web'], ['infinite', 'Infinite']]} />
+                      {!isWeb && <Seg label="Reading Direction" value={settings.readingMode} onChange={v => set('readingMode', v)} options={[['ltr', 'Left to Right'], ['rtl', 'Right to Left']]} />}
+                      <Seg label="Top Bar" value={settings.topBar} onChange={v => set('topBar', v)} options={[['scroll', 'Show on scroll up'], ['hidden', 'Always hidden']]} />
+                      <Seg label="Magnifier (Z key)" value={settings.magnifier ? 'on' : 'off'} onChange={v => set('magnifier', v === 'on')} options={[['on', 'On'], ['off', 'Off']]} />
+                      <Seg label="Click Navigation on Image" value={settings.clickNav} onChange={v => set('clickNav', v)} options={[['both', 'Forward and Back'], ['forward', 'Forward Only']]} />
+                      <Seg label="Automatically Mark Chapter Read" value={settings.autoMarkRead ? 'yes' : 'no'} onChange={v => set('autoMarkRead', v === 'yes')} options={[['yes', 'Yes'], ['no', 'No']]} />
+                      <Seg label="Automatic Bookmark" value={settings.autoBookmark ? 'yes' : 'no'} onChange={v => set('autoBookmark', v === 'yes')} options={[['yes', 'Yes'], ['no', 'No']]} />
+                      <div className="space-y-2">
+                          <Seg label="Image Width" value={settings.imageWidth} onChange={v => set('imageWidth', v)} options={[['auto', 'Auto'], ['manual', 'Manual'], ['at-least', 'At Least'], ['fit-height', 'Fit Height']]} />
+                          {(settings.imageWidth === 'manual' || settings.imageWidth === 'at-least') && (
+                              <div className="flex items-center h-[38px] p-[2px] rounded-[10px] bg-[rgba(118,118,128,0.24)]">
+                                  <button type="button" aria-label="Narrower" onClick={() => set('widthPx', Math.max(300, settings.widthPx - 50))} className="w-12 h-[34px] rounded-[8px] bg-[#ffa332] text-black font-semibold shadow-[0_2px_8px_rgba(255,163,50,0.35)]">-</button>
+                                  <span className="flex-1 text-center">{settings.widthPx}px</span>
+                                  <button type="button" aria-label="Wider" onClick={() => set('widthPx', Math.min(4000, settings.widthPx + 50))} className="w-12 h-[34px] rounded-[8px] bg-[#ffa332] text-black font-semibold shadow-[0_2px_8px_rgba(255,163,50,0.35)]">+</button>
+                              </div>
+                          )}
+                      </div>
+                      <div className="space-y-2">
+                          <SegLabel>Brightness</SegLabel>
+                          <div className="rounded-[10px] bg-[rgba(118,118,128,0.24)] px-3 pt-3 pb-2">
+                              <input type="range" min={30} max={100} step={5} value={Math.min(settings.brightness, 100)} aria-label="Brightness"
+                                  onChange={e => set('brightness', parseInt(e.target.value))} className="w-full accent-[#ffa332] cursor-pointer" />
+                              <div className="text-center mt-1 font-semibold text-[rgba(235,235,245,0.6)]">{Math.min(settings.brightness, 100)}%</div>
+                          </div>
+                      </div>
+                      <Seg label="Auto-Crop Margins" value={settings.cropMargins ? 'on' : 'off'} onChange={v => set('cropMargins', v === 'on')} options={[['on', 'On'], ['off', 'Off']]} />
+                      {!isWeb && (
+                          <div className="dark text-foreground font-normal">
+                              <GuidedSettingsSection value={guidedSettings} onChange={setGuidedSettings} />
+                          </div>
+                      )}
+                  </div>
+              </aside>
+          </>
       )}
-
-      {/* SETTINGS MODAL */}
-      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-          <DialogContent className="sm:max-w-[425px] w-[95%] bg-background border-border rounded-xl">
-              <DialogHeader><DialogTitle className="text-xl font-black tracking-tight text-foreground">Reader Settings</DialogTitle></DialogHeader>
-              
-              <div className="grid gap-6 py-4 max-h-[70vh] overflow-y-auto pr-2">
-                  <div className="flex items-center justify-between bg-muted/50 p-3 rounded-lg border border-border">
-                      <Label className="font-bold cursor-pointer text-sm" htmlFor="mark-read">Mark Issue as Completed</Label>
-                      <Switch id="mark-read" checked={isMarkedRead} onCheckedChange={toggleReadStatus} />
-                  </div>
-                  
-                  <div className="space-y-4">
-                      <div className="grid grid-cols-[30px_1fr] items-center gap-3">
-                          <LayoutTemplate className="w-5 h-5 text-muted-foreground justify-self-center" />
-                          <div className="grid gap-1.5">
-                              <Label className="text-[10px] sm:text-xs uppercase tracking-wider text-muted-foreground font-bold">Reading Mode & Layout</Label>
-                              <div className="grid grid-cols-2 gap-2">
-                                  <Select value={settings.readingMode} onValueChange={(v) => setSettings(s => ({...s, readingMode: v}))}>
-                                      <SelectTrigger className="h-10 text-xs sm:text-sm border-border bg-background"><SelectValue /></SelectTrigger>
-                                      <SelectContent className="bg-popover border-border">
-                                          <SelectItem value="ltr" className="focus:bg-primary/10 focus:text-primary">Left to Right</SelectItem>
-                                          <SelectItem value="rtl" className="focus:bg-primary/10 focus:text-primary">Right to Left</SelectItem>
-                                          <SelectItem value="webtoon" className="focus:bg-primary/10 focus:text-primary">Webtoon</SelectItem>
-                                      </SelectContent>
-                                  </Select>
-                                  <Select value={settings.pageLayout} onValueChange={(v) => setSettings(s => ({...s, pageLayout: v}))} disabled={settings.readingMode === 'webtoon'}>
-                                      <SelectTrigger className="h-10 text-xs sm:text-sm border-border bg-background"><SelectValue /></SelectTrigger>
-                                      <SelectContent className="bg-popover border-border">
-                                          <SelectItem value="single" className="focus:bg-primary/10 focus:text-primary">Single Page</SelectItem>
-                                          <SelectItem value="double" className="focus:bg-primary/10 focus:text-primary">Double Page</SelectItem>
-                                          <SelectItem value="double-no-cover" className="focus:bg-primary/10 focus:text-primary">Double (No Cover)</SelectItem>
-                                      </SelectContent>
-                                  </Select>
-                              </div>
-                          </div>
-                      </div>
-
-                      {/* Manga Spread Gutter Setup */}
-                      <div className="grid grid-cols-[30px_1fr] items-center gap-3">
-                          <AlignHorizontalSpaceAround className="w-5 h-5 text-muted-foreground justify-self-center" />
-                          <div className="grid gap-1.5">
-                              <Label className="text-[10px] sm:text-xs uppercase tracking-wider text-muted-foreground font-bold">2-Page Spread Gutter</Label>
-                              <Select value={settings.spreadGap} onValueChange={(v) => setSettings(s => ({...s, spreadGap: v}))} disabled={settings.pageLayout === 'single' || settings.readingMode === 'webtoon'}>
-                                  <SelectTrigger className="h-10 text-xs sm:text-sm border-border bg-background"><SelectValue /></SelectTrigger>
-                                  <SelectContent className="bg-popover border-border">
-                                      <SelectItem value="none" className="focus:bg-primary/10 focus:text-primary">Seamless (No Gap)</SelectItem>
-                                      <SelectItem value="small" className="focus:bg-primary/10 focus:text-primary">Book Binding (Small)</SelectItem>
-                                      <SelectItem value="large" className="focus:bg-primary/10 focus:text-primary">Book Binding (Large)</SelectItem>
-                                  </SelectContent>
-                              </Select>
-                          </div>
-                      </div>
-
-                      <div className="grid grid-cols-[30px_1fr] items-center gap-3">
-                          <MonitorPlay className="w-5 h-5 text-muted-foreground justify-self-center" />
-                          <div className="grid gap-1.5">
-                              <Label className="text-[10px] sm:text-xs uppercase tracking-wider text-muted-foreground font-bold">Scale Type</Label>
-                              <Select value={settings.scaleType} onValueChange={(v) => setSettings(s => ({...s, scaleType: v}))} disabled={settings.readingMode === 'webtoon'}>
-                                  <SelectTrigger className="h-10 text-xs sm:text-sm border-border bg-background"><SelectValue /></SelectTrigger>
-                                  <SelectContent className="bg-popover border-border">
-                                      <SelectItem value="screen" className="focus:bg-primary/10 focus:text-primary">Screen (Fit Best)</SelectItem>
-                                      <SelectItem value="fit-height" className="focus:bg-primary/10 focus:text-primary">Fit Height</SelectItem>
-                                      <SelectItem value="fit-width" className="focus:bg-primary/10 focus:text-primary">Fit Width</SelectItem>
-                                      <SelectItem value="original" className="focus:bg-primary/10 focus:text-primary">Original Size</SelectItem>
-                                  </SelectContent>
-                              </Select>
-                          </div>
-                      </div>
-
-                      <div className="grid grid-cols-[30px_1fr] items-center gap-3">
-                          <Scissors className="w-5 h-5 text-muted-foreground justify-self-center" />
-                          <div className="grid gap-1.5">
-                              <div className="flex items-center justify-between">
-                                  <Label className="text-[10px] sm:text-xs uppercase tracking-wider text-muted-foreground font-bold cursor-pointer" htmlFor="auto-crop-toggle">Auto-Crop Margins</Label>
-                                  <Switch id="auto-crop-toggle" checked={settings.cropMargins} onCheckedChange={(v) => setSettings(s => ({...s, cropMargins: v}))} />
-                              </div>
-                              <p className="text-[10px] text-muted-foreground">Automatically removes solid white or black borders from pages to maximize screen space.</p>
-                          </div>
-                      </div>
-
-                      <div className="grid grid-cols-[30px_1fr] items-center gap-3">
-                          <Paintbrush className="w-5 h-5 text-muted-foreground justify-self-center" />
-                          <div className="grid gap-1.5">
-                              <Label className="text-[10px] sm:text-xs uppercase tracking-wider text-muted-foreground font-bold">Background Color</Label>
-                              <Select value={settings.backgroundColor} onValueChange={(v) => setSettings(s => ({...s, backgroundColor: v}))}>
-                                  <SelectTrigger className="h-10 text-xs sm:text-sm border-border bg-background"><SelectValue /></SelectTrigger>
-                                  <SelectContent className="bg-popover border-border">
-                                      <SelectItem value="black" className="focus:bg-primary/10 focus:text-primary">Pitch Black</SelectItem>
-                                      <SelectItem value="grey" className="focus:bg-primary/10 focus:text-primary">Dark Gray</SelectItem>
-                                      <SelectItem value="white" className="focus:bg-primary/10 focus:text-primary">Bright White</SelectItem>
-                                  </SelectContent>
-                              </Select>
-                          </div>
-                      </div>
-
-                      <div className="grid grid-cols-[30px_1fr] items-center gap-3">
-                          <Zap className="w-5 h-5 text-muted-foreground justify-self-center" />
-                          <div className="grid gap-1.5">
-                              <Label className="text-[10px] sm:text-xs uppercase tracking-wider text-muted-foreground font-bold">Page Transitions</Label>
-                              <Select value={settings.animateTransitions} onValueChange={(v) => setSettings(s => ({...s, animateTransitions: v}))}>
-                                  <SelectTrigger className="h-10 text-xs sm:text-sm border-border bg-background"><SelectValue /></SelectTrigger>
-                                  <SelectContent className="bg-popover border-border">
-                                      <SelectItem value="true" className="focus:bg-primary/10 focus:text-primary">Smooth Fade</SelectItem>
-                                      <SelectItem value="false" className="focus:bg-primary/10 focus:text-primary">Instant</SelectItem>
-                                  </SelectContent>
-                              </Select>
-                          </div>
-                      </div>
-
-                      {settings.readingMode !== 'webtoon' && <GuidedSettingsSection value={guidedSettings} onChange={setGuidedSettings} />}
-
-                      {/* --- Image Adjustments (Brightness/Contrast) --- */}
-                      <div className="grid grid-cols-[30px_1fr] items-start gap-3 pt-2 border-t border-border">
-                          <Sun className="w-5 h-5 text-muted-foreground justify-self-center mt-1" />
-                          <div className="grid gap-4">
-                              <div className="space-y-3">
-                                  <div className="flex flex-col gap-1.5">
-                                      <div className="flex items-center justify-between">
-                                          <Label className="text-[10px] sm:text-xs uppercase tracking-wider text-muted-foreground font-bold">Brightness</Label>
-                                          <span className="text-[10px] font-mono text-muted-foreground">{settings.brightness}%</span>
-                                      </div>
-                                      <input 
-                                          type="range" min="50" max="150" step="5" 
-                                          value={settings.brightness} 
-                                          onChange={(e) => setSettings(s => ({...s, brightness: parseInt(e.target.value)}))} 
-                                          className="w-full h-1.5 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
-                                      />
-                                  </div>
-                                  <div className="flex flex-col gap-1.5">
-                                      <div className="flex items-center justify-between">
-                                          <Label className="text-[10px] sm:text-xs uppercase tracking-wider text-muted-foreground font-bold">Contrast</Label>
-                                          <span className="text-[10px] font-mono text-muted-foreground">{settings.contrast}%</span>
-                                      </div>
-                                      <input 
-                                          type="range" min="50" max="150" step="5" 
-                                          value={settings.contrast} 
-                                          onChange={(e) => setSettings(s => ({...s, contrast: parseInt(e.target.value)}))} 
-                                          className="w-full h-1.5 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
-                                      />
-                                  </div>
-                                  
-                                  {(settings.brightness !== 100 || settings.contrast !== 100) && (
-                                      <div className="flex justify-end pt-1">
-                                          <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] uppercase tracking-widest text-muted-foreground hover:bg-muted" onClick={() => setSettings(s => ({...s, brightness: 100, contrast: 100}))}>
-                                              Reset Adjustments
-                                          </Button>
-                                      </div>
-                                  )}
-                              </div>
-                          </div>
-                      </div>
-
-                  </div>
-              </div>
-          </DialogContent>
-      </Dialog>
 
       {/* ADD TAG MODAL (#199 round 2, admin-only): note characters/teams/locations/credits while
           reading. Nothing saves here — additions accumulate for this session and are written on

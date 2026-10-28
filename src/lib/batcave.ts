@@ -27,6 +27,11 @@ export function sameEvent(a: string, b: string): boolean {
     return !!eventKey(a) && eventKey(a) === eventKey(b) && (!ya || !yb || ya === yb);
 }
 
+/** The catalog events a guide-less list still wants: a list two events match ("Secret Wars" vs 1984 and 2015) wants neither. */
+export function wantedGuides(lists: string[], events: string[]): string[] {
+    return events.filter(e => lists.some(n => sameEvent(n, e) && events.filter(o => sameEvent(n, o)).length === 1));
+}
+
 /** Issue number as both sides can compare it: "001" → "1", "23.10" → "23.1", "½" stays as is. */
 export function normIssueNumber(n: string | number): string {
     const s = String(n ?? '').trim();

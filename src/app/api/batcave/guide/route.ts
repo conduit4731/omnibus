@@ -9,7 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { validateApiKey } from '@/lib/api-auth';
-import { sameEvent } from '@/lib/batcave';
+import { sameEvent, wantedGuides } from '@/lib/batcave';
 import { sanitizeDescription } from '@/lib/utils/sanitize';
 
 export const dynamic = 'force-dynamic';
@@ -22,7 +22,8 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => null);
     if (Array.isArray(body?.events)) {
         const missing = (await prisma.readingList.findMany({ where: { guide: null }, select: { name: true } })).map(l => l.name);
-        const wanted = body.events.filter((e: unknown) => typeof e === 'string' && missing.some(n => sameEvent(n, e)));
+        const events: string[] = body.events.filter((e: unknown) => typeof e === 'string');
+        const wanted = wantedGuides(missing, events);
         return NextResponse.json({ wanted });
     }
     const event = typeof body?.event === 'string' ? body.event : '';

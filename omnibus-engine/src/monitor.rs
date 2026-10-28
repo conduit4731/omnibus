@@ -523,9 +523,16 @@ async fn insert_skeleton(
     }
 }
 
+/// Fork: a same-name local volume of about that start year (any publisher spelling) — then a pull-list series
+/// is not new, however the matcher missed it.
+fn has_same_name_volume(series: &[SeriesRec], m_series_name: &str, year_began: Option<i32>) -> bool {
+    series.iter().any(|s| normalize(&s.name) == m_series_name && (s.year == 0 || year_began.is_none_or(|y| (s.year - y).abs() <= 1)))
+}
+
 /// Fork: every pull-list series the library lacks becomes a Metron-sourced series row, NOT monitored (the
-/// user picks what to download). Folder from the naming pattern in the default comics library, nothing made on
-/// disk. shortcut: the series is not in this run's in-memory list, so its skeletons come with the next run.
+/// user picks what to download). Folder from the naming pattern in the default comics library, created empty
+/// so the scan's ghost purge (unmonitored + folder missing) leaves the row alone.
+/// shortcut: the series is not in this run's in-memory list, so its skeletons come with the next run.
 async fn add_pull_list_series(db: &Db, unknown: &HashMap<String, (String, Option<i32>, Option<String>)>) -> usize {
     if unknown.is_empty() { return 0; }
     let pattern: Option<String> = sqlx::query_scalar(r#"SELECT value FROM "SystemSetting" WHERE key = 'folder_naming_pattern'"#)
@@ -552,7 +559,12 @@ async fn add_pull_list_series(db: &Db, unknown: &HashMap<String, (String, Option
         .bind(&folder).bind(sid).bind(&lib_id)
         .execute(&db.pool).await;
         match res {
-            Ok(r) if r.rows_affected() > 0 => added += 1,
+            Ok(r) if r.rows_affected() > 0 => {
+                added += 1;
+                if let Err(e) = std::fs::create_dir_all(&folder) {
+                    log::warn!("[Series Monitor] Creating folder {} failed: {:?}", folder, e);
+                }
+            }
             Ok(_) => {}
             Err(e) => log::warn!("[Series Monitor] Adding pull-list series \"{}\" failed: {:?}", name, e),
         }
@@ -923,8 +935,7 @@ async fn phase1_metron(
                 match unhoused {
                     MetronMatch::Ambiguous { candidates: n } => skipped.entry((m_series_raw.to_string(), year_began)).or_insert((0, n)).0 += 1,
                     // Not when a same-name volume of about that year exists under a differently spelled publisher
-                    _ => if let Some(sid) = m_series_id.as_ref().filter(|_| !m_series_name.is_empty() && !series.iter().any(|s|
-                        normalize(&s.name) == m_series_name && (s.year == 0 || year_began.is_none_or(|y| (s.year - y).abs() <= 1)))) {
+                    _ => if let Some(sid) = m_series_id.as_ref().filter(|_| !m_series_name.is_empty() && !has_same_name_volume(series, &m_series_name, year_began)) {
                         let publisher = m.pointer("/publisher/name").or_else(|| m.pointer("/series/publisher/name")).and_then(|v| v.as_str()).map(|p| p.to_string());
                         unknown.entry(sid.clone()).or_insert((m_series_raw.trim().to_string(), year_began, publisher));
                     },
@@ -1264,10 +1275,14 @@ mod tests {
             r#"ALTER TABLE "Series" ADD COLUMN "updatedAt" TEXT"#,
             r#"CREATE UNIQUE INDEX series_meta ON "Series" ("metadataSource", "metadataId")"#,
             r#"CREATE TABLE "Library" (id TEXT PRIMARY KEY, path TEXT, "isDefault" INTEGER, "isManga" INTEGER)"#,
-            r#"INSERT INTO "Library" VALUES ('manga', '/manga', 1, 1), ('comics', '/comics', 1, 0)"#,
         ] {
             sqlx::query(ddl).execute(&db.pool).await.unwrap();
         }
+        let comics = std::env::temp_dir().join(format!("omnibus_mon_pulllist_lib_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&comics);
+        let comics = comics.to_string_lossy().replace('\\', "/");
+        sqlx::query(r#"INSERT INTO "Library" VALUES ('manga', '/manga', 1, 1), ('comics', $1, 1, 0)"#)
+            .bind(&comics).execute(&db.pool).await.unwrap();
         let unknown: HashMap<String, (String, Option<i32>, Option<String>)> =
             [("123".to_string(), ("Absolute Flash".to_string(), Some(2025), Some("DC Comics".to_string())))].into();
 
@@ -1275,9 +1290,21 @@ mod tests {
         assert_eq!(add_pull_list_series(&db, &unknown).await, 0, "the same Metron series is never added twice");
         let row = sqlx::query(r#"SELECT "folderPath", "libraryId", CAST(monitored AS INTEGER) AS monitored FROM "Series" WHERE "metadataId" = '123'"#)
             .fetch_one(&db.pool).await.unwrap();
-        assert_eq!(row.get::<String, _>("folderPath"), "/comics/DC Comics/Absolute Flash (2025)");
+        let folder = format!("{}/DC Comics/Absolute Flash (2025)", comics);
+        assert_eq!(row.get::<String, _>("folderPath"), folder);
+        assert!(std::path::Path::new(&folder).is_dir(), "folder exists, so the scan's ghost purge keeps the row");
         assert_eq!(row.get::<String, _>("libraryId"), "comics");
         assert_eq!(row.get::<i64, _>("monitored"), 0, "added, not monitored");
+    }
+
+    #[test]
+    fn pull_list_series_is_new_only_without_a_same_name_volume_of_that_era() {
+        let series = vec![rec("a", "Batman", "DC", 2016, "COMICVINE", Some("1"), None)];
+        assert!(has_same_name_volume(&series, "batman", Some(2016)), "same volume, publisher spelled differently");
+        assert!(has_same_name_volume(&series, "batman", Some(2017)), "within a year");
+        assert!(has_same_name_volume(&series, "batman", None), "no start year to tell them apart");
+        assert!(!has_same_name_volume(&series, "batman", Some(2025)), "a new volume");
+        assert!(!has_same_name_volume(&series, "superman", Some(2016)));
     }
 
     #[tokio::test]

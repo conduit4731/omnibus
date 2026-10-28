@@ -1,6 +1,6 @@
 // __tests__/lib/batcave.test.ts
 import { describe, it, expect } from 'vitest';
-import { eventKey, normIssueNumber, sameEvent, parseBatcaveTitle, pickCvVolume, pickSeries, uploadFileName } from '@/lib/batcave';
+import { eventKey, normIssueNumber, sameEvent, wantedGuides, parseBatcaveTitle, pickCvVolume, pickSeries, uploadFileName } from '@/lib/batcave';
 
 describe('lib/batcave', () => {
     it('matches a Batcave event title to the reading list name', () => {
@@ -10,6 +10,12 @@ describe('lib/batcave', () => {
         expect(sameEvent('Secret Wars (2015)', '[Marvel] Secret Wars (2015)')).toBe(true);
         expect(sameEvent('Secret Wars (2015)', 'Secret Wars (1984)')).toBe(false);
         expect(sameEvent('Dark Reign', 'Dark Reign (2008)')).toBe(true);
+    });
+
+    it('wants no guide for a yearless list two catalog events match', () => {
+        const events = ['Secret Wars (1984)', 'Secret Wars (2015)', 'Dark Reign (2008)'];
+        expect(wantedGuides(['Secret Wars', 'Dark Reign'], events)).toEqual(['Dark Reign (2008)']);
+        expect(wantedGuides(['Secret Wars (2015)'], events)).toEqual(['Secret Wars (2015)']);
     });
 
     it('parses Batcave series titles', () => {

@@ -91,7 +91,7 @@ export async function POST(request: Request) {
 
         if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-        const { filePath, currentPage, totalPages, keepCompleted } = await request.json();
+        const { filePath, currentPage, totalPages, keepCompleted, noComplete } = await request.json();
         const newPage = parseInt(currentPage);
         const total = parseInt(totalPages);
 
@@ -109,6 +109,8 @@ export async function POST(request: Request) {
         // Fork: the reader's page sync sends keepCompleted, so leafing through a finished issue again keeps it
         // read; only an explicit "mark unread" (which doesn't send it) reopens it.
         if (keepCompleted && oldProgress?.isCompleted) isCompleted = true;
+        // Fork: reader setting "Automatically mark chapter read: No" — the last page alone doesn't finish it
+        else if (noComplete) isCompleted = false;
 
         let pagesReadDelta = 0;
         if (oldProgress) {
