@@ -397,6 +397,24 @@ export async function initDatabase() {
     const { backfillFileAddedAt } = await import('./file-added');
     await backfillFileAddedAt();
 
+    // 16. Fork: monitor every existing series once (new ones get it from the schema default). Batcave series
+    //     stay off — the userscript fetches their issues and the gap backfill must not search them again.
+    //     Sentinel-guarded, so a series turned off later stays off.
+    try {
+        const MONITOR_ALL_SENTINEL = 'series_monitor_all_backfilled';
+        if (!await prisma.systemSetting.findUnique({ where: { key: MONITOR_ALL_SENTINEL } })) {
+            const { BATCAVE_MAP_KEY } = await import('./batcave');
+            const map = await prisma.systemSetting.findUnique({ where: { key: BATCAVE_MAP_KEY } });
+            const jobs = await prisma.batcaveJob.findMany({ select: { seriesId: true }, distinct: ['seriesId'] });
+            const batcaveIds = [...new Set([...Object.values(JSON.parse(map?.value || '{}')) as string[], ...jobs.map(j => j.seriesId)])];
+            const res = await prisma.series.updateMany({ where: { id: { notIn: batcaveIds }, OR: [{ monitored: false }, { monitored: null }] }, data: { monitored: true } });
+            await prisma.systemSetting.create({ data: { key: MONITOR_ALL_SENTINEL, value: new Date().toISOString() } });
+            Logger.log(`[DB Init] Monitored ${res.count} existing series (${batcaveIds.length} Batcave series left as they are).`, "success");
+        }
+    } catch (e) {
+        Logger.log(`[DB Init] Monitor-all backfill failed: ${getErrorMessage(e)}`, "error");
+    }
+
     // Inside initDatabase(), right before Logger.log("[DB Init] Schema mapping complete.")
     const logLevelSetting = await prisma.systemSetting.findUnique({ where: { key: 'system_log_level' } });
     if (logLevelSetting?.value) {

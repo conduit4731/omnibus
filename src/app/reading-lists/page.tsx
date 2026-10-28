@@ -10,7 +10,7 @@ import { AllSources, BatcaveButton, GetComicsButton, RequestIconButton } from "@
 import { useSearchParams } from "next/navigation"
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
@@ -26,6 +26,7 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 import { Badge } from "@/components/ui/badge"
+import { PageTabs } from "@/components/page-tabs"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ReadingListPicker } from "@/components/reading-list-picker"
@@ -863,15 +864,10 @@ function ReadingListsContent() {
                                   </Button>
                               )}
                           </div>
-
-                          {activeList.description && (
-                              <CardDescription className="text-primary/80 leading-relaxed text-sm sm:text-base break-words whitespace-normal w-full mt-2">
-                                  {activeList.description}
-                              </CardDescription>
-                          )}
                       </CardHeader>
                   </Card>
 
+                  <PageTabs defaultValue="issues" tabs={[{ value: 'metadata', label: 'Metadata', content: (<>
                   {seriesSummary.length > 1 && (
                       <Card className="border-border bg-background/80">
                           <CardHeader className="pb-2">
@@ -922,7 +918,14 @@ function ReadingListsContent() {
                           </CardContent>
                       </Card>
                   )}
-
+                  </>) }, { value: 'description', label: 'Description', content: (
+                      <div className="text-sm leading-relaxed bg-muted/30 p-6 rounded-2xl border border-border text-foreground space-y-4 break-words">
+                          {activeList.description && <p className="whitespace-pre-line">{activeList.description}</p>}
+                          {/* Batcave's event guide ("Start here" … FAQ), sanitized on the server */}
+                          {activeList.guide && <div className="prose prose-sm dark:prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: activeList.guide }} />}
+                          {!activeList.description && !activeList.guide && <p className="italic text-muted-foreground">No description yet. Open the event on Batcave with the userscript to bring its guide over.</p>}
+                      </div>
+                  ) }, { value: 'issues', label: `Issues (${activeList.items.length})`, content: (<>
                   {activeList.items.length === 0 ? (
                     <div className="text-center py-20 border-2 border-dashed rounded-xl border-border bg-muted/30">
                         <BookOpen className="w-12 h-12 mx-auto text-muted-foreground/50 mb-3" />
@@ -1087,6 +1090,7 @@ function ReadingListsContent() {
                           </Droppable>
                       </DragDropContext>
                   )}
+                  </>) }]} />
               </div>
           ) : activeListId ? (
               <div className="flex justify-center py-32"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>

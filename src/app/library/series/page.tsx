@@ -20,6 +20,7 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 import { Badge } from "@/components/ui/badge"
+import { PageTabs } from "@/components/page-tabs"
 import { useToast } from "@/components/ui/use-toast"
 import { copyText } from "@/lib/utils/clipboard"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
@@ -1454,7 +1455,8 @@ function SeriesContent() {
               </div>
           </div>
 
-          <div className="space-y-10 min-w-0">
+          <div className="min-w-0">
+            <PageTabs defaultValue="issues" tabs={[{ value: 'metadata', label: 'Metadata', content: (<>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   <div className="flex flex-col h-full bg-background p-6 rounded-2xl border border-border shadow-sm">
                       <h4 className="font-black text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-4 flex items-center gap-2">
@@ -1559,6 +1561,7 @@ function SeriesContent() {
 </div>
               </div>
 
+            </>) }, { value: 'description', label: 'Description', content: (<>
               <div className="space-y-3">
                   <h4 className="font-black text-[10px] uppercase tracking-[0.2em] text-muted-foreground px-1">
                     {activeIssue ? `${activeIssue.name} Synopsis` : 'Synopsis'}
@@ -1632,6 +1635,7 @@ function SeriesContent() {
                   </div>
               </div>
 
+            </>) }, { value: 'issues', label: 'Issues', content: (<>
               {/* --- UNMATCHED FILES WARNING & RESOLUTION --- */}
               {isAdmin && unmatchedIssues.length > 0 && (
                   <div className="space-y-4 mb-8 bg-orange-50/50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-900/50 rounded-xl p-4 sm:p-6 animate-in fade-in">
@@ -2170,6 +2174,7 @@ function SeriesContent() {
                       onSelect={(issue) => setActiveIssue(issue)}
                   />
               )}
+            </>) }]} />
           </div>
         </div>
       )}

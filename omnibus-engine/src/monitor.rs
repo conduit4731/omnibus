@@ -523,6 +523,43 @@ async fn insert_skeleton(
     }
 }
 
+/// Fork: every pull-list series the library lacks becomes a Metron-sourced series row, NOT monitored (the
+/// user picks what to download). Folder from the naming pattern in the default comics library, nothing made on
+/// disk. shortcut: the series is not in this run's in-memory list, so its skeletons come with the next run.
+async fn add_pull_list_series(db: &Db, unknown: &HashMap<String, (String, Option<i32>, Option<String>)>) -> usize {
+    if unknown.is_empty() { return 0; }
+    let pattern: Option<String> = sqlx::query_scalar(r#"SELECT value FROM "SystemSetting" WHERE key = 'folder_naming_pattern'"#)
+        .fetch_optional(&db.pool).await.ok().flatten();
+    let pattern = pattern.filter(|p| !p.trim().is_empty()).unwrap_or_else(|| "{Publisher}/{Series} ({Year})".to_string());
+    let lib = sqlx::query(r#"SELECT id, path FROM "Library" WHERE CAST("isManga" AS INTEGER) = 0 ORDER BY CAST("isDefault" AS INTEGER) DESC LIMIT 1"#)
+        .fetch_optional(&db.pool).await.ok().flatten();
+    let Some(lib) = lib else { return 0; };
+    let (lib_id, lib_path): (String, String) = (lib.get("id"), lib.get("path"));
+    let year_now = Utc::now().format("%Y").to_string().parse::<i32>().unwrap_or(0);
+    let mut added = 0;
+    for (sid, (name, year, publisher)) in unknown {
+        let year = year.unwrap_or(year_now);
+        let input = crate::naming::NamingInput { publisher: publisher.clone(), series: name.clone(), series_year: year, ..Default::default() };
+        let Some(parts) = crate::naming::folder_segments(&pattern, &input) else { continue; };
+        let folder = std::path::Path::new(&lib_path).join(parts.join("/")).to_string_lossy().replace('\\', "/");
+        let res = sqlx::query(&format!(
+            r#"INSERT INTO "Series" (id, name, publisher, year, "folderPath", "metadataId", "metadataSource", "matchState", monitored, "isManga", "libraryId", "updatedAt")
+               VALUES ($1, $2, $3, $4, $5, $6, 'METRON', 'MATCHED', false, false, $7, {now})
+               ON CONFLICT ("metadataSource", "metadataId") DO NOTHING"#,
+            now = db.now_expr()
+        ))
+        .bind(uuid::Uuid::new_v4().to_string()).bind(name).bind(publisher.as_deref().unwrap_or("Unknown")).bind(year)
+        .bind(&folder).bind(sid).bind(&lib_id)
+        .execute(&db.pool).await;
+        match res {
+            Ok(r) if r.rows_affected() > 0 => added += 1,
+            Ok(_) => {}
+            Err(e) => log::warn!("[Series Monitor] Adding pull-list series \"{}\" failed: {:?}", name, e),
+        }
+    }
+    added
+}
+
 async fn update_skeleton_release_date(db: &Db, issue_id: &str, release_date: &str) {
     let _ = sqlx::query(r#"UPDATE "Issue" SET "releaseDate" = $1 WHERE id = $2"#)
         .bind(release_date).bind(issue_id).execute(&db.pool).await;
@@ -850,6 +887,8 @@ async fn phase1_metron(
     let mut checked = load_audit_checked(db).await;
     let mut skipped: std::collections::BTreeMap<(String, Option<i32>), (usize, usize)> = std::collections::BTreeMap::new();
     let (mut relocated, mut deleted, mut evicted) = (0usize, 0usize, 0usize);
+    // Fork: pull-list series the library doesn't have yet (Metron series id → name, start year, publisher)
+    let mut unknown: HashMap<String, (String, Option<i32>, Option<String>)> = HashMap::new();
 
     for m in &metron_issues {
         let m_id = jstr(m.get("id")).unwrap_or_default();
@@ -881,8 +920,14 @@ async fn phase1_metron(
                 {
                     evicted += 1;
                 }
-                if let MetronMatch::Ambiguous { candidates: n } = unhoused {
-                    skipped.entry((m_series_raw.to_string(), year_began)).or_insert((0, n)).0 += 1;
+                match unhoused {
+                    MetronMatch::Ambiguous { candidates: n } => skipped.entry((m_series_raw.to_string(), year_began)).or_insert((0, n)).0 += 1,
+                    // Not when a same-name volume of about that year exists under a differently spelled publisher
+                    _ => if let Some(sid) = m_series_id.as_ref().filter(|_| !m_series_name.is_empty() && !series.iter().any(|s|
+                        normalize(&s.name) == m_series_name && (s.year == 0 || year_began.is_none_or(|y| (s.year - y).abs() <= 1)))) {
+                        let publisher = m.pointer("/publisher/name").or_else(|| m.pointer("/series/publisher/name")).and_then(|v| v.as_str()).map(|p| p.to_string());
+                        unknown.entry(sid.clone()).or_insert((m_series_raw.trim().to_string(), year_began, publisher));
+                    },
                 }
                 continue;
             }
@@ -931,6 +976,11 @@ async fn phase1_metron(
                 }
             }
         }
+    }
+
+    let added = add_pull_list_series(db, &unknown).await;
+    if added > 0 {
+        notes.push(format!("[Phase 1] Added {} pull-list series the library didn't have (not monitored; their issues follow on the next run).", added));
     }
 
     for ((name, year), (count, n)) in &skipped {
@@ -1202,6 +1252,32 @@ mod tests {
                        VALUES ($1,$2,$3,$4,NULL,$5,$6,$7,$8,$9)"#)
             .bind(id).bind(series_id).bind(num).bind(path).bind(annual).bind(lane).bind(covers).bind(meta_id).bind(source)
             .execute(&db.pool).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn pull_list_series_are_added_unmonitored_once() {
+        let db = fixture("pulllist").await;
+        for ddl in [
+            r#"ALTER TABLE "Series" ADD COLUMN "folderPath" TEXT"#,
+            r#"ALTER TABLE "Series" ADD COLUMN "matchState" TEXT"#,
+            r#"ALTER TABLE "Series" ADD COLUMN "libraryId" TEXT"#,
+            r#"ALTER TABLE "Series" ADD COLUMN "updatedAt" TEXT"#,
+            r#"CREATE UNIQUE INDEX series_meta ON "Series" ("metadataSource", "metadataId")"#,
+            r#"CREATE TABLE "Library" (id TEXT PRIMARY KEY, path TEXT, "isDefault" INTEGER, "isManga" INTEGER)"#,
+            r#"INSERT INTO "Library" VALUES ('manga', '/manga', 1, 1), ('comics', '/comics', 1, 0)"#,
+        ] {
+            sqlx::query(ddl).execute(&db.pool).await.unwrap();
+        }
+        let unknown: HashMap<String, (String, Option<i32>, Option<String>)> =
+            [("123".to_string(), ("Absolute Flash".to_string(), Some(2025), Some("DC Comics".to_string())))].into();
+
+        assert_eq!(add_pull_list_series(&db, &unknown).await, 1);
+        assert_eq!(add_pull_list_series(&db, &unknown).await, 0, "the same Metron series is never added twice");
+        let row = sqlx::query(r#"SELECT "folderPath", "libraryId", CAST(monitored AS INTEGER) AS monitored FROM "Series" WHERE "metadataId" = '123'"#)
+            .fetch_one(&db.pool).await.unwrap();
+        assert_eq!(row.get::<String, _>("folderPath"), "/comics/DC Comics/Absolute Flash (2025)");
+        assert_eq!(row.get::<String, _>("libraryId"), "comics");
+        assert_eq!(row.get::<i64, _>("monitored"), 0, "added, not monitored");
     }
 
     #[tokio::test]

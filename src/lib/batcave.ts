@@ -15,6 +15,18 @@ export function normSeriesName(name: string): string {
     return String(name || '').toLowerCase().replace(/&/g, 'and').replace(/^the\s+/, '').replace(/[^a-z0-9]/g, '');
 }
 
+/** A Batcave event and an Omnibus reading list: "[DC] Knight Terrors (2023)" and "Knight Terrors Reading Order" → "knightterrors". */
+export function eventKey(name: string): string {
+    return normSeriesName(String(name || '').replace(/^\s*\[[^\]]*\]\s*/, '').replace(/\(\d{4}(-\d{0,4})?\)/g, '').replace(/reading order\s*$/i, ''));
+}
+
+/** Same event: same key, and no differing years when both name one ("Secret Wars (2015)" is not "Secret Wars (1984)"). */
+export function sameEvent(a: string, b: string): boolean {
+    const year = (n: string) => n.match(/\((\d{4})/)?.[1];
+    const [ya, yb] = [year(a), year(b)];
+    return !!eventKey(a) && eventKey(a) === eventKey(b) && (!ya || !yb || ya === yb);
+}
+
 /** Issue number as both sides can compare it: "001" → "1", "23.10" → "23.1", "½" stays as is. */
 export function normIssueNumber(n: string | number): string {
     const s = String(n ?? '').trim();

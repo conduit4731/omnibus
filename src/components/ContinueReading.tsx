@@ -85,7 +85,8 @@ export function ContinueReading({ excludePaths }: { excludePaths?: Set<string> }
   };
 
   const shown = excludePaths ? items.filter(item => !excludePaths.has(item.filePath)) : items;
-  if (loading || shown.length === 0) return null;
+  // Wait for the reading list shelf, or its issues flash here first and then jump over to it
+  if (loading || !excludePaths || shown.length === 0) return null;
 
   return (
     <div className="space-y-4">

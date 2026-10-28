@@ -1,8 +1,17 @@
 // __tests__/lib/batcave.test.ts
 import { describe, it, expect } from 'vitest';
-import { normIssueNumber, parseBatcaveTitle, pickCvVolume, pickSeries, uploadFileName } from '@/lib/batcave';
+import { eventKey, normIssueNumber, sameEvent, parseBatcaveTitle, pickCvVolume, pickSeries, uploadFileName } from '@/lib/batcave';
 
 describe('lib/batcave', () => {
+    it('matches a Batcave event title to the reading list name', () => {
+        expect(eventKey('Knight Terrors Reading Order')).toBe(eventKey('[DC] Knight Terrors (2023)'));
+        expect(eventKey('Knight Terrors')).toBe('knightterrors');
+        expect(eventKey('Dark Nights: Metal')).not.toBe(eventKey('Dark Nights: Death Metal'));
+        expect(sameEvent('Secret Wars (2015)', '[Marvel] Secret Wars (2015)')).toBe(true);
+        expect(sameEvent('Secret Wars (2015)', 'Secret Wars (1984)')).toBe(false);
+        expect(sameEvent('Dark Reign', 'Dark Reign (2008)')).toBe(true);
+    });
+
     it('parses Batcave series titles', () => {
         expect(parseBatcaveTitle('New Avengers: Illuminati (2007)')).toEqual({ name: 'New Avengers: Illuminati', year: 2007 });
         expect(parseBatcaveTitle('Secret Invasion Prologue (2008-)')).toEqual({ name: 'Secret Invasion Prologue', year: 2008 });

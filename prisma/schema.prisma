@@ -193,7 +193,7 @@ model Series {
   folderPath      String
   universe        String?
   seriesGroup     String?  // ComicInfo <SeriesGroup>; umbrella folder for related series (providers don't supply it — set from ComicInfo.xml or manually)
-  monitored       Boolean?
+  monitored       Boolean? @default(true) // fork: every series is monitored unless turned off (Batcave series opt out explicitly)
   isManga         Boolean  @default(false)
   size            Float?   @default(0)
   
@@ -646,6 +646,7 @@ model ReadingList {
   id          String            @id @default(cuid())
   name        String
   description String?
+  guide       String?           // fork: Batcave event guide ("Start here" … FAQ), sanitized HTML from the userscript
   coverUrl    String?
   userId      String?
   user        User?             @relation(fields: [userId], references: [id], onDelete: Cascade)

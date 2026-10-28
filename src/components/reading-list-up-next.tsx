@@ -68,7 +68,7 @@ export function ReadingListUpNext({ onLoaded }: { onLoaded?: (filePaths: Set<str
                 setLists(ok);
                 onLoaded?.(new Set(ok.flatMap((d: any) => d.items.flatMap((i: any) => i.issue?.filePath ? [i.issue.filePath] : []))));
             })
-            .catch(() => setLists([]));
+            .catch(() => { setLists([]); onLoaded?.(new Set()); });
         // eslint-disable-next-line react-hooks/exhaustive-deps -- once per visit
     }, []);
 

@@ -301,11 +301,11 @@ function ReaderContent() {
         } else {
             setNextIssue(null);
         }
-        // Reading list: the next entry after this one that has a file, whatever its series
+        // Reading list: the next unread entry after this one that has a file, whatever its series
         const listItems: any[] = listData?.items || [];
         const listIdx = listItems.findIndex(i => i.issue?.filePath === filePath);
         if (listIdx > -1) {
-            const next = listItems.slice(listIdx + 1).find(i => i.issue?.filePath && i.issue.series?.folderPath);
+            const next = listItems.slice(listIdx + 1).find(i => i.issue?.filePath && i.issue.series?.folderPath && !i.progress?.isCompleted);
             setNextIssue(next ? { path: next.issue.filePath, name: `${next.issue.series.name} #${next.issue.number}`, series: next.issue.series.folderPath } : null);
         }
 
