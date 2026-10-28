@@ -1261,7 +1261,7 @@ function SeriesContent() {
                       <div className="absolute top-3 left-3 flex flex-col gap-2 z-20 pointer-events-none">
                           {downloadedIssues.length === 0 ? (
                               <Badge className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-lg px-2.5 py-1 text-[10px] font-black uppercase tracking-widest">
-                                  Pending
+                                  Not downloaded
                               </Badge>
                           ) : seriesInfo.matchState === 'UNMATCHED' ? (
                               <Badge className="bg-orange-500 hover:bg-orange-600 text-white border-0 shadow-lg px-2.5 py-1 text-[10px] font-black uppercase tracking-widest">
