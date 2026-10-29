@@ -20,3 +20,47 @@ jobs:
       - run: npx prisma generate
       - run: npx tsc --noEmit
       - run: npx vitest run
+
+  # The fork changes the Rust engine too (monitor.rs), so the server runs an engine built from here, not upstream's.
+  # Tagged v<version>-<tree hash of omnibus-engine/>: an unchanged engine folder is neither rebuilt nor retested.
+  # omnibus-update.sh pulls ghcr.io/conduit4731/omnibus-engine:<that tag> once this run is green.
+  engine:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - id: tag
+        run: |
+          echo "image=ghcr.io/${{ github.repository_owner }}/omnibus-engine:v$(jq -r .version package.json)-$(git rev-parse HEAD:omnibus-engine | cut -c1-12)" >> "$GITHUB_OUTPUT"
+          echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: have
+        run: docker manifest inspect "${{ steps.tag.outputs.image }}" >/dev/null 2>&1 && echo hit=1 >> "$GITHUB_OUTPUT" || true
+      - if: steps.have.outputs.hit != '1'
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96.0"  # same as the engine Dockerfile
+      - if: steps.have.outputs.hit != '1'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: omnibus-engine
+      - if: steps.have.outputs.hit != '1'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential clang libclang-dev pkg-config
+      - if: steps.have.outputs.hit != '1'
+        working-directory: omnibus-engine
+        run: cargo test
+      - if: steps.have.outputs.hit != '1'
+        uses: docker/build-push-action@v5
+        with:
+          context: ./omnibus-engine
+          push: true
+          tags: ${{ steps.tag.outputs.image }}
+          build-args: OMNIBUS_VERSION=${{ steps.tag.outputs.version }}
+          cache-from: type=gha,scope=engine
+          cache-to: type=gha,mode=max,scope=engine

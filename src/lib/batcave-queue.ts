@@ -262,8 +262,8 @@ export async function queueAwaitingForBatcave(userId?: string | null, maxLookups
 }
 
 /**
- * Open requests (Awaiting, GetComics hold, Needs review, failed) whose issue Batcave delivered (job DONE) or that is
- * in the library by now are closed COMPLETED — else they stay "action needed" and the parked re-search fetches the
+ * Open requests (Awaiting, GetComics hold, Needs review, failed) whose issue is in the library by now (a Batcave
+ * job DONE only means uploaded to the inbox; the import can still fail) are closed COMPLETED — else they stay "action needed" and the parked re-search fetches the
  * issue a second time. No ComicVine calls: a request without volume id finds its series by name + year (pickSeries).
  * Runs on every worker poll and in the Series Monitor.
  */
@@ -294,10 +294,8 @@ export async function closeDeliveredRequests(): Promise<number> {
         return { req: r, seriesId, number: requestIssue(r) };
     }).filter(t => t.seriesId && t.number);
     const seriesIds = [...new Set(targets.map(t => t.seriesId!))];
-    const delivered = new Set([
-        ...(await prisma.batcaveJob.findMany({ where: { seriesId: { in: seriesIds }, status: 'DONE', isAnnual: false }, select: { seriesId: true, number: true } })),
-        ...(await prisma.issue.findMany({ where: { seriesId: { in: seriesIds }, status: 'DOWNLOADED', isAnnual: false }, select: { seriesId: true, number: true } })),
-    ].map(x => `${x.seriesId}|${normIssueNumber(x.number)}`));
+    const delivered = new Set((await prisma.issue.findMany({ where: { seriesId: { in: seriesIds }, status: 'DOWNLOADED', isAnnual: false }, select: { seriesId: true, number: true } }))
+        .map(x => `${x.seriesId}|${normIssueNumber(x.number)}`));
     const done = targets.filter(t => delivered.has(`${t.seriesId}|${t.number}`)).map(t => t.req);
     // The same close as an import that landed: COMPLETED, notified: false and one "available" alert
     for (const r of done) await closeAsCompleted(r, { imported: 1, unmatched: 0, reason: 'handoff' });

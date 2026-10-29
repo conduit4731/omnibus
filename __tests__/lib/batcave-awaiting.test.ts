@@ -68,17 +68,17 @@ describe('queueAwaitingForBatcave', () => {
         expect(m.cvGet).toHaveBeenCalledTimes(1); // Steel looked up (and not found), Batgirl waits for the next run
     });
 
-    it('closes requests whose issue Batcave delivered or that is in the library, found by id or name + year', async () => {
+    it('closes requests whose issue is in the library, found by id or name + year; a Batcave upload alone does not', async () => {
         m.requests = [
-            { id: 'b', volumeId: '100', metadataSource: 'COMICVINE', issueNumber: '2', activeDownloadName: 'Flash #2' },         // job DONE
+            { id: 'b', volumeId: '100', metadataSource: 'COMICVINE', issueNumber: '2', activeDownloadName: 'Flash #2' },         // job DONE, import not landed
             { id: 'c', volumeId: '100', metadataSource: 'COMICVINE', issueNumber: '3', activeDownloadName: 'Flash #3' },         // nothing yet
             { id: 'r', volumeId: '0', metadataSource: 'COMICVINE', issueNumber: '1', activeDownloadName: 'Detective Comics – Endgame #1 (2015).zip' }, // on disk
             // A pack and a whole-title request name no issue: #1 being on disk must not close them
             { id: 'p', volumeId: '7', metadataSource: 'COMICVINE', issueNumber: null, activeDownloadName: 'Detective Comics: Endgame #1-6 (2015)' },
             { id: 'v', volumeId: '7', metadataSource: 'COMICVINE', issueNumber: null, activeDownloadName: 'Detective Comics: Endgame (2015)' },
         ];
-        expect(await closeDeliveredRequests()).toBe(2);
-        expect(m.closed).toEqual(['b', 'r']);
+        expect(await closeDeliveredRequests()).toBe(1);
+        expect(m.closed).toEqual(['r']);
     });
 
     it('a pack request is never queued as its first issue', async () => {

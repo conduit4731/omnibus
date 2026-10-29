@@ -17,6 +17,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   sync:
@@ -56,3 +57,10 @@ jobs:
       - name: Push
         if: env.NEW == '1'
         run: git push origin HEAD:main --tags
+
+      # A push with GITHUB_TOKEN starts no workflows; Fork CI must still run so the engine image for this commit exists
+      - name: Start Fork CI
+        if: env.NEW == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run fork-ci.yml --ref main
