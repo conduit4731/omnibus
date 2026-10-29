@@ -28,15 +28,16 @@ import {
 } from "@/components/ui/select"
 
 // Fork: one table for tabs, filter and the status ring (label, statuses, ring colour)
-const STATUS_GROUPS: { tab: string, label: string, statuses: string[], color: string }[] = [
-  { tab: "ACTIVE", label: "Active / DL", statuses: ['DOWNLOADING', 'PENDING', 'MANUAL_DDL', 'IMPORTING'], color: '#3b82f6' }, // IMPORTING: upstream #240
-  { tab: "PENDING_APPROVAL", label: "Pending", statuses: ['PENDING_APPROVAL'], color: '#f97316' },
-  { tab: "UNRELEASED", label: "Unreleased", statuses: ['UNRELEASED'], color: '#a855f7' },
-  { tab: "AWAITING", label: "Awaiting", statuses: ['AWAITING_RELEASE'], color: '#0ea5e9' },
-  { tab: "COMPLETED", label: "Completed", statuses: ['IMPORTED', 'COMPLETED'], color: '#22c55e' },
-  { tab: "REVIEW", label: "Review", statuses: ['NEEDS_REVIEW'], color: '#eab308' }, // v1.4.9: a pack imported, but not this issue
-  { tab: "FAILED", label: "Failed", statuses: ['FAILED', 'STALLED', 'ERROR'], color: '#ef4444' },
-  { tab: "CANCELLED", label: "Cancelled", statuses: ['CANCELLED'], color: '#64748b' },
+const STATUS_GROUPS: { tab: string, label: string, statuses: string[], color: string, hint: string }[] = [
+  { tab: "ACTIVE", label: "Active / DL", statuses: ['DOWNLOADING', 'PENDING', 'IMPORTING'], color: '#3b82f6', hint: "Searching, downloading or importing right now" }, // IMPORTING: upstream #240
+  { tab: "GETCOMICS", label: "GetComics", statuses: ['MANUAL_DDL'], color: '#f59e0b', hint: "GetComics link found but Cloudflare blocks the auto-download; download it by hand" },
+  { tab: "PENDING_APPROVAL", label: "Pending", statuses: ['PENDING_APPROVAL'], color: '#f97316', hint: "Waiting for an admin to approve the request" },
+  { tab: "UNRELEASED", label: "Awaiting", statuses: ['UNRELEASED'], color: '#a855f7', hint: "Release date still ahead; searched automatically once it is out" },
+  { tab: "AWAITING", label: "No source", statuses: ['AWAITING_RELEASE'], color: '#0ea5e9', hint: "Released, but no indexer or GetComics had it; retried automatically" },
+  { tab: "COMPLETED", label: "Completed", statuses: ['IMPORTED', 'COMPLETED'], color: '#22c55e', hint: "In the library" },
+  { tab: "REVIEW", label: "Not in pack", statuses: ['NEEDS_REVIEW'], color: '#eab308', hint: "A pack was downloaded and imported, but this issue was not in it; check the pack" }, // v1.4.9
+  { tab: "FAILED", label: "Failed", statuses: ['FAILED', 'STALLED', 'ERROR'], color: '#ef4444', hint: "Download failed, or several editions matched and need an interactive pick" },
+  { tab: "CANCELLED", label: "Cancelled", statuses: ['CANCELLED'], color: '#64748b', hint: "Cancelled by a user" },
 ];
 // Requests that wait for you: a GetComics link behind Cloudflare, an admin approval, or an import to review
 const needsAction = (r: any) => r.status === 'MANUAL_DDL' || r.status === 'PENDING_APPROVAL' || r.status === 'NEEDS_REVIEW';
@@ -59,7 +60,7 @@ function batcaveBodyOf(req: any, others: any[] = []) {
     issues: [req, ...others].map(x => String(x.issueNumber || (String(x.seriesName || '').match(/#\s*([^\s(]+)/) || [])[1] || '')).filter(Boolean).map(number => ({ number })) };
 }
 const CANCELLABLE = ['PENDING_APPROVAL', 'PENDING', 'DOWNLOADING', 'MANUAL_DDL', 'UNRELEASED', 'AWAITING_RELEASE'];
-const statusLabel = (status: string) => status === 'PENDING_APPROVAL' ? 'Needs Approval' : status === 'NEEDS_REVIEW' ? 'Needs review' : status === 'MANUAL_DDL' ? 'GETCOMICS' : status === 'AWAITING_RELEASE' ? 'Awaiting' : status === 'IMPORTING' ? 'Importing…' : status;
+const statusLabel = (status: string) => status === 'PENDING_APPROVAL' ? 'Needs Approval' : status === 'NEEDS_REVIEW' ? 'Not in pack' : status === 'MANUAL_DDL' ? 'GETCOMICS' : status === 'AWAITING_RELEASE' ? 'No source found' : status === 'UNRELEASED' ? 'Awaiting release' : status === 'IMPORTING' ? 'Importing…' : status;
 
 // Fork: ring of all requests by status group; a click filters to that group
 function StatusRing({ requests, active, onSelect }: { requests: any[], active: string, onSelect: (tab: string) => void }) {
@@ -610,9 +611,9 @@ export default function RequestsPage() {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="w-full flex flex-wrap justify-start gap-1 h-auto! p-1 bg-muted border border-border [&>*]:flex-none">{/* fork: wraps instead of overflowing on both sides */}
             <TabsTrigger value="ALL" className="px-4 py-2">All <span className="ml-1.5 text-xs opacity-60">{requests.length}</span></TabsTrigger>
-            <TabsTrigger value="NEEDS_ACTION" className="px-4 py-2 text-amber-500 data-[state=active]:text-amber-500">Needs action <span className="ml-1.5 text-xs opacity-80">{requests.filter(needsAction).length}</span></TabsTrigger>
+            <TabsTrigger value="NEEDS_ACTION" title="Everything waiting on you: GetComics links to download by hand, approvals, issues missing from a pack" className="px-4 py-2 text-amber-500 data-[state=active]:text-amber-500">Needs action <span className="ml-1.5 text-xs opacity-80">{requests.filter(needsAction).length}</span></TabsTrigger>
             {STATUS_GROUPS.map(g => (
-              <TabsTrigger key={g.tab} value={g.tab} className="px-4 py-2">{g.label} <span className="ml-1.5 text-xs opacity-60">{requests.filter(r => g.statuses.includes(r.status)).length}</span></TabsTrigger>
+              <TabsTrigger key={g.tab} value={g.tab} title={g.hint} className="px-4 py-2">{g.label} <span className="ml-1.5 text-xs opacity-60">{requests.filter(r => g.statuses.includes(r.status)).length}</span></TabsTrigger>
             ))}
         </TabsList>
       </Tabs>

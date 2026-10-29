@@ -194,6 +194,7 @@ export function AdminRequestManagement() {
     if (status === 'DOWNLOADING') return "bg-primary/20 text-primary border-primary/30";
     if (status === 'PENDING_APPROVAL') return "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400 border-orange-200 dark:border-orange-800";
     if (status === 'UNRELEASED') return "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400 border-purple-200 dark:border-purple-800";
+    if (status === 'AWAITING_RELEASE') return "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400 border-sky-200 dark:border-sky-800";
     // #240 PR B: handed to the watched folder, waiting on the sweep (parity with the admin badges).
     if (status === 'IMPORTING') return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 border-blue-300 dark:border-blue-800";
     // #240: the dedupe's terminal-but-not-done state — a person has to look at the pack.
@@ -283,12 +284,13 @@ export function AdminRequestManagement() {
               <SelectItem value="ALL" className="focus:bg-primary/10 focus:text-primary">All Statuses</SelectItem>
               <SelectItem value="PENDING_APPROVAL" className="focus:bg-primary/10 focus:text-primary">Needs Approval</SelectItem>
               <SelectItem value="PENDING" className="focus:bg-primary/10 focus:text-primary">Pending Search</SelectItem>
-              <SelectItem value="UNRELEASED" className="focus:bg-primary/10 focus:text-primary">Unreleased</SelectItem>
+              <SelectItem value="UNRELEASED" className="focus:bg-primary/10 focus:text-primary">Awaiting Release</SelectItem>
+              <SelectItem value="AWAITING_RELEASE" className="focus:bg-primary/10 focus:text-primary">No Source Found</SelectItem>
               <SelectItem value="DOWNLOADING" className="focus:bg-primary/10 focus:text-primary">Downloading</SelectItem>
               <SelectItem value="IMPORTED" className="focus:bg-primary/10 focus:text-primary">Imported</SelectItem>
               <SelectItem value="STALLED" className="focus:bg-primary/10 focus:text-primary">Stalled / Failed</SelectItem>
               <SelectItem value="IMPORTING" className="focus:bg-primary/10 focus:text-primary">Importing</SelectItem>
-              <SelectItem value="NEEDS_REVIEW" className="focus:bg-primary/10 focus:text-primary">Needs Review</SelectItem>
+              <SelectItem value="NEEDS_REVIEW" className="focus:bg-primary/10 focus:text-primary">Not In Pack</SelectItem>
             </SelectContent>
           </Select>
 
@@ -364,7 +366,7 @@ export function AdminRequestManagement() {
                     <td className="px-4 py-3 text-muted-foreground truncate">{req.userName}</td>
                     <td className="px-4 py-3">
                       <Badge className={`${getStatusColor(req.status)} text-[10px] uppercase font-bold px-2 py-0.5 truncate`}>
-                        {req.status === 'PENDING_APPROVAL' ? 'Needs Approval' : req.status === 'IMPORTING' ? 'Importing…' : req.status === 'NEEDS_REVIEW' ? 'Needs Review' : req.status}
+                        {req.status === 'PENDING_APPROVAL' ? 'Needs Approval' : req.status === 'IMPORTING' ? 'Importing…' : req.status === 'NEEDS_REVIEW' ? 'Not In Pack' : req.status === 'UNRELEASED' ? 'Awaiting Release' : req.status === 'AWAITING_RELEASE' ? 'No Source Found' : req.status}
                       </Badge>
                       {req.status === 'STALLED' && (
                         <Badge variant="outline" className="text-[9px] uppercase font-black px-1.5 py-0 border-blue-500 text-blue-600 bg-blue-50 dark:bg-blue-900/20 ml-2">
@@ -440,7 +442,7 @@ export function AdminRequestManagement() {
                         <Users className="w-3.5 h-3.5" /> <span className="font-medium truncate">{req.userName}</span>
                       </div>
                       <Badge className={`${getStatusColor(req.status)} text-[10px] uppercase font-bold px-2 py-0.5`}>
-                        {req.status === 'PENDING_APPROVAL' ? 'Needs Approval' : req.status === 'IMPORTING' ? 'Importing…' : req.status === 'NEEDS_REVIEW' ? 'Needs Review' : req.status}
+                        {req.status === 'PENDING_APPROVAL' ? 'Needs Approval' : req.status === 'IMPORTING' ? 'Importing…' : req.status === 'NEEDS_REVIEW' ? 'Not In Pack' : req.status === 'UNRELEASED' ? 'Awaiting Release' : req.status === 'AWAITING_RELEASE' ? 'No Source Found' : req.status}
                       </Badge>
                       {req.status === 'STALLED' && (
                           <div className="mt-1.5">

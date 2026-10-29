@@ -348,7 +348,7 @@ export async function runSystemHealthCheck() {
     if (awaitingReqs.length > 0) {
         results.push({
             id: 'awaiting_release',
-            name: 'Awaiting Availability',
+            name: 'No Source Found',
             status: 'ok',
             message: `${awaitingReqs.length} request(s) aren't available on any source yet — Omnibus will keep retrying automatically. This is normal for brand-new or small-press titles.`,
             actionLink: '/admin',
