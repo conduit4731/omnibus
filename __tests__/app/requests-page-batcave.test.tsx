@@ -38,9 +38,9 @@ describe('My Requests: Batcave for many at once', () => {
         ]);
     });
 
-    it('"Alle" in Awaiting queues the shown awaiting issues, one entry per series', async () => {
+    it('"Alle" in No source queues the shown no-source issues, one entry per series', async () => {
         await act(async () => { render(<RequestsPage />); });
-        await act(async () => { fireEvent.mouseDown(screen.getByRole('tab', { name: /Awaiting/ })); });
+        await act(async () => { fireEvent.mouseDown(screen.getByRole('tab', { name: /No source/ })); });
         await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Alle 3 angezeigten Hefte über Batcave laden' })); });
 
         expect(queued).toEqual([{ batch: [

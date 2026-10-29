@@ -619,7 +619,7 @@ export default function RequestsPage() {
       </Tabs>
 
       {/* Fork: everything shown in these tabs (search applies) onto the Batcave queue in one press */}
-      {["NEEDS_ACTION", "REVIEW", "AWAITING"].includes(activeTab) && filteredRequests.some(batcaveWorthy) && (
+      {["NEEDS_ACTION", "GETCOMICS", "REVIEW", "AWAITING"].includes(activeTab) && filteredRequests.some(batcaveWorthy) && (
           <AllSources label={`Alle ${filteredRequests.filter(batcaveWorthy).length} über Batcave`}>
               <BatcaveButton title={`Alle ${filteredRequests.filter(batcaveWorthy).length} angezeigten Hefte über Batcave laden`} body={() => batcaveBatchOf(filteredRequests)} />
           </AllSources>
