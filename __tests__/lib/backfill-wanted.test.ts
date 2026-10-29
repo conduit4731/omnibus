@@ -32,4 +32,9 @@ describe('pickBackfill (fork)', () => {
         );
         expect(picked.map(g => g.volumeId)).toEqual(['99999']);
     });
+
+    it('skips issues on the Batcave queue', () => {
+        const picked = pickBackfill([gap('5', '2012-03-01'), gap('6', '2012-04-01')], [], 10, new Set(['42722|5']));
+        expect(picked.map(g => g.number)).toEqual(['6']);
+    });
 });

@@ -57,6 +57,8 @@ export async function POST(request: Request) {
             return url ? [url] : [];
         });
         result[id] = covers;
+        // Nothing found (list still empty, no such list): not remembered, so covers show once issues are added
+        if (covers.length === 0) continue;
         await prisma.systemSetting.upsert({
             where: { key: `list_covers:${id}` }, update: { value: JSON.stringify(covers) }, create: { key: `list_covers:${id}`, value: JSON.stringify(covers) },
         });
