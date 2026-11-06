@@ -19,7 +19,10 @@ export async function listMeta(lists: ListRow[]): Promise<Map<string, ListMeta>>
             select: { listId: true, title: true, year: true, issue: { select: { coverUrl: true, releaseDate: true, series: { select: { publisher: true, year: true } } } } },
         });
         const byList = new Map<string, typeof items>();
-        for (const item of items) byList.set(item.listId, [...(byList.get(item.listId) || []), item]);
+        for (const item of items) {
+            const rows = byList.get(item.listId);
+            if (rows) rows.push(item); else byList.set(item.listId, [item]);
+        }
         for (const l of missing) {
             const rows = byList.get(l.id) || [];
             const { publisher, category } = classifyList(l, rows.map(r => r.issue?.series?.publisher ?? null));

@@ -532,7 +532,7 @@ fn has_same_name_volume(series: &[SeriesRec], m_series_name: &str, year_began: O
 /// Fork: every pull-list series the library lacks becomes a Metron-sourced series row, monitored, so its new issues
 /// are requested automatically (user's call, 2026-11-02). Folder from the naming pattern in the default comics library, created empty
 /// so the scan's ghost purge (unmonitored + folder missing) leaves the row alone.
-/// shortcut: the series is not in this run's in-memory list, so its skeletons come with the next run.
+/// Its full issue list comes from the same run's `unsynced_series` sync.
 async fn add_pull_list_series(db: &Db, unknown: &HashMap<String, (String, Option<i32>, Option<String>)>) -> usize {
     if unknown.is_empty() { return 0; }
     let pattern: Option<String> = sqlx::query_scalar(r#"SELECT value FROM "SystemSetting" WHERE key = 'folder_naming_pattern'"#)
@@ -570,6 +570,18 @@ async fn add_pull_list_series(db: &Db, unknown: &HashMap<String, (String, Option
         }
     }
     added
+}
+
+/// Series synced per monitor run. Three Metron calls or so each, well inside the daily budget.
+const UNSYNCED_PER_RUN: i64 = 100;
+
+/// Fork: a monitored series that never had a metadata sync holds only the issues the pull-list window brought
+/// (Aladdin: #4 onwards, no row for #1-3), so its older issues never showed as missing and the gap backfill
+/// never saw them. The scheduled sweep takes 15 series a day across the whole library, so it can't catch up.
+async fn unsynced_series(db: &Db) -> Vec<String> {
+    sqlx::query_scalar(
+        r#"SELECT id FROM "Series" WHERE monitored = true AND "metadataId" IS NOT NULL AND "lastMetadataSync" IS NULL ORDER BY "updatedAt" ASC LIMIT $1"#,
+    ).bind(UNSYNCED_PER_RUN).fetch_all(&db.pool).await.unwrap_or_default()
 }
 
 async fn update_skeleton_release_date(db: &Db, issue_id: &str, release_date: &str) {
@@ -991,7 +1003,7 @@ async fn phase1_metron(
 
     let added = add_pull_list_series(db, &unknown).await;
     if added > 0 {
-        notes.push(format!("[Phase 1] Added {} pull-list series the library didn't have (monitored; their issues are requested from the next run).", added));
+        notes.push(format!("[Phase 1] Added {} pull-list series the library didn't have (monitored).", added));
     }
 
     for ((name, year), (count, n)) in &skipped {
@@ -1178,6 +1190,19 @@ pub async fn run_series_monitor(db: Db) -> Result<MonitorOutput> {
         }
     }
 
+    // Last, so it never races the skeleton upserts above. Not awaited: rate-limited syncs can take far longer
+    // than the job should; the gap backfill requests what they find from the next run.
+    let unsynced = unsynced_series(&db).await;
+    if !unsynced.is_empty() {
+        notes.push(format!("[Monitor] Fetching the full issue list of {} never-synced monitored series.", unsynced.len()));
+        let db = db.clone();
+        tokio::spawn(async move {
+            if let Err(e) = crate::metadata::sync_metadata(db, Some(unsynced), false, None).await {
+                log::error!("[Series Monitor] Syncing never-synced series failed: {:?}", e);
+            }
+        });
+    }
+
     Ok(MonitorOutput { skeletons_created, metron_fetched: metron_fetched as i32, notes, candidates })
 }
 
@@ -1263,6 +1288,22 @@ mod tests {
                        VALUES ($1,$2,$3,$4,NULL,$5,$6,$7,$8,$9)"#)
             .bind(id).bind(series_id).bind(num).bind(path).bind(annual).bind(lane).bind(covers).bind(meta_id).bind(source)
             .execute(&db.pool).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn only_monitored_matched_series_without_a_sync_are_picked() {
+        let db = fixture("unsynced").await;
+        for ddl in [r#"ALTER TABLE "Series" ADD COLUMN "lastMetadataSync" TEXT"#, r#"ALTER TABLE "Series" ADD COLUMN "updatedAt" TEXT"#] {
+            sqlx::query(ddl).execute(&db.pool).await.unwrap();
+        }
+        insert_series(&db, "new", "Aladdin", "Dynamite", 2026, "15471", "METRON", 1, None).await;
+        insert_series(&db, "off", "Saga", "Image", 2012, "4000", "METRON", 0, None).await;
+        insert_series(&db, "done", "Batman", "DC", 2016, "4001", "METRON", 1, None).await;
+        insert_series(&db, "bare", "Local", "Unknown", 2020, "x", "LOCAL", 1, None).await;
+        sqlx::query(r#"UPDATE "Series" SET "lastMetadataSync" = '2026-01-01' WHERE id = 'done'"#).execute(&db.pool).await.unwrap();
+        sqlx::query(r#"UPDATE "Series" SET "metadataId" = NULL WHERE id = 'bare'"#).execute(&db.pool).await.unwrap();
+
+        assert_eq!(unsynced_series(&db).await, vec!["new".to_string()]);
     }
 
     #[tokio::test]

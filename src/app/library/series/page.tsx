@@ -16,7 +16,7 @@ import {
   RefreshCw, Search, Edit, Copy, Check, CloudDownload, CloudOff, Heart, Trash2,
   CheckCircle2, DownloadCloud, Users, Sparkles, AlertTriangle,
   LayoutGrid, List, CheckSquare, Square, EyeOff, Tags, BookMarked, Star,
-  MapPin, Shield, FolderSearch, Upload, RotateCcw, FolderInput, Bell, BellRing
+  MapPin, Shield, FolderSearch, Upload, RotateCcw, FolderInput, Bell, BellRing, ChevronDown
 } from "lucide-react"
 import Link from "next/link"
 import { Badge } from "@/components/ui/badge"
@@ -1364,6 +1364,12 @@ function SeriesContent() {
                       {seriesInfo.isFollowing ? <BellRing className="w-4 h-4 mr-2" /> : <Bell className="w-4 h-4 mr-2" />} {seriesInfo.isFollowing ? "Following" : "Follow"}
                   </Button>
                   
+                  {(isAdmin || seriesInfo.metadataId) && (
+                  <details className="group">
+                  <summary className="flex cursor-pointer list-none items-center justify-between rounded-md border border-border px-4 py-2 text-sm font-bold text-foreground hover:bg-muted [&::-webkit-details-marker]:hidden">
+                      Manage series <ChevronDown className="w-4 h-4 transition-transform group-open:rotate-180" />
+                  </summary>
+                  <div className="mt-3 space-y-3">
                   {isAdmin && (
                       <Button variant="outline" className="w-full border-border hover:bg-muted text-foreground font-bold" onClick={() => setEditModalOpen(true)}>
                           <Edit className="w-4 h-4 mr-2" /> Edit Info
@@ -1435,15 +1441,10 @@ function SeriesContent() {
                                 folderPath={folderPath}
                             />
                         )}
-
-                        {missingIssues.length > 0 && (
-                            <AllSources>
-                                {canRequest && <RequestIconButton title={`Alle ${missingIssues.length} fehlenden anfragen (Usenet)`} busy={isBulkDownloading} onClick={() => handleDownloadAllMissing()} />}
-                                <GetComicsButton title={`Alle ${missingIssues.length} fehlenden über GetComics`} disabled={isBulkDownloading} onClick={() => handleDownloadAllMissing('getcomics')} />
-                                <BatcaveButton title={`Alle ${missingIssues.length} fehlenden über Batcave`} body={{ seriesId: seriesInfo.id }} />
-                            </AllSources>
-                        )}
                       </>
+                  )}
+                  </div>
+                  </details>
                   )}
 
                   <Button variant="outline" className="w-full border-border font-bold text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 mt-4" onClick={() => setReportModalOpen(true)} disabled={!seriesInfo.id}>

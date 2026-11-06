@@ -53,6 +53,24 @@ describe('Reader webtoon mode (fork)', () => {
         expect(screen.getByText('Mark as read & back to series')).toBeInTheDocument();
     });
 
+    it('Infinite: a tap on the right half scrolls down a little, the left half and buttons do not', async () => {
+        mockApi(false);
+        const base = global.fetch as any;
+        global.fetch = vi.fn().mockImplementation((url: string) => url.includes('/api/reader/preferences')
+            ? Promise.resolve({ ok: true, json: async () => ({ settings: { readingMode: 'webtoon', infinite: true } }) }) : base(url));
+        const scrollBy = vi.fn();
+        window.HTMLElement.prototype.scrollBy = scrollBy as any;
+        render(<ReaderPage />);
+        const page = await screen.findByAltText('Page 1');
+        const right = window.innerWidth - 10;
+        await waitFor(() => { fireEvent.click(page, { clientX: right }); expect(scrollBy).toHaveBeenCalled(); }, { timeout: 3000 }); // preferences load async
+        expect(scrollBy.mock.calls[0][0]).toMatchObject({ behavior: 'smooth' });
+        scrollBy.mockClear();
+        fireEvent.click(page, { clientX: 10 });
+        fireEvent.click(screen.getByText('Mark as read & back to series'), { clientX: right });
+        expect(scrollBy).not.toHaveBeenCalled();
+    });
+
     it('a not-yet-loaded page (no height) never becomes the current page', async () => {
         mockApi(false);
         render(<ReaderPage />);

@@ -685,6 +685,7 @@ model ReadingListItem {
 
   @@index([listId])
   @@index([issueId])
+  @@index([cvIssueId]) // for-series looks items up by it on every series page; 99k rows without it
 }
 
 model OpdsKey {

@@ -21,6 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 const BAR_H = 54;
 const LENS_SIZE = 240;
 const LENS_ZOOM = 2.5;
+const TAP_SCROLL = 0.25; // of the screen height, per tap in Infinite mode
 
 function SegLabel({ children }: { children: React.ReactNode }) {
   return <div className="px-1 text-[11px] font-semibold uppercase tracking-[0.77px] text-[rgba(235,235,245,0.4)]">{children}</div>;
@@ -788,6 +789,12 @@ function ReaderContent() {
       lastScrollY.current = y;
   };
 
+  // Infinite mode: a tap on the right half scrolls a little further down
+  const handleWebTap = (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!settings.infinite || e.clientX < window.innerWidth / 2 || (e.target as HTMLElement).closest('button')) return;
+      e.currentTarget.scrollBy({ top: e.currentTarget.clientHeight * TAP_SCROLL, behavior: 'smooth' });
+  };
+
   // Magnifier: hold Z over a page
   const handleLens = (e: React.MouseEvent) => {
       if (!settings.magnifier || !zHeld.current) return;
@@ -904,8 +911,8 @@ function ReaderContent() {
 
       {/* CANVAS */}
       {isWeb ? (
-          <div ref={webtoonRef} onScroll={handleScroll} onMouseMove={handleLens} onMouseLeave={() => setLens(null)}
-              className={`absolute inset-0 z-10 overflow-auto flex flex-col ${wide ? 'items-start' : 'items-center'}`} style={{ paddingTop: pad }}>
+          <div ref={webtoonRef} onScroll={handleScroll} onClick={handleWebTap} onMouseMove={handleLens} onMouseLeave={() => setLens(null)}
+              className={`absolute inset-0 z-10 overflow-auto touch-manipulation flex flex-col ${wide ? 'items-start' : 'items-center'}`} style={{ paddingTop: pad }}>
               {pages.map((p, i) => (
                   <img
                       key={p}
