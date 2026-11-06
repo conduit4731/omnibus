@@ -10,11 +10,17 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { useToast } from "@/components/ui/use-toast"
 import { 
-  Search, Trash2, ExternalLink, Info, Loader2, ChevronsUpDown, AlertTriangle, 
-  ChevronUp, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Calendar, Users
+  Search, Trash2, ExternalLink, Info, Loader2, ChevronsUpDown, AlertTriangle,
+  ChevronUp, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Calendar, Users, CheckCircle2
 } from "lucide-react"
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog"
 import { InteractiveSearchModal } from "@/components/interactive-search-modal"
+import { COMPLETABLE_STATUSES, REQUEST_STATUS_FILTERS, requestStatusClass, requestStatusLabel, requestStatusMatches } from "@/lib/request-status"
+
+// beta.010: a request still waiting for its issue can be marked completed - what the Smart Matcher and
+// the Series Monitor can't tie to a series (a MyAnimeList import, a request against the other provider,
+// a trade). Not a running download or an import.
+const canComplete = (req: { status: string }) => COMPLETABLE_STATUSES.includes(req.status)
 
 export function AdminRequestManagement() {
   const [requests, setRequests] = useState<any[]>([])
@@ -38,6 +44,12 @@ export function AdminRequestManagement() {
   const [idsToDelete, setIdsToDelete] = useState<string[]>([])
   const [isDeleting, setIsDeleting] = useState(false)
 
+  // Mark completed (beta.010)
+  const [completeOpen, setCompleteOpen] = useState(false)
+  const [idsToComplete, setIdsToComplete] = useState<string[]>([])
+  const [notifyRequester, setNotifyRequester] = useState(true)
+  const [isCompleting, setIsCompleting] = useState(false)
+
   // Details Modal
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [selectedComicDetails, setSelectedComicDetails] = useState<any>(null)
@@ -54,7 +66,7 @@ export function AdminRequestManagement() {
     status: 140,
     createdAt: 100,
     updatedAt: 100,
-    actions: 120
+    actions: 170
   })
   const [isResizing, setIsResizing] = useState<string | null>(null)
   const startXRef = useRef<number>(0)
@@ -85,7 +97,7 @@ export function AdminRequestManagement() {
     return requests.filter(req => {
       const targetName = req.activeDownloadName || req.seriesName || "";
       const matchesSearch = targetName.toLowerCase().includes(searchQuery.toLowerCase()) || String(req.volumeId).includes(searchQuery);
-      const matchesStatus = statusFilter === "ALL" || req.status === statusFilter;
+      const matchesStatus = requestStatusMatches(req.status, statusFilter);
       const matchesUser = userFilter === "ALL" || req.userName === userFilter;
       return matchesSearch && matchesStatus && matchesUser;
     })
@@ -108,6 +120,10 @@ export function AdminRequestManagement() {
   const totalPages = Math.ceil(sortedRequests.length / pageSize) || 1;
   
   useEffect(() => { if (currentPage > totalPages) setCurrentPage(totalPages); }, [totalPages, currentPage])
+
+  // #263: a selection belongs to the filters it was made under. Changing one clears it, so Delete and
+  // Mark completed never reach a request the list no longer shows. The 15-second refresh keeps it.
+  useEffect(() => { setSelectedIds(new Set()); }, [searchQuery, statusFilter, userFilter])
 
   const paginatedRequests = useMemo(() => {
     const start = (currentPage - 1) * pageSize;
@@ -142,6 +158,48 @@ export function AdminRequestManagement() {
         fetchRequests();
       }
     } finally { setIsDeleting(false); }
+  }
+
+  // The selected requests that can be marked completed (a selection can include any status).
+  const selectedCompletable = useMemo(
+    () => requests.filter(r => selectedIds.has(r.id) && canComplete(r)).map(r => r.id),
+    [requests, selectedIds]
+  )
+
+  const initiateComplete = (ids: string[]) => {
+    setIdsToComplete(ids);
+    setNotifyRequester(true);
+    setCompleteOpen(true);
+  }
+
+  const handleConfirmedComplete = async () => {
+    if (idsToComplete.length === 0) return;
+    setIsCompleting(true);
+    try {
+      const res = await fetch('/api/admin/requests', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'complete', ids: idsToComplete, notify: notifyRequester })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast({ title: "Couldn't mark completed", description: data.error || `HTTP ${res.status}`, variant: "destructive" });
+        return;
+      }
+      const skipped = Array.isArray(data.skipped) ? data.skipped.length : 0;
+      toast({
+        title: "Marked completed",
+        description: `${data.completed} request(s) marked completed${notifyRequester ? ', and the requester was told' : ''}.`
+          + (skipped > 0 ? ` ${skipped} skipped: no longer waiting for their issue.` : ''),
+      });
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        for (const id of idsToComplete) next.delete(id);
+        return next;
+      });
+      setCompleteOpen(false);
+      fetchRequests();
+    } finally { setIsCompleting(false); }
   }
 
   const toggleAll = () => {
@@ -187,19 +245,6 @@ export function AdminRequestManagement() {
     } finally {
       setLoadingDetails(false);
     }
-  }
-
-  const getStatusColor = (status: string) => {
-    if (['IMPORTED', 'COMPLETED'].includes(status)) return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-200 dark:border-green-800";
-    if (status === 'DOWNLOADING') return "bg-primary/20 text-primary border-primary/30";
-    if (status === 'PENDING_APPROVAL') return "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400 border-orange-200 dark:border-orange-800";
-    if (status === 'UNRELEASED') return "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400 border-purple-200 dark:border-purple-800";
-    if (status === 'AWAITING_RELEASE') return "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400 border-sky-200 dark:border-sky-800";
-    // #240 PR B: handed to the watched folder, waiting on the sweep (parity with the admin badges).
-    if (status === 'IMPORTING') return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 border-blue-300 dark:border-blue-800";
-    // #240: the dedupe's terminal-but-not-done state — a person has to look at the pack.
-    if (status === 'NEEDS_REVIEW') return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800";
-    return "bg-muted text-foreground border-border";
   }
 
   const SortIcon = ({ columnKey }: { columnKey: string }) => {
@@ -253,14 +298,22 @@ export function AdminRequestManagement() {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 mb-6">
         <div>
           <h2 className="text-2xl font-bold tracking-tight text-foreground">Request Management</h2>
-          <p className="text-sm text-muted-foreground">Manage, filter, and delete all user requests.</p>
+          <p className="text-sm text-muted-foreground">Manage, filter, complete, and delete all user requests.</p>
         </div>
-        
+
         {selectedIds.size > 0 && (
-          <Button variant="destructive" onClick={() => initiateDelete(Array.from(selectedIds))} disabled={isDeleting} className="h-12 sm:h-10 font-bold w-full sm:w-auto animate-in fade-in zoom-in-95 shadow-lg">
-            {isDeleting ? <Loader2 className="w-5 h-5 sm:w-4 sm:h-4 animate-spin mr-2" /> : <Trash2 className="w-5 h-5 sm:w-4 sm:h-4 mr-2" />}
-            Delete ({selectedIds.size})
-          </Button>
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            {selectedCompletable.length > 0 && (
+              <Button onClick={() => initiateComplete(selectedCompletable)} disabled={isCompleting} className="h-12 sm:h-10 font-bold w-full sm:w-auto animate-in fade-in zoom-in-95 shadow-lg bg-green-600 hover:bg-green-700 text-white">
+                {isCompleting ? <Loader2 className="w-5 h-5 sm:w-4 sm:h-4 animate-spin mr-2" /> : <CheckCircle2 className="w-5 h-5 sm:w-4 sm:h-4 mr-2" />}
+                Mark completed ({selectedCompletable.length})
+              </Button>
+            )}
+            <Button variant="destructive" onClick={() => initiateDelete(Array.from(selectedIds))} disabled={isDeleting} className="h-12 sm:h-10 font-bold w-full sm:w-auto animate-in fade-in zoom-in-95 shadow-lg">
+              {isDeleting ? <Loader2 className="w-5 h-5 sm:w-4 sm:h-4 animate-spin mr-2" /> : <Trash2 className="w-5 h-5 sm:w-4 sm:h-4 mr-2" />}
+              Delete ({selectedIds.size})
+            </Button>
+          </div>
         )}
       </div>
 
@@ -282,15 +335,9 @@ export function AdminRequestManagement() {
             </SelectTrigger>
             <SelectContent className="bg-popover border-border">
               <SelectItem value="ALL" className="focus:bg-primary/10 focus:text-primary">All Statuses</SelectItem>
-              <SelectItem value="PENDING_APPROVAL" className="focus:bg-primary/10 focus:text-primary">Needs Approval</SelectItem>
-              <SelectItem value="PENDING" className="focus:bg-primary/10 focus:text-primary">Pending Search</SelectItem>
-              <SelectItem value="UNRELEASED" className="focus:bg-primary/10 focus:text-primary">Awaiting Release</SelectItem>
-              <SelectItem value="AWAITING_RELEASE" className="focus:bg-primary/10 focus:text-primary">No Source Found</SelectItem>
-              <SelectItem value="DOWNLOADING" className="focus:bg-primary/10 focus:text-primary">Downloading</SelectItem>
-              <SelectItem value="IMPORTED" className="focus:bg-primary/10 focus:text-primary">Imported</SelectItem>
-              <SelectItem value="STALLED" className="focus:bg-primary/10 focus:text-primary">Stalled / Failed</SelectItem>
-              <SelectItem value="IMPORTING" className="focus:bg-primary/10 focus:text-primary">Importing</SelectItem>
-              <SelectItem value="NEEDS_REVIEW" className="focus:bg-primary/10 focus:text-primary">Not In Pack</SelectItem>
+              {REQUEST_STATUS_FILTERS.map(f => (
+                <SelectItem key={f.value} value={f.value} className="focus:bg-primary/10 focus:text-primary">{f.label}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
 
@@ -365,9 +412,12 @@ export function AdminRequestManagement() {
                     </td>
                     <td className="px-4 py-3 text-muted-foreground truncate">{req.userName}</td>
                     <td className="px-4 py-3">
-                      <Badge className={`${getStatusColor(req.status)} text-[10px] uppercase font-bold px-2 py-0.5 truncate`}>
-                        {req.status === 'PENDING_APPROVAL' ? 'Needs Approval' : req.status === 'IMPORTING' ? 'Importing…' : req.status === 'NEEDS_REVIEW' ? 'Not In Pack' : req.status === 'UNRELEASED' ? 'Awaiting Release' : req.status === 'AWAITING_RELEASE' ? 'No Source Found' : req.status}
+                      <Badge className={`${requestStatusClass(req.status)} text-[10px] uppercase font-bold px-2 py-0.5 truncate`}>
+                        {requestStatusLabel(req.status)}
                       </Badge>
+                      {req.statusNote && (
+                        <p className="text-[10px] text-muted-foreground mt-1 leading-snug line-clamp-2 whitespace-normal" title={req.statusNote}>{req.statusNote}</p>
+                      )}
                       {req.status === 'STALLED' && (
                         <Badge variant="outline" className="text-[9px] uppercase font-black px-1.5 py-0 border-blue-500 text-blue-600 bg-blue-50 dark:bg-blue-900/20 ml-2">
                             Perform Interactive Search
@@ -390,6 +440,11 @@ export function AdminRequestManagement() {
                         {req.status === 'STALLED' && (
                             <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-blue-100 text-blue-600" title="Interactive Search" onClick={() => setInteractiveSearchReq(req)}>
                               <Search className="w-4 h-4" />
+                            </Button>
+                        )}
+                        {canComplete(req) && (
+                            <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-green-100 dark:hover:bg-green-900/30 text-green-600" title="Mark completed" onClick={() => initiateComplete([req.id])}>
+                              <CheckCircle2 className="w-4 h-4" />
                             </Button>
                         )}
                         <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-muted text-primary" onClick={() => openDetails(req)}>
@@ -441,9 +496,12 @@ export function AdminRequestManagement() {
                       <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-2">
                         <Users className="w-3.5 h-3.5" /> <span className="font-medium truncate">{req.userName}</span>
                       </div>
-                      <Badge className={`${getStatusColor(req.status)} text-[10px] uppercase font-bold px-2 py-0.5`}>
-                        {req.status === 'PENDING_APPROVAL' ? 'Needs Approval' : req.status === 'IMPORTING' ? 'Importing…' : req.status === 'NEEDS_REVIEW' ? 'Not In Pack' : req.status === 'UNRELEASED' ? 'Awaiting Release' : req.status === 'AWAITING_RELEASE' ? 'No Source Found' : req.status}
+                      <Badge className={`${requestStatusClass(req.status)} text-[10px] uppercase font-bold px-2 py-0.5`}>
+                        {requestStatusLabel(req.status)}
                       </Badge>
+                      {req.statusNote && (
+                        <p className="text-[11px] text-muted-foreground mt-1.5 leading-snug" title={req.statusNote}>{req.statusNote}</p>
+                      )}
                       {req.status === 'STALLED' && (
                           <div className="mt-1.5">
                               <Badge variant="outline" className="text-[9px] uppercase font-black px-1.5 py-0 border-blue-500 text-blue-600 bg-blue-50 dark:bg-blue-900/20">
@@ -476,6 +534,11 @@ export function AdminRequestManagement() {
                     {req.status === 'STALLED' && (
                         <Button variant="outline" size="sm" className="h-10 sm:h-9 text-xs font-bold text-blue-600 border-blue-300 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20 dark:border-blue-800 mr-auto px-2" onClick={() => setInteractiveSearchReq(req)}>
                             <Search className="w-4 h-4 sm:w-3 sm:h-3 mr-1" /> Search
+                        </Button>
+                    )}
+                    {canComplete(req) && (
+                        <Button variant="outline" size="sm" className="h-10 w-10 sm:h-9 sm:w-9 text-green-600 border-green-200 hover:bg-green-50 dark:border-green-900/50 dark:hover:bg-green-900/30" title="Mark completed" onClick={() => initiateComplete([req.id])}>
+                          <CheckCircle2 className="w-5 h-5 sm:w-4 sm:h-4" />
                         </Button>
                     )}
                     <Button variant="outline" size="sm" className="h-10 w-10 sm:h-9 sm:w-9 text-primary border-border hover:bg-muted" onClick={() => openDetails(req)}>
@@ -559,6 +622,25 @@ export function AdminRequestManagement() {
         }
         confirmText={idsToDelete.length > 1 ? "Permanently Delete" : "Delete Request"}
       />
+
+      <ConfirmationDialog
+        isOpen={completeOpen}
+        onClose={() => setCompleteOpen(false)}
+        onConfirm={handleConfirmedComplete}
+        isLoading={isCompleting}
+        variant="default"
+        title={idsToComplete.length > 1 ? `Mark ${idsToComplete.length} Requests Completed?` : "Mark Request Completed?"}
+        description="Only do this when the issue is in your library: Omnibus then counts it as owned (in Discover and search, for example). The request keeps its history and notes who closed it."
+        confirmText="Mark Completed"
+      >
+        <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/50 p-3">
+          <Checkbox id="notify-requester" className="mt-0.5" checked={notifyRequester} onCheckedChange={(c) => setNotifyRequester(c === true)} />
+          <div className="space-y-0.5">
+            <label htmlFor="notify-requester" className="text-sm font-bold text-foreground cursor-pointer">Tell the requester</label>
+            <p className="text-xs text-muted-foreground">They get the &quot;available&quot; alert and a notification bell entry.</p>
+          </div>
+        </div>
+      </ConfirmationDialog>
 
       {interactiveSearchReq && (
         <InteractiveSearchModal 

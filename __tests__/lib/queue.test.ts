@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { initWorker } from '@/lib/queue';
 import { ENGINE_URL } from '@/lib/engine';
 import { JOB_PRIORITY } from '@/lib/job-priority';
+import { notifierSendAlert } from '../helpers/setup-global';
 
 // 1. Hoist our mocks
 const mocks = vi.hoisted(() => ({
@@ -21,6 +22,7 @@ const mocks = vi.hoisted(() => ({
     requestFindMany: vi.fn(),
     requestCreate: vi.fn(),
     requestUpdate: vi.fn(),
+    requestUpdateMany: vi.fn().mockResolvedValue({ count: 1 }),
     userFindFirst: vi.fn(),
     seriesFindFirst: vi.fn(),
     issueCount: vi.fn(),
@@ -34,6 +36,7 @@ const mocks = vi.hoisted(() => ({
     digestHistoryCreate: vi.fn(),
     transaction: vi.fn().mockResolvedValue([]),
     engineFetch: vi.fn(),
+    closeFulfilledParked: vi.fn().mockResolvedValue(0),
     workerCb: { current: null as any }
 }));
 
@@ -53,7 +56,7 @@ vi.mock('@/lib/db', () => ({
         series: { findMany: mocks.seriesFindMany, findFirst: mocks.seriesFindFirst, update: mocks.seriesUpdate },
         issue: { findMany: mocks.issueFindMany, count: mocks.issueCount },
         user: { findMany: mocks.userFindMany, findFirst: mocks.userFindFirst },
-        request: { findUnique: mocks.requestFindUnique, findFirst: mocks.requestFindFirst, findMany: mocks.requestFindMany, create: mocks.requestCreate, update: mocks.requestUpdate },
+        request: { findUnique: mocks.requestFindUnique, findFirst: mocks.requestFindFirst, findMany: mocks.requestFindMany, create: mocks.requestCreate, update: mocks.requestUpdate, updateMany: mocks.requestUpdateMany },
         downloadClient: { findMany: mocks.downloadClientFindMany },
         digestHistory: {
             deleteMany: vi.fn(),
@@ -73,6 +76,8 @@ vi.mock('@/lib/health-checker', () => ({ runSystemHealthCheck: mocks.runSystemHe
 vi.mock('@/lib/download-clients', () => ({ DownloadService: { addDownload: mocks.addDownload, downloadDirectFile: mocks.downloadDirectFile } }));
 vi.mock('@/lib/automation', () => ({ searchAndDownload: mocks.searchAndDownload, waitForSearchSlot: mocks.waitForSearchSlot }));
 vi.mock('@/lib/pages/page-sweep', () => ({ processPageSweepChunk: mocks.processPageSweepChunk }));
+// beta.009: which parked requests the monitor closes is request-fulfilment.ts's business (tested there).
+vi.mock('@/lib/request-fulfilment', () => ({ closeFulfilledParkedRequests: mocks.closeFulfilledParked }));
 
 // Mock the mailer for the digest
 vi.mock('@/lib/mailer', () => ({
@@ -105,6 +110,10 @@ vi.mock('bullmq', () => ({
         on = vi.fn();
     }
 }));
+
+// beta.011: a search writes its outcome only while its request is still open - never over one a
+// person closed meanwhile (cancelled, marked completed) or one already imported or handed on.
+const openRequest = (id: string) => ({ id, status: { notIn: ['CANCELLED', 'COMPLETED', 'IMPORTED', 'IMPORTING'] } });
 
 describe('Cron: BullMQ Worker Router', () => {
     let originalSetTimeout: typeof setTimeout;
@@ -267,6 +276,55 @@ describe('Cron: BullMQ Worker Router', () => {
         );
     });
 
+    // #251: the scheduled embed (and its Run Now) is a library-wide rewrite; "Write metadata to
+    // ComicInfo.xml" off means it never runs.
+    it('should skip a scheduled bulk EMBED_METADATA while ComicInfo writing is off', async () => {
+        initWorker();
+        mocks.systemSettingFindUnique.mockResolvedValueOnce({ key: 'metadata_write_comicinfo', value: 'false' });
+
+        await mocks.workerCb.current({ id: 'job_embed_off', data: { type: 'EMBED_METADATA' }, updateProgress: vi.fn() });
+
+        expect(mocks.systemSettingFindUnique).toHaveBeenCalledWith({ where: { key: 'metadata_write_comicinfo' } });
+        expect(mocks.engineFetch).not.toHaveBeenCalled();
+        expect(mocks.systemSettingUpsert).not.toHaveBeenCalledWith(
+            expect.objectContaining({ where: { key: 'last_embed_sync' } })
+        );
+        expect(mocks.jobLogCreate).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({
+                jobType: 'EMBED_METADATA',
+                status: 'COMPLETED_WITH_ERRORS',
+                message: expect.stringContaining('Skipped')
+            })
+        }));
+    });
+
+    it('should still forward a targeted EMBED_METADATA while writing is off: the edit already chose to write', async () => {
+        initWorker();
+        mocks.systemSettingFindUnique.mockImplementation(async () => ({ key: 'metadata_write_comicinfo', value: 'false' }));
+        try {
+            await mocks.workerCb.current({ id: 'job_embed_edit', data: { type: 'EMBED_METADATA', issueIds: ['i1'] }, updateProgress: vi.fn() });
+
+            expect(mocks.engineFetch).toHaveBeenCalledWith(
+                `${ENGINE_URL}/api/metadata/embed`,
+                expect.objectContaining({ body: JSON.stringify({ series_id: null, issue_ids: ['i1'] }) })
+            );
+        } finally {
+            mocks.systemSettingFindUnique.mockReset();
+        }
+    });
+
+    // #251 (#230 item 7): the Smart Matcher's "Write to file" toggle reaches the engine's sync.
+    it('should forward a sync\'s writeComicInfo choice to the engine as write_comicinfo', async () => {
+        initWorker();
+
+        await mocks.workerCb.current({ id: 'job_meta_write', data: { type: 'METADATA_SYNC', seriesIds: ['series_1'], writeComicInfo: false }, updateProgress: vi.fn() });
+
+        expect(mocks.engineFetch).toHaveBeenCalledWith(
+            `${ENGINE_URL}/api/metadata/sync`,
+            expect.objectContaining({ body: JSON.stringify({ series_ids: ['series_1'], write_comicinfo: false }) })
+        );
+    });
+
     it('should forward EXPORT_SERIES_JSON to the engine when the export is enabled', async () => {
         initWorker();
 
@@ -420,7 +478,7 @@ describe('Cron: BullMQ Worker Router', () => {
     // request. The DDL path already dedups against the primary link (queue.ts duplicateDownload);
     // the external-client (Prowlarr → SAB/qBit) path must do the same on the tracking hash.
 
-    const runExternalClientSearch = async (siblings: { id: string; status: string; userId?: string }[], req: Record<string, unknown> = { id: 'req_2', volumeId: '0', failedLinks: '[]' }) => {
+    const runExternalClientSearch = async (siblings: { id: string; status: string; userId?: string }[], req: Record<string, unknown> = { id: 'req_2', status: 'PENDING', volumeId: '0', failedLinks: '[]' }) => {
         initWorker();
 
         // freshReq: volumeId "0" skips the series/issue-year block — these tests target routing only.
@@ -461,8 +519,8 @@ describe('Cron: BullMQ Worker Router', () => {
         expect(mocks.addDownload).not.toHaveBeenCalled();
         // …the request is parked against the sibling's link so the shared-link completion sweep
         // (importer updateMany on downloadLink) closes it out when the one download imports.
-        expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({
-            where: { id: 'req_2' },
+        expect(mocks.requestUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+            where: openRequest('req_2'),
             data: expect.objectContaining({ status: 'DOWNLOADING', downloadLink: 'nzbgeek-abc' })
         }));
     });
@@ -477,7 +535,7 @@ describe('Cron: BullMQ Worker Router', () => {
         expect(mocks.addDownload).not.toHaveBeenCalled();
         expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({
             where: { id: 'req_2' },
-            data: { status: 'NEEDS_REVIEW' }
+            data: { status: 'NEEDS_REVIEW', statusNote: expect.stringContaining('already used') }
         }));
     });
 
@@ -486,7 +544,7 @@ describe('Cron: BullMQ Worker Router', () => {
         mocks.issueFindMany.mockResolvedValue([{ number: '2' }]);
 
         await runExternalClientSearch([{ id: 'req_1', status: 'COMPLETED', userId: 'u1' }], {
-            id: 'req_2', volumeId: '101', metadataSource: 'COMICVINE', issueNumber: '2',
+            id: 'req_2', status: 'PENDING', volumeId: '101', metadataSource: 'COMICVINE', issueNumber: '2',
             activeDownloadName: "Batman '89: Echoes #2", userId: 'u1', failedLinks: '[]'
         });
 
@@ -504,7 +562,7 @@ describe('Cron: BullMQ Worker Router', () => {
         mocks.issueFindMany.mockResolvedValue([{ number: '2' }]);
 
         await runExternalClientSearch([{ id: 'req_1', status: 'COMPLETED', userId: 'someone_else' }], {
-            id: 'req_2', volumeId: '101', metadataSource: 'COMICVINE', issueNumber: '2',
+            id: 'req_2', status: 'PENDING', volumeId: '101', metadataSource: 'COMICVINE', issueNumber: '2',
             activeDownloadName: "Batman '89: Echoes #2", userId: 'u1', failedLinks: '[]'
         });
 
@@ -519,8 +577,8 @@ describe('Cron: BullMQ Worker Router', () => {
         await runExternalClientSearch([]);
 
         expect(mocks.addDownload).toHaveBeenCalledTimes(1);
-        expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({
-            where: { id: 'req_2' },
+        expect(mocks.requestUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+            where: openRequest('req_2'),
             data: expect.objectContaining({ status: 'DOWNLOADING', downloadLink: 'nzbgeek-abc' })
         }));
     });
@@ -683,6 +741,65 @@ describe('Cron: BullMQ Worker Router', () => {
         expect(mocks.requestUpdate).not.toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'r_live' } }));
     });
 
+    // A search that found nothing anywhere is NOT_FOUND now; AWAITING_RELEASE is only the dateless park.
+    // Both are waiting states, so the parked sweep has to re-search either.
+    it('re-searches NOT_FOUND requests on the awaiting cadence too', async () => {
+        mocks.requestFindMany
+            .mockResolvedValueOnce([]) // Phase 3: UNRELEASED
+            .mockResolvedValueOnce([   // Phase 3b: parked
+                { id: 'r_nf', volumeId: null, activeDownloadName: 'Saga #61', status: 'NOT_FOUND', retryCount: 0, downloadLink: null },
+            ]);
+        await runMonitor([]);
+
+        type FindArgs = { where?: { status?: { in?: string[] } } } | undefined;
+        const parkedQuery = (mocks.requestFindMany.mock.calls as unknown as [FindArgs][])
+            .map(c => c[0])
+            .find(a => a?.where?.status?.in?.includes('MANUAL_DDL'));
+        expect(parkedQuery?.where?.status?.in).toEqual(expect.arrayContaining(['NOT_FOUND', 'AWAITING_RELEASE']));
+        expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({
+            where: { id: 'r_nf' },
+            data: expect.objectContaining({ status: 'PENDING', retryCount: 0 })
+        }));
+        expect(mocks.searchAndDownload).toHaveBeenCalledTimes(1);
+    });
+
+    // beta.009: a parked request whose issue reached the library some other way (a Smart Matcher match,
+    // a file dropped in and scanned) was searched again on the awaiting cadence - and downloaded a second
+    // time once a source had it. The monitor closes those first, before anything reads a request.
+    it('closes the requests whose issue is already in the library before it re-searches anything', async () => {
+        mocks.closeFulfilledParked.mockResolvedValueOnce(2);
+        mocks.requestFindMany.mockImplementation(async () => []);
+        await runMonitor([{
+            volume_id: 'v1', metadata_source: 'COMICVINE', search_name: 'Spawn #360', issue_number: '360',
+            issue_year: '2026', is_released: true, has_date: true, publisher: 'Image', is_manga: false, image_url: null
+        }]);
+
+        expect(mocks.closeFulfilledParked).toHaveBeenCalledTimes(1);
+        const closedAt = mocks.closeFulfilledParked.mock.invocationCallOrder[0];
+        expect(Math.min(...mocks.requestFindMany.mock.invocationCallOrder)).toBeGreaterThan(closedAt);
+        expect(mocks.jobLogCreate).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({
+                jobType: 'SERIES_MONITOR',
+                message: expect.stringMatching(/\[CLOSED\] 2 request\(s\) whose issue is already in the library[\s\S]*2 closed/),
+            })
+        }));
+    });
+
+    it('still re-searches the parked requests when closing the fulfilled ones fails', async () => {
+        mocks.closeFulfilledParked.mockRejectedValueOnce(new Error('database is locked'));
+        mocks.requestFindMany
+            .mockResolvedValueOnce([]) // Phase 3: UNRELEASED
+            .mockResolvedValueOnce([   // Phase 3b: parked
+                { id: 'r_nf', volumeId: null, activeDownloadName: 'Saga #61', status: 'NOT_FOUND', retryCount: 0, downloadLink: null },
+            ]);
+        await runMonitor([]);
+
+        expect(mocks.searchAndDownload).toHaveBeenCalledTimes(1);
+        expect(mocks.jobLogCreate).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({ jobType: 'SERIES_MONITOR', status: 'COMPLETED' })
+        }));
+    });
+
     // A monitor run can queue hundreds of searches at once (every new issue, plus every parked request
     // past the awaiting cadence). Nobody is waiting on any one of them, so all four of its search paths
     // go to the back: a request someone makes in the meantime must not queue behind the whole run.
@@ -715,11 +832,40 @@ describe('Cron: BullMQ Worker Router', () => {
         }
     });
 
+    // #255: a Special's request carries the parent's volume, so the parent's rows hold both "#1"s. The
+    // UNRELEASED upgrade reads the Special's own date, never the run's #1 that happens to come first.
+    it("upgrades a Special's UNRELEASED request by the Special's own release date, not the run's #1 (#255)", async () => {
+        const arkM = { name: 'Absolute Batman: Ark-M', kind: 'SPECIAL' };
+        mocks.requestFindMany
+            .mockResolvedValueOnce([   // Phase 3: two Specials' requests, filed under their parents' volumes
+                { id: 'req_later', volumeId: 'v1', activeDownloadName: 'Absolute Batman: Ark-M #1' },
+                { id: 'req_out', volumeId: 'v2', activeDownloadName: 'Absolute Batman: Ark-M #1' }
+            ])
+            .mockResolvedValueOnce([]); // Phase 3b
+        mocks.seriesFindMany.mockResolvedValueOnce([
+            // v1: the run's #1 is long out, the Special's #1 is not.
+            { id: 's1', metadataId: 'v1', name: 'Absolute Batman', publisher: 'DC Comics', isManga: false, issues: [
+                { number: '1', releaseDate: '2024-10-09', attachedVolumeId: null, attachedVolume: null },
+                { number: '1', releaseDate: '2099-01-01', attachedVolumeId: 'av_arkm', attachedVolume: arkM }
+            ] },
+            // v2: the Special's #1 is out, and is searched with its own year.
+            { id: 's2', metadataId: 'v2', name: 'Absolute Batman', publisher: 'DC Comics', isManga: false, issues: [
+                { number: '1', releaseDate: '2024-10-09', attachedVolumeId: null, attachedVolume: null },
+                { number: '1', releaseDate: '2026-02-04', attachedVolumeId: 'av_arkm2', attachedVolume: arkM }
+            ] }
+        ]);
+
+        await runMonitor([]);
+
+        expect(mocks.requestUpdate).not.toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'req_later' } }));
+        expect(mocks.searchAndDownload.mock.calls.map(c => [c[0], c[2]])).toEqual([['req_out', '2026']]);
+    });
+
     // The 5-second gap between searches is kept here, as each search STARTS — not handed out as a
     // delay when it is queued, where no priority could overtake it.
     it('waits for its turn in the 5-second search spacing before asking the engine to search', async () => {
         initWorker();
-        mocks.requestFindUnique.mockResolvedValue(null);
+        mocks.requestFindUnique.mockResolvedValue({ id: 'req_slot', status: 'PENDING', volumeId: '0', failedLinks: '[]' });
         mocks.engineFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ success: false }) });
 
         await mocks.workerCb.current({
@@ -756,13 +902,13 @@ describe('Cron: BullMQ Worker Router', () => {
     // ==== Pack guard: packs bypass the single-issue number check and the off-series reverse
     // guard, so they must not be considered for an issue too fresh for any pack to contain. ====
 
-    const runSearchWithReleaseDate = async (releaseDate: string) => {
+    const runSearchWithReleaseDate = async (releaseDate: string, engineAnswer: Record<string, unknown> = { success: false }) => {
         initWorker();
-        mocks.requestFindUnique.mockResolvedValue({ id: 'req_p', volumeId: '101', metadataSource: 'COMICVINE', activeDownloadName: 'Spawn #360', failedLinks: '[]' });
+        mocks.requestFindUnique.mockResolvedValue({ id: 'req_p', status: 'PENDING', volumeId: '101', metadataSource: 'COMICVINE', activeDownloadName: 'Spawn #360', failedLinks: '[]' });
         mocks.seriesFindFirst.mockResolvedValue({ id: 's1', metadataId: '101', metadataSource: 'COMICVINE' });
         mocks.issueCount.mockResolvedValue(0); // zero files owned → packs would normally be allowed
         mocks.issueFindMany.mockResolvedValue([{ number: '360', releaseDate }]);
-        mocks.engineFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ success: false }) });
+        mocks.engineFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => engineAnswer });
 
         await mocks.workerCb.current({
             id: 'job_search_pack',
@@ -773,6 +919,38 @@ describe('Cron: BullMQ Worker Router', () => {
         const searchCall = mocks.engineFetch.mock.calls.find((c: any[]) => String(c[0]).includes('/api/automation/search'));
         return JSON.parse(searchCall![1].body);
     };
+
+    it('parks a released issue that no source had as NOT_FOUND, not AWAITING_RELEASE', async () => {
+        const lastYear = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        await runSearchWithReleaseDate(lastYear);
+
+        // An engine that sends no per-source summary (an older one) still leaves a reason.
+        expect(mocks.requestUpdateMany).toHaveBeenCalledWith({
+            where: openRequest('req_p'), data: { status: 'NOT_FOUND', statusNote: 'Searched every enabled source; none had it.' }
+        });
+        expect(mocks.requestUpdateMany).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'AWAITING_RELEASE' }) }));
+    });
+
+    // beta.008: WHY it wasn't found - the engine's per-source summary becomes the request's note.
+    it("keeps the engine's per-source summary as the NOT_FOUND request's note", async () => {
+        const lastYear = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        await runSearchWithReleaseDate(lastYear, { success: false, search_note: 'GetComics: nothing found · Prowlarr: 12 results, none matched' });
+
+        expect(mocks.requestUpdateMany).toHaveBeenCalledWith({
+            where: openRequest('req_p'), data: { status: 'NOT_FOUND', statusNote: 'GetComics: nothing found · Prowlarr: 12 results, none matched' }
+        });
+    });
+
+    it("keeps a stall's reason as its note, without the alert's bold markers", async () => {
+        const lastYear = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        await runSearchWithReleaseDate(lastYear, {
+            success: false, stall_for_review: true, stall_reason: 'GetComics lists **Spawn #360** only on a multi-pack page.'
+        });
+
+        expect(mocks.requestUpdateMany).toHaveBeenCalledWith({
+            where: openRequest('req_p'), data: { status: 'STALLED', statusNote: 'GetComics lists Spawn #360 only on a multi-pack page.' }
+        });
+    });
 
     it('disables packs when the requested issue is brand-new (released < 30 days ago)', async () => {
         const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
@@ -791,7 +969,7 @@ describe('Cron: BullMQ Worker Router', () => {
     // row's start year is already fetched for the pack decision — send it.
     it('sends the Series start year as series_year while year keeps the per-issue anchor (#202)', async () => {
         initWorker();
-        mocks.requestFindUnique.mockResolvedValue({ id: 'req_sy', volumeId: '101', metadataSource: 'COMICVINE', activeDownloadName: 'Batman #5', failedLinks: '[]' });
+        mocks.requestFindUnique.mockResolvedValue({ id: 'req_sy', status: 'PENDING', volumeId: '101', metadataSource: 'COMICVINE', activeDownloadName: 'Batman #5', failedLinks: '[]' });
         mocks.seriesFindFirst.mockResolvedValue({ id: 's1', metadataId: '101', metadataSource: 'COMICVINE', year: 2011 });
         mocks.issueCount.mockResolvedValue(0);
         mocks.issueFindMany.mockResolvedValue([{ number: '5', releaseDate: '2012-03-14' }]);
@@ -810,9 +988,42 @@ describe('Cron: BullMQ Worker Router', () => {
         expect(body.series_year).toBe('2011'); // pack lane: the series start year the anchor was designed for
     });
 
+    // #255: a missing Special is requested under its parent's volume, so the search worker finds the
+    // requested issue's row among the parent's. "Absolute Batman: Ark-M #1" is the Special's #1 (2026),
+    // not the run's #1 (2024): GetComics drops a post more than a year off the requested year.
+    describe("the requested issue's year (#255)", () => {
+        const searchYearFor = async (requestName: string) => {
+            initWorker();
+            mocks.requestFindUnique.mockResolvedValue({ id: 'req_sp', status: 'PENDING', volumeId: '160294', metadataSource: 'COMICVINE', activeDownloadName: requestName, failedLinks: '[]' });
+            mocks.seriesFindFirst.mockResolvedValue({ id: 's1', name: 'Absolute Batman', metadataId: '160294', metadataSource: 'COMICVINE', year: 2024 });
+            mocks.issueCount.mockResolvedValue(1);
+            mocks.issueFindMany.mockResolvedValue([
+                // The Special's #1 is listed first, so the run's own lookup can't pass by luck.
+                { number: '1', releaseDate: '2026-02-04', attachedVolumeId: 'av_arkm', attachedVolume: { name: 'Absolute Batman: Ark-M', kind: 'SPECIAL' } },
+                { number: '1', releaseDate: '2024-10-09', attachedVolumeId: null, attachedVolume: null },
+            ]);
+            mocks.engineFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ success: false }) });
+            await mocks.workerCb.current({
+                id: 'job_special_year',
+                data: { type: 'SEARCH_AND_DOWNLOAD', requestId: 'req_sp', name: requestName, year: '2024', isManga: false, skipIndexers: false },
+                updateProgress: vi.fn()
+            });
+            const searchCall = mocks.engineFetch.mock.calls.find((c: any[]) => String(c[0]).includes('/api/automation/search'));
+            return JSON.parse(searchCall![1].body).year;
+        };
+
+        it("asks the engine for the Special's own year", async () => {
+            expect(await searchYearFor('Absolute Batman: Ark-M #1')).toBe('2026');
+        });
+
+        it("keeps the run's year for the run's own #1", async () => {
+            expect(await searchYearFor('Absolute Batman #1')).toBe('2024');
+        });
+    });
+
     it('parks the request as STALLED when every DDL hoster candidate fails (no more orphaned DOWNLOADING)', async () => {
         initWorker();
-        mocks.requestFindUnique.mockResolvedValue({ id: 'req_ddl', volumeId: '0', failedLinks: '[]' });
+        mocks.requestFindUnique.mockResolvedValue({ id: 'req_ddl', status: 'PENDING', volumeId: '0', failedLinks: '[]' });
         mocks.systemSettingFindMany.mockResolvedValue([]);
         mocks.requestFindFirst.mockResolvedValue(null); // no duplicate download
         mocks.requestFindMany.mockResolvedValue([]); // …and nothing holds this link either
@@ -835,10 +1046,114 @@ describe('Cron: BullMQ Worker Router', () => {
         // The hoster loop is detached — wait for it to park the request. The mediafire URL matches
         // neither manual-hold pattern, so the request must land STALLED (not stay DOWNLOADING).
         await vi.waitFor(() => {
-            expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({
-                where: { id: 'req_ddl' },
+            expect(mocks.requestUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+                where: openRequest('req_ddl'),
                 data: expect.objectContaining({ status: 'STALLED', progress: 0 })
             }));
         });
+    });
+
+    // ==== beta.011: a running search never reopens a request a person closed meanwhile. Every search
+    // is queued for a PENDING request; it waits its turn (the 5-second spacing), then the engine
+    // searches for seconds to minutes - time enough to cancel the request in My Requests or mark it
+    // completed in Request Management.
+
+    const searchJob = (requestId: string) => mocks.workerCb.current({
+        id: `job_${requestId}`,
+        data: { type: 'SEARCH_AND_DOWNLOAD', requestId, name: 'Saga #61', year: '2012', isManga: false, publisher: 'Image', skipIndexers: false },
+        updateProgress: vi.fn()
+    });
+    const engineSearches = () => mocks.engineFetch.mock.calls.filter((c: unknown[]) => String(c[0]).includes('/api/automation/search')).length;
+
+    it('never searches for a request that was closed while its search waited in the queue', async () => {
+        initWorker();
+        mocks.requestFindUnique.mockResolvedValue({ id: 'req_c', status: 'CANCELLED', volumeId: '0', failedLinks: '[]' });
+
+        await searchJob('req_c');
+
+        expect(engineSearches()).toBe(0);
+        expect(mocks.requestUpdateMany).not.toHaveBeenCalled();
+        expect(mocks.requestUpdate).not.toHaveBeenCalled();
+    });
+
+    it('ends quietly when the request was deleted', async () => {
+        initWorker();
+        mocks.requestFindUnique.mockResolvedValue(null);
+
+        await searchJob('req_gone');
+
+        expect(engineSearches()).toBe(0);
+        expect(mocks.requestUpdateMany).not.toHaveBeenCalled();
+    });
+
+    it('drops the answer of a search whose request was closed while it searched', async () => {
+        initWorker();
+        mocks.requestFindUnique
+            .mockResolvedValueOnce({ id: 'req_s', status: 'PENDING', volumeId: '0', failedLinks: '[]' })  // as the search starts
+            .mockResolvedValue({ id: 'req_s', status: 'CANCELLED', volumeId: '0', failedLinks: '[]' });  // as it answers
+        mocks.systemSettingFindMany.mockResolvedValue([]);
+        mocks.downloadClientFindMany.mockResolvedValue([{ id: 'dc1', name: 'SAB', protocol: 'usenet' }]);
+        mocks.requestFindMany.mockResolvedValue([]);
+        mocks.engineFetch.mockResolvedValueOnce({
+            ok: true, status: 200,
+            json: async () => ({
+                success: true,
+                best_match: { title: 'Saga 061', protocol: 'usenet', downloadUrl: 'http://nzbgeek/get/s61', guid: 'nzbgeek-s61', infoHash: null, indexer: 'NZBGeek' },
+                ddl_candidates: []
+            })
+        });
+
+        await searchJob('req_s');
+
+        expect(engineSearches()).toBe(1);
+        expect(mocks.addDownload).not.toHaveBeenCalled();
+        expect(mocks.requestUpdateMany).not.toHaveBeenCalled();
+        expect(mocks.requestUpdate).not.toHaveBeenCalled();
+    });
+
+    it('stops trying hosters once the request is closed', async () => {
+        initWorker();
+        mocks.requestFindUnique.mockResolvedValue({ id: 'req_h', status: 'PENDING', volumeId: '0', failedLinks: '[]' });
+        mocks.systemSettingFindMany.mockResolvedValue([]);
+        mocks.requestFindMany.mockResolvedValue([]);
+        mocks.downloadDirectFile.mockResolvedValue(false);
+        // The first hoster's claim lands; by the second the request has been cancelled.
+        mocks.requestUpdateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
+        mocks.engineFetch.mockResolvedValueOnce({
+            ok: true, status: 200,
+            json: async () => ({
+                success: true,
+                best_match: { title: 'Saga 061', protocol: 'ddl', downloadUrl: 'https://mediafire.com/a', indexer: 'mediafire' },
+                ddl_candidates: [{ url: 'https://mediafire.com/a', hoster: 'mediafire' }, { url: 'https://pixeldrain.com/b', hoster: 'pixeldrain' }]
+            })
+        });
+
+        await searchJob('req_h');
+
+        // The loop is detached: wait for its second claim, then give it a tick to finish.
+        await vi.waitFor(() => expect(mocks.requestUpdateMany).toHaveBeenCalledTimes(2));
+        await new Promise(r => setTimeout(r, 0));
+        expect(mocks.downloadDirectFile).toHaveBeenCalledTimes(1);
+        // No STALLED or GetComics-link park written over the closed request either.
+        expect(mocks.requestUpdateMany).toHaveBeenCalledTimes(2);
+    });
+
+    it('leaves a closed request as it is when its search fails', async () => {
+        initWorker();
+        mocks.requestFindUnique.mockResolvedValue({ id: 'req_f', status: 'PENDING', volumeId: '0', failedLinks: '[]' });
+        mocks.engineFetch.mockResolvedValueOnce({ ok: false, status: 502, json: async () => ({}) });
+
+        await searchJob('req_f');
+
+        expect(mocks.requestUpdateMany).toHaveBeenCalledWith({ where: openRequest('req_f'), data: { status: 'STALLED' } });
+        expect(mocks.requestUpdate).not.toHaveBeenCalled();
+    });
+
+    it('alerts a stall only when the stall was written', async () => {
+        const lastYear = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        mocks.requestUpdateMany.mockResolvedValueOnce({ count: 0 }); // closed between the answer and the write
+        await runSearchWithReleaseDate(lastYear, { success: false, stall_for_review: true, stall_reason: 'Two editions of Spawn #360.' });
+
+        expect(notifierSendAlert).not.toHaveBeenCalledWith('download_failed', expect.anything());
     });
 });

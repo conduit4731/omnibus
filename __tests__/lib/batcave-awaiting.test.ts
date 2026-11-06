@@ -1,5 +1,5 @@
 // __tests__/lib/batcave-awaiting.test.ts
-// Fork: queueAwaitingForBatcave puts AWAITING_RELEASE requests on the Batcave queue once, leaves DONE / NOT_FOUND
+// Fork: queueAwaitingForBatcave puts waiting (NOT_FOUND, AWAITING_RELEASE) requests on the Batcave queue once, leaves DONE / NOT_FOUND
 // alone and spends at most maxLookups ComicVine lookups per run; closeDeliveredRequests closes what was delivered.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -47,6 +47,16 @@ vi.mock('@/lib/import-handoff', () => ({ closeAsCompleted: vi.fn(async (r: any) 
 import { closeDeliveredRequests, queueAwaitingForBatcave, queueRequest } from '@/lib/batcave-queue';
 
 describe('queueAwaitingForBatcave', () => {
+    it('picks up NOT_FOUND too: since upstream 1.4.10 that is what a search with no source writes', async () => {
+        const { prisma } = await import('@/lib/db');
+        m.requests = [];
+        await queueAwaitingForBatcave();
+        await closeDeliveredRequests();
+        const wheres = vi.mocked(prisma.request.findMany).mock.calls.map(c => (c[0] as any).where.status.in);
+        for (const statuses of wheres) expect(statuses).toEqual(expect.arrayContaining(['NOT_FOUND', 'AWAITING_RELEASE']));
+        expect(wheres).toHaveLength(2);
+    });
+
     beforeEach(() => {
         m.jobs.clear(); m.updated = []; m.created = []; m.closed = [];
         m.cvGet.mockReset().mockResolvedValue({ data: { results: [] } }); // ComicVine finds nothing

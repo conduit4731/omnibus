@@ -19,7 +19,8 @@ import { WATCHED_DIR, isInsideLibraryRoot } from '@/lib/utils/paths';
 import { ENGINE_URL, engineHeaders } from '@/lib/engine';
 import { deleteUsenetSource } from '@/lib/utils/usenet-cleanup';
 import { issueFileName, issuePaddingFromSetting, seriesFolderSegments, type NamingInput } from '@/lib/utils/naming';
-import { ANNUAL_FILE_PATTERN } from '@/lib/utils/file-pattern';
+import { ANNUAL_FILE_PATTERN, SPECIAL_FILE_PATTERN } from '@/lib/utils/file-pattern';
+import { attachmentForFilename } from '@/lib/utils/attachment-name';
 import { readZipEntryNames } from '@/lib/utils/archive-pages';
 import { fixMagicNumberSync } from '@/lib/utils/archive-signature';
 import { storedFolderProblem } from '@/lib/utils/stored-folder';
@@ -76,6 +77,15 @@ function ensureLocalCover(folder: string, archivePath: string): string | null {
         Logger.log(`[Importer] Cover extraction failed for ${archivePath}: ${e.message}`, 'warn');
         return null;
     }
+}
+
+// An import that can't run (no library, a Root Path the server can't use, a folder pattern that gives
+// no folder) used to leave its request sitting at 100% with the reason only in the log (beta.008). The
+// status is left alone so the next attempt still picks it up; the note says why, in Request Management.
+async function noteImportBlocked(requestId: string, note: string): Promise<void> {
+    try {
+        await prisma.request.update({ where: { id: requestId }, data: { statusNote: note } });
+    } catch { /* the note is a courtesy: never let it break the import's own bookkeeping */ }
 }
 
 export const Importer = {
@@ -188,7 +198,7 @@ export const Importer = {
               Logger.log(`[Importer] Source file permanently missing for 20+ cycles. Marking request as STALLED.`, "warn");
               await prisma.request.update({
                   where: { id: req.id },
-                  data: { status: 'STALLED' }
+                  data: { status: 'STALLED', statusNote: `The downloaded file was never found at ${sourcePath} after 20 tries. Check the download client's path mappings.` }
               });
           } else {
               await prisma.request.update({
@@ -644,7 +654,10 @@ export const Importer = {
 
             if (knownIssues.length > 0 && !issueInVolume) {
                 Logger.log(`[Importer] Aborting import: "${req.activeDownloadName}" does not match requested series "${series.name}" (series words missing and issue #${parsedIssue} not in this volume). Holding for manual review.`, 'warn');
-                await prisma.request.update({ where: { id: req.id }, data: { status: 'STALLED' } });
+                await prisma.request.update({
+                    where: { id: req.id },
+                    data: { status: 'STALLED', statusNote: `The downloaded file "${req.activeDownloadName}" doesn't match ${series.name}, so it wasn't imported. Grab the right release with Interactive Search.` }
+                });
                 await SystemNotifier.sendAlert('download_failed', {
                     title: series.name,
                     imageUrl: req.imageUrl ?? undefined,
@@ -679,6 +692,7 @@ export const Importer = {
 
     if (!libraryRoot) {
       Logger.log("[Importer] No Library Path found for this import! Please add a Library in Settings.", "error");
+      await noteImportBlocked(req.id, 'Downloaded, but there is no library to import into. Add one in Settings → Library & Files.');
       return false;
     }
 
@@ -688,6 +702,7 @@ export const Importer = {
     const rootProblem = storedFolderProblem(libraryRoot, { example: '/data/comics' });
     if (rootProblem) {
       Logger.log(`[Importer] Can't import into library "${targetLibrary.name || 'Unnamed'}": ${rootProblem} Fix its Root Path in Settings → Library & Files.`, "error");
+      await noteImportBlocked(req.id, `Downloaded, but library "${targetLibrary.name || 'Unnamed'}" can't be used: ${rootProblem} Fix its Root Path in Settings → Library & Files.`);
       return false;
     }
 
@@ -737,6 +752,7 @@ export const Importer = {
     const folderParts = seriesFolderSegments(folderPattern, seriesValues);
     if (!folderParts) {
         Logger.log(`[Importer] The folder pattern "${folderPattern}" gives no folder inside the library for ${seriesNameFromMeta}. Check Settings > Library & Files.`, "error");
+        await noteImportBlocked(req.id, `Downloaded, but the folder pattern "${folderPattern}" gives no folder for ${seriesNameFromMeta}. Check Settings → Library & Files.`);
         return false;
     }
     const idealDestFolder = path.join(libraryRoot, ...folderParts);
@@ -791,23 +807,53 @@ export const Importer = {
     // renamer.rs / watched_sync.rs) so it reads correctly beside the main run from the first write.
     const isAnnualImport = annualFlagForSignals(xmlMeta?.format, xmlMeta?.number, rawFileName);
 
+    // #255: a Special is requested against its PARENT's volume under its own name (request-name.ts),
+    // so the import lands in the parent — where its "#1" is not the run's #1. The download takes the
+    // Special's pattern and its lane's row when the file's own ComicInfo carries the provider id of
+    // one of the series' Special rows — whatever the names say: by now activeDownloadName is the
+    // release's title, which needn't start with the Special's name ("Batman: Ark-M #1") — or else
+    // when the release name (or the file's own) names the Special. Otherwise, the run.
+    const specialLanes = series?.id && !isAnnualImport
+        ? await prisma.attachedVolume.findMany({ where: { seriesId: series.id, kind: 'SPECIAL' }, select: { id: true, name: true, kind: true } })
+            .catch(() => [] as Array<{ id: string; name: string | null; kind: string }>)
+        : [];
+    const specialIds = new Set(specialLanes.map(a => a.id));
+    const seriesRows = series?.id
+        ? await prisma.issue.findMany({
+            where: { seriesId: series.id },
+            select: { number: true, isAnnual: true, releaseDate: true, attachedVolumeId: true, metadataId: true, metadataSource: true },
+        }).catch(() => [] as Array<{ number: string; isAnnual: boolean; releaseDate: string | null; attachedVolumeId: string | null; metadataId: string | null; metadataSource: string | null }>)
+        : [];
+    const embeddedIssueId = xmlMeta?.metadataIssueId ? String(xmlMeta.metadataIssueId) : null;
+    const specialById = embeddedIssueId
+        ? seriesRows.find(r => r.attachedVolumeId && specialIds.has(r.attachedVolumeId)
+            && r.metadataId === embeddedIssueId && r.metadataSource === xmlMeta.metadataSource) ?? null
+        : null;
+    const specialMatch = specialById
+        ? { id: specialById.attachedVolumeId as string, kind: 'SPECIAL', number: specialById.number }
+        : specialLanes.length > 0
+            ? (attachmentForFilename(req.activeDownloadName || '', series?.name || '', specialLanes)
+                ?? attachmentForFilename(rawFileName, series?.name || '', specialLanes))
+            : null;
+    const specialLane = specialMatch ? specialLanes.find(a => a.id === specialMatch.id) ?? null : null;
+
     // #243: {IssueYear} is THIS issue's year - its release date in the library (the year
     // Standardize writes), else the file's own ComicInfo <Year>, else the series year. A monitored
     // download already has its row (the monitor's placeholder), so look it up before naming -
     // same identity as the dedupe below: number + annual domain.
     let issueReleaseDate: string | null = null;
     if (series?.id) {
-        const identity = xmlMeta?.number || extractedNum;
-        const rows = await prisma.issue.findMany({
-            where: { seriesId: series.id },
-            select: { number: true, isAnnual: true, releaseDate: true },
-        }).catch(() => [] as Array<{ number: string; isAnnual: boolean; releaseDate: string | null }>);
-        issueReleaseDate = rows.find(r => ((r.isAnnual ?? false) === isAnnualImport) && isSameIssue(r.number, identity))?.releaseDate ?? null;
+        const identity = xmlMeta?.number || specialMatch?.number || extractedNum;
+        issueReleaseDate = seriesRows.find(r => (specialLane
+            ? r.attachedVolumeId === specialLane.id
+            : ((r.isAnnual ?? false) === isAnnualImport) && !(r.attachedVolumeId && specialIds.has(r.attachedVolumeId)))
+            && isSameIssue(r.number, identity))?.releaseDate ?? null;
     }
-    const filePatToUse = isAnnualImport ? ANNUAL_FILE_PATTERN : (isManga ? mangaFilePattern : filePattern);
+    const filePatToUse = specialLane ? SPECIAL_FILE_PATTERN : isAnnualImport ? ANNUAL_FILE_PATTERN : (isManga ? mangaFilePattern : filePattern);
     const newFileName = issueFileName(filePatToUse, {
         ...seriesValues,
-        issueNumber: extractedNum,
+        ...(specialLane?.name?.trim() ? { series: specialLane.name.trim() } : {}),
+        issueNumber: specialLane ? (xmlMeta?.number || specialMatch?.number || extractedNum) : extractedNum,
         releaseDate: issueReleaseDate,
         comicInfoYear: xmlMeta?.issueYear,
         issueTitle: xmlMeta?.title,
@@ -898,6 +944,7 @@ export const Importer = {
 
       if (series?.id) {
          let issueNum = extractIssueNumber(fileName);
+         if (specialMatch) issueNum = specialMatch.number;
          if (xmlMeta?.number) issueNum = xmlMeta.number;
          // #203: annual domain — part of numbering identity, so the dedupe below never pairs
          // "Annual #1" with the plain #1. Signals: ComicInfo <Format> / <Number> shape / filename.
@@ -934,7 +981,11 @@ export const Importer = {
          const allSeriesIssues = await prisma.issue.findMany({
              where: { seriesId: series.id }
          });
-         const existingIssue = allSeriesIssues.find(i => (((i as any).isAnnual ?? false) === isAnnual) && isSameIssue(i.number, issueNum));
+         // A Special's download fills its lane's own row; anything else never takes a Special's row
+         // (#255). Not found: a new row, unbound, which the lane's name claim then binds.
+         const existingIssue = specialLane
+             ? allSeriesIssues.find(i => i.attachedVolumeId === specialLane.id && isSameIssue(i.number, issueNum))
+             : allSeriesIssues.find(i => (((i as any).isAnnual ?? false) === isAnnual) && !(i.attachedVolumeId && specialIds.has(i.attachedVolumeId)) && isSameIssue(i.number, issueNum));
          const targetMetaId = xmlMeta?.metadataIssueId ? xmlMeta.metadataIssueId.toString() : `unmatched_${Math.random()}`;
          const targetMetaSource = xmlMeta?.metadataIssueId ? xmlMeta.metadataSource : 'LOCAL';
          const matchState = xmlMeta?.metadataIssueId ? 'MATCHED' : 'UNMATCHED';

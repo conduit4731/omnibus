@@ -4,6 +4,7 @@
 // Batcave tab (batcave/omnibus-batcave.user.js in the Unraid repo) fetches them via /api/batcave/worker, downloads
 // them in the browser and uploads them through /api/batcave/upload. Server-side downloading is not possible:
 // Batcave sits behind Cloudflare's bot check and needs the reader's login.
+import { WAITING_STATUSES } from '@/lib/request-status';
 import path from 'path';
 import { prisma } from '@/lib/db';
 import { Logger } from '@/lib/logger';
@@ -221,14 +222,14 @@ export async function queueRequest(body: QueueBody, userId?: string | null, budg
 }
 
 /**
- * Series Monitor, before its parked re-search: every AWAITING_RELEASE request (Usenet and GetComics had nothing) also
+ * Series Monitor, before its parked re-search: every waiting request (Usenet and GetComics had nothing) also
  * goes on the Batcave queue, once — a NOT_FOUND / ERROR job is not queued again, the normal 7-day re-search goes on.
  * Closing the ones Batcave delivered is closeDeliveredRequests' job.
  * Series not in the library yet cost ComicVine calls: at most maxLookups new ones per run, the rest waits for the next.
  */
 export async function queueAwaitingForBatcave(userId?: string | null, maxLookups = 40) {
     const reqs = await prisma.request.findMany({
-        where: { status: 'AWAITING_RELEASE' },
+        where: { status: { in: [...WAITING_STATUSES] } },
         select: { id: true, volumeId: true, metadataSource: true, issueNumber: true, activeDownloadName: true },
     });
     const seriesByKey = new Map<string, string | null>();
@@ -269,7 +270,7 @@ export async function queueAwaitingForBatcave(userId?: string | null, maxLookups
  */
 export async function closeDeliveredRequests(): Promise<number> {
     const reqs = await prisma.request.findMany({
-        where: { status: { in: ['AWAITING_RELEASE', 'MANUAL_DDL', 'NEEDS_REVIEW', 'STALLED', 'FAILED', 'ERROR'] } },
+        where: { status: { in: [...WAITING_STATUSES, 'MANUAL_DDL', 'NEEDS_REVIEW', 'STALLED', 'FAILED', 'ERROR'] } },
         select: { id: true, volumeId: true, metadataSource: true, issueNumber: true, activeDownloadName: true, imageUrl: true, updatedAt: true, user: { select: { username: true, email: true } } },
     });
     if (!reqs.length) return 0;

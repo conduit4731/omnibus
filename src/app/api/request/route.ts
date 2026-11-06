@@ -25,7 +25,7 @@ import { cachedCvGet } from '@/lib/metadata/metadata-cache';
 import { followSeries, followSeriesByCatalogId } from '@/lib/follows';
 import { seriesFolderSegments } from '@/lib/utils/naming';
 
-const OPEN_REQUEST_STATUSES = ['PENDING', 'PENDING_APPROVAL', 'DOWNLOADING', 'MANUAL_DDL', 'STALLED', 'AWAITING_RELEASE', 'UNRELEASED'];
+const OPEN_REQUEST_STATUSES = ['PENDING', 'PENDING_APPROVAL', 'DOWNLOADING', 'MANUAL_DDL', 'STALLED', 'NOT_FOUND', 'AWAITING_RELEASE', 'UNRELEASED'];
 
 export const dynamic = 'force-dynamic';
 
@@ -740,7 +740,8 @@ export async function DELETE(request: NextRequest) {
         const existingJobs = await omnibusQueue.getJobs(['waiting', 'delayed', 'active', 'paused', 'prioritized']);
         for (const job of existingJobs) {
             if (job.id === `SEARCH_${id}` || job.data?.requestId === id) {
-                // job.remove() works on waiting jobs. Active jobs will be caught by the status check in automation.ts
+                // job.remove() works on waiting jobs. An active search can't be removed (it is locked): it
+                // writes nothing over a cancelled request (request-guard.ts, beta.011).
                 await job.remove().catch(() => {});
                 Logger.log(`[Request API] Removed pending background job for cancelled "${reqRecord.activeDownloadName || id}"`, 'info');
             }

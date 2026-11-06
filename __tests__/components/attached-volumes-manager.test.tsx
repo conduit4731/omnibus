@@ -162,10 +162,40 @@ describe('AttachedVolumesManager (COLLECTED)', () => {
         expect(await screen.findByText('This volume is already in your library')).toBeTruthy();
         expect(fetchMock.mock.calls.some(c => c[1]?.method === 'PUT')).toBe(false);
 
-        // Declining leaves the standalone series exactly where it is.
+        // Declining leaves the standalone series exactly where it is — and #239: the choice is
+        // STORED, so the next Refresh doesn't ask again (it used to only close the dialog).
         fireEvent.click(screen.getByRole('button', { name: /Leave it as its own series/ }));
         await waitFor(() => expect(screen.queryByText('This volume is already in your library')).toBeNull());
         expect(fetchMock.mock.calls.some(c => c[1]?.method === 'PUT')).toBe(false);
+        const patch = fetchMock.mock.calls.find(c => c[1]?.method === 'PATCH');
+        expect(JSON.parse(patch![1].body)).toEqual({ attachmentId: 'att2', retain: true });
+        await waitFor(() => expect(toast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Kept as its own series' })));
+    });
+
+    it('shows a volume kept as its own series, with the move still on offer (#239)', async () => {
+        const fetchMock = stubFetchRouter([
+            [/\/api\/library\/series\/attachments\?/, () => ok({ attachments: [{
+                ...collected, issueCount: 0, ownedCount: 0, retained: true,
+                retainedSeries: { id: 's_tpb', name: 'Court of Owls', folderPath: '/comics/DC Comics/Court of Owls (2012)', issueCount: 2 },
+            }] })],
+            ['/api/library/series/attachments', () => ok({ success: true, moved: 2, skeletonsReplaced: 0, removedSeries: true })],
+        ]);
+
+        render(<AttachedVolumesManager {...baseProps} kind="COLLECTED" />);
+
+        const link = await screen.findByRole('link', { name: 'Court of Owls' });
+        expect(link.getAttribute('href')).toBe(`/library/series?path=${encodeURIComponent('/comics/DC Comics/Court of Owls (2012)')}`);
+        expect(screen.getByText(/Kept as its own series/)).toBeTruthy();
+        // Its books are that series' rows: no "0 of 0 owned" for the lane.
+        expect(screen.queryByText(/of 0 owned/)).toBeNull();
+
+        fireEvent.click(screen.getByRole('button', { name: /Move it here/ }));
+        expect(await screen.findByText(/exists as its own series with\s+2 books/)).toBeTruthy();
+        fireEvent.click(screen.getByRole('button', { name: /Move it under Batman/ }));
+        await waitFor(() => {
+            const put = fetchMock.mock.calls.find(c => c[1]?.method === 'PUT');
+            expect(JSON.parse(put![1].body)).toEqual({ attachmentId: 'att2', sourceSeriesId: 's_tpb' });
+        });
     });
 
     it('absorbs on request, and says the files still need Standardize to move', async () => {
@@ -202,6 +232,28 @@ describe('AttachedVolumesManager (COLLECTED)', () => {
 // A collected edition the provider has no volume for (field report by robotshavehearts2): attach
 // it by name. It lists as Local, never offers a provider id, and its files are the ones in the
 // folder whose names carry it.
+// #255: a one-shot attached as a Special — its own panel, its own copy, provider volumes only.
+describe('AttachedVolumesManager (SPECIAL)', () => {
+    beforeEach(() => { vi.clearAllMocks(); });
+    afterEach(() => { vi.unstubAllGlobals(); });
+
+    const special = { ...attachment, id: 'att3', kind: 'SPECIAL', volumeId: '169970', name: 'Batman: Ark-M' };
+
+    it('speaks about Specials, lists only its own kind, and offers no attaching by name', async () => {
+        stubFetchRouter([['/api/library/series/attachments', () => ok({ attachments: [attachment, special] })]]);
+
+        render(<AttachedVolumesManager {...baseProps} kind="SPECIAL" />);
+
+        expect(await screen.findByText('Batman: Ark-M')).toBeTruthy();
+        expect(screen.queryByText('Batman Annual')).toBeNull();
+        expect(screen.getByText('Specials')).toBeTruthy();
+        fireEvent.click(screen.getByText('Attach special'));
+        const input = await screen.findByPlaceholderText('Search the provider for the special');
+        expect((input as HTMLInputElement).value).toBe('Batman');
+        expect(screen.queryByRole('button', { name: 'Add it by name' })).toBeNull();
+    });
+});
+
 describe('AttachedVolumesManager (COLLECTED, local by name)', () => {
     beforeEach(() => { vi.clearAllMocks(); });
     afterEach(() => { vi.unstubAllGlobals(); });

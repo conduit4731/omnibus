@@ -16,16 +16,18 @@ import { getErrorMessage } from '@/lib/utils/error';
 import { AuditLogger } from '@/lib/audit-logger';
 import { ENGINE_URL, engineHeaders, engineFetchLong } from '@/lib/engine';
 import { omnibusQueue } from '@/lib/queue';
+import { comicInfoWritesEnabled } from '@/lib/comicinfo-writes';
 import fs from 'fs';
 import { randomUUID } from 'crypto';
 import { UNMATCHED_DIR, isPathWithinRoots } from '@/lib/utils/paths';
 import { attachAsCollected } from '@/lib/match-collision';
-import { comicInfoWriteEnabled } from '@/lib/utils/comicinfo-write';
+import { retainedChildren } from '@/lib/retained-attachments';
 
 // LOCAL: a collected edition (or annual run) the provider has no volume for — attached by name,
 // no sync lane; its books are the files whose names carry it (field report by robotshavehearts2).
 const VALID_SOURCES = ['COMICVINE', 'METRON', 'LOCAL'];
-const VALID_KINDS = ['ANNUAL', 'COLLECTED'];
+// SPECIAL (#255): a one-shot that belongs with the series but is neither an annual nor a trade.
+const VALID_KINDS = ['ANNUAL', 'COLLECTED', 'SPECIAL'];
 
 /**
  * Queue the series.json regeneration WITHOUT awaiting it. A `await queue.add(...)` never settles
@@ -45,16 +47,18 @@ function queueSeriesJsonExport(seriesId: string, tag: string) {
  * claimed file otherwise keeps the XML it had before the attach — the parent volume's id, the series'
  * year, no issue id — until the series' next refresh, and the attached volume's id in the file is
  * half of the zero-API restore. Same FIRE-AND-FORGET rule as the series.json export, and a failure
- * here never fails the attach: the next refresh rewrites these files anyway.
+ * here never fails the attach: the next refresh rewrites these files anyway. An attach is no
+ * write-to-file choice of its own, so "Write metadata to ComicInfo.xml" decides (#251).
  */
 async function queueLaneEmbed(attachmentId: string) {
     try {
+        if (!(await comicInfoWritesEnabled())) return;
         const rows = await prisma.issue.findMany({
             where: { attachedVolumeId: attachmentId, filePath: { not: null } },
             select: { id: true, filePath: true },
         });
         const issueIds = rows.filter(r => r.filePath).map(r => r.id);
-        if (issueIds.length === 0 || !(await comicInfoWriteEnabled())) return;
+        if (issueIds.length === 0) return;
         void omnibusQueue.add('EMBED_METADATA',
             { type: 'EMBED_METADATA', issueIds },
             { jobId: `EMBED_META_ATTACH_${attachmentId}_${Date.now()}` }
@@ -166,9 +170,14 @@ export async function GET(request: Request) {
             _count: { _all: true },
         });
         const ownedByAttachment = new Map(owned.map(o => [o.attachedVolumeId, o._count._all]));
+        // #239: an attachment kept as its own series shows as such, with the series it lives in.
+        const kept = await Promise.all(attachments.map(async a => {
+            const [child] = await retainedChildren(a);
+            return child ? { ...child, issueCount: await prisma.issue.count({ where: { seriesId: child.id } }) } : null;
+        }));
 
         return NextResponse.json({
-            attachments: attachments.map(a => ({
+            attachments: attachments.map((a, i) => ({
                 id: a.id,
                 metadataSource: a.metadataSource,
                 volumeId: a.volumeId,
@@ -178,6 +187,8 @@ export async function GET(request: Request) {
                 issueCount: a.issueCount,
                 ownedCount: ownedByAttachment.get(a.id) || 0,
                 lastSyncedAt: a.lastSyncedAt,
+                retained: kept[i] !== null,
+                retainedSeries: kept[i],
             })),
         });
     } catch (error: unknown) {
@@ -212,6 +223,10 @@ export async function POST(request: Request) {
         }
         if (!VALID_KINDS.includes(kind)) {
             return NextResponse.json({ error: `Unknown attachment kind "${kind}"` }, { status: 400 });
+        }
+        // A Special is a provider volume: its files are named after it and found by it (#255, v1).
+        if (isLocal && kind === 'SPECIAL') {
+            return NextResponse.json({ error: 'A Special is attached from the provider, not by name.' }, { status: 400 });
         }
 
         const series = await prisma.series.findUnique({ where: { id: seriesId } });
@@ -280,14 +295,17 @@ export async function POST(request: Request) {
             where: { metadataSource, metadataId: volumeId, id: { not: seriesId } },
             select: { id: true, name: true, folderPath: true, _count: { select: { issues: true } } },
         });
+        // #239: once the admin chose "Leave it as its own series", a Refresh doesn't ask again.
+        const kept = await retainedChildren(attachment);
 
         return NextResponse.json({
             success: true,
             attachmentId: attachment.id,
             name: summary?.name ?? attachment.name,
-            existingSeries: standalone
+            existingSeries: standalone && kept.length === 0
                 ? { id: standalone.id, name: standalone.name, folderPath: standalone.folderPath, issueCount: standalone._count.issues }
                 : null,
+            retainedSeries: kept[0] ?? null,
             summary: summary
                 ? {
                     total: summary.total,
@@ -335,35 +353,51 @@ export async function PUT(request: Request) {
         const source = await prisma.series.findUnique({ where: { id: sourceSeriesId } });
         if (!source) return NextResponse.json({ error: 'Series not found' }, { status: 404 });
 
-        const sourceIssues = await prisma.issue.findMany({ where: { seriesId: sourceSeriesId } });
-        const laneRows = await prisma.issue.findMany({ where: { attachedVolumeId: attachmentId } });
+        // One transaction (#239): a failure part-way used to leave the source's books re-parented,
+        // its skeletons deleted and the source Series standing empty — with no audit entry, since
+        // the throw came before it. Nothing outside the transaction is awaited inside it (#195:
+        // SQLite's single pooled connection would deadlock on its own transaction).
+        const { moved, skeletonsReplaced, removedSeries } = await prisma.$transaction(async (tx) => {
+            const sourceIssues = await tx.issue.findMany({ where: { seriesId: sourceSeriesId } });
+            const laneRows = await tx.issue.findMany({ where: { attachedVolumeId: attachmentId } });
 
-        let moved = 0;
-        let skeletonsReplaced = 0;
-        for (const issue of sourceIssues) {
-            // A file-less skeleton for the same provider issue is redundant once the real book
-            // arrives — drop it and let the owning row take its place in the lane.
-            const twin = issue.metadataId
-                ? laneRows.find(r => r.metadataId === issue.metadataId && !r.filePath)
-                : undefined;
-            if (twin) {
-                await prisma.issue.delete({ where: { id: twin.id } }).catch(() => {});
-                skeletonsReplaced++;
+            let moved = 0;
+            let skeletonsReplaced = 0;
+            for (const issue of sourceIssues) {
+                // A file-less skeleton for the same provider issue is redundant once the real book
+                // arrives — drop it and let the owning row take its place in the lane. Never the row
+                // itself (#239): a skeleton the source's sync once adopted is in BOTH lists, and taking
+                // it as its own twin deleted it before the update ("Record to update not found").
+                const twin = issue.metadataId
+                    ? laneRows.find(r => r.id !== issue.id && r.metadataId === issue.metadataId && !r.filePath)
+                    : undefined;
+                if (twin) {
+                    // Its reading-list entries follow the book that replaces it (same provider issue);
+                    // the delete would otherwise cascade them away.
+                    await tx.readingListItem.updateMany({ where: { issueId: twin.id }, data: { issueId: issue.id } });
+                    await tx.issue.delete({ where: { id: twin.id } });
+                    skeletonsReplaced++;
+                }
+                await tx.issue.update({
+                    where: { id: issue.id },
+                    data: { seriesId: attachment.seriesId, attachedVolumeId: attachmentId },
+                });
+                moved++;
             }
-            await prisma.issue.update({
-                where: { id: issue.id },
-                data: { seriesId: attachment.seriesId, attachedVolumeId: attachmentId },
-            });
-            moved++;
-        }
 
-        // Only remove the source series once nothing is left pointing at it — never a blind delete.
-        const remaining = await prisma.issue.count({ where: { seriesId: sourceSeriesId } });
-        let removedSeries = false;
-        if (remaining === 0) {
-            await prisma.series.delete({ where: { id: sourceSeriesId } }).catch(() => {});
-            removedSeries = true;
-        }
+            // Only remove the source series once nothing is left pointing at it — never a blind delete.
+            const remaining = await tx.issue.count({ where: { seriesId: sourceSeriesId } });
+            let removedSeries = false;
+            if (remaining === 0) {
+                await tx.series.delete({ where: { id: sourceSeriesId } });
+                removedSeries = true;
+            }
+            // #239: the volume is the parent's lane now, not a series kept as its own.
+            if (attachment.retained) {
+                await tx.attachedVolume.update({ where: { id: attachmentId }, data: { retained: false } });
+            }
+            return { moved, skeletonsReplaced, removedSeries };
+        }, { timeout: 30000, maxWait: 10000 });
 
         queueSeriesJsonExport(attachment.seriesId, `ABSORB_${attachmentId}`);
 
@@ -376,6 +410,77 @@ export async function PUT(request: Request) {
         return NextResponse.json({ success: true, moved, skeletonsReplaced, removedSeries });
     } catch (error: unknown) {
         Logger.log(`[Attachments API] Absorb failed: ${getErrorMessage(error)}`, 'error');
+        return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
+    }
+}
+
+/**
+ * #239 "Leave it as its own series": the attached volume is also a Series of its own, and the admin
+ * keeps it that way. The choice is STORED (it used to be a dialog close, so every Refresh asked again
+ * and one misclick absorbed the series). The child keeps its folder, files and rows; the parent's
+ * shelf lists the child's books instead of its own skeletons for them, so those skeletons go —
+ * file-less ones only, after their reading-list entries are moved onto the child's row for the same
+ * provider issue (ReadingListItem.issue cascades). A file-backed lane row stays where it is.
+ */
+export async function PATCH(request: Request) {
+    try {
+        const session = await requireAdmin();
+        if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+
+        const body = await request.json().catch(() => ({}));
+        const attachmentId: string = body?.attachmentId;
+        if (!attachmentId || body?.retain !== true) {
+            return NextResponse.json({ error: 'Missing attachmentId or retain' }, { status: 400 });
+        }
+
+        const attachment = await prisma.attachedVolume.findUnique({ where: { id: attachmentId } });
+        if (!attachment) return NextResponse.json({ error: 'Attachment not found' }, { status: 404 });
+        if (attachment.metadataSource === 'LOCAL') {
+            return NextResponse.json({ error: 'A local edition has no series of its own to keep.' }, { status: 400 });
+        }
+
+        const children = await retainedChildren({ ...attachment, retained: true });
+        if (children.length === 0) {
+            return NextResponse.json({ error: "That volume isn't a series of its own in your library any more." }, { status: 409 });
+        }
+
+        const skeletons = await prisma.issue.findMany({
+            where: { seriesId: attachment.seriesId, attachedVolumeId: attachmentId, OR: [{ filePath: null }, { filePath: '' }] },
+            select: { id: true, metadataId: true },
+        });
+        const skeletonIds = skeletons.map(s => s.id);
+        const providerIds = skeletons.map(s => s.metadataId).filter((m): m is string => !!m);
+        const childRows = providerIds.length > 0
+            ? await prisma.issue.findMany({
+                where: { seriesId: { in: children.map(c => c.id) }, metadataId: { in: providerIds } },
+                select: { id: true, metadataId: true },
+            })
+            : [];
+
+        await prisma.$transaction(async (tx) => {
+            await tx.attachedVolume.update({ where: { id: attachmentId }, data: { retained: true } });
+            for (const skeleton of skeletons) {
+                const replacement = childRows.find(r => r.metadataId === skeleton.metadataId);
+                await tx.readingListItem.updateMany({
+                    where: { issueId: skeleton.id },
+                    data: { issueId: replacement?.id ?? null },
+                });
+            }
+            if (skeletonIds.length > 0) {
+                await tx.issue.deleteMany({ where: { id: { in: skeletonIds } } });
+            }
+        }, { timeout: 30000, maxWait: 10000 });
+
+        queueSeriesJsonExport(attachment.seriesId, `RETAIN_${attachmentId}`);
+
+        await AuditLogger.log('RETAIN_ATTACHED_SERIES', {
+            attachmentId, parentSeriesId: attachment.seriesId, volumeId: attachment.volumeId,
+            metadataSource: attachment.metadataSource, keptSeriesId: children[0].id, skeletonsRemoved: skeletonIds.length,
+        }, (session.user as any).id);
+
+        return NextResponse.json({ success: true, retainedSeries: children[0], skeletonsRemoved: skeletonIds.length });
+    } catch (error: unknown) {
+        Logger.log(`[Attachments API] Keeping a volume as its own series failed: ${getErrorMessage(error)}`, 'error');
         return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
     }
 }

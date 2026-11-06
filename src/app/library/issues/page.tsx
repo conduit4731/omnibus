@@ -38,6 +38,8 @@ interface IssueRow {
   isAnnual?: boolean;
   isCollected?: boolean;
   collectionName?: string | null;
+  isSpecial?: boolean;
+  specialName?: string | null;
   seriesMetadataId?: string | null;
   metadataSource?: string;
   requestable?: boolean;
@@ -218,6 +220,7 @@ function LibraryIssuesInner() {
     const { composite, reqNum } = requestNameFor({
       seriesName: row.seriesName, number: row.number, parsedNum: Number.isFinite(p) ? p : null,
       name: row.name, isAnnual: row.isAnnual, isCollected: row.isCollected, collectionName: row.collectionName,
+      isSpecial: row.isSpecial, specialName: row.specialName,
     });
     setRequestingIds(prev => new Set(prev).add(row.id));
     try {

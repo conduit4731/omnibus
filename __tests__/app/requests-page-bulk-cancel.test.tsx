@@ -15,6 +15,10 @@ vi.mock('next-auth/react', () => ({ useSession: () => sessionValue }));
 
 import RequestsPage from '@/app/requests/page';
 
+// A status badge's text, not the tab of the same name ("Pending", "Cancelled").
+// fork: the status ring's legend (span.flex-1) repeats each label
+const badges = (label: string) => screen.queryAllByText(label).filter(el => el.getAttribute('role') !== 'tab' && !el.classList.contains('flex-1'));
+
 const mine = (id: string, name: string) => ({
     id, status: 'PENDING', seriesName: name, activeDownloadName: name, createdAt: '2026-10-12T12:00:00.000Z', imageUrl: null,
 });
@@ -44,7 +48,8 @@ describe('My Requests: bulk cancel reports what the server did', () => {
         await selectAllAndCancel();
 
         expect(toast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Requests Cancelled', description: 'Cancelled 2 requests.' }));
-        expect(screen.getAllByText('CANCELLED')).toHaveLength(2);
+        // Labels come from src/lib/request-status.ts (the badge shows them upper-case through CSS).
+        expect(badges('Cancelled')).toHaveLength(2);
         expect(screen.queryByRole('button', { name: 'Cancel selected requests' })).toBeNull();
     });
 
@@ -55,8 +60,8 @@ describe('My Requests: bulk cancel reports what the server did', () => {
         expect(toast).toHaveBeenCalledWith(expect.objectContaining({
             variant: 'destructive', title: '1 of 2 cancellations failed', description: 'Forbidden',
         }));
-        expect(screen.getAllByText('CANCELLED')).toHaveLength(1);
-        expect(screen.getAllByText('PENDING')).toHaveLength(1);
+        expect(badges('Cancelled')).toHaveLength(1);
+        expect(badges('Pending')).toHaveLength(1);
         screen.getByText('1 Selected');
     });
 });

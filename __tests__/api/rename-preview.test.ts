@@ -9,6 +9,7 @@ import { NextRequest } from 'next/server';
 const mocks = vi.hoisted(() => ({
     seriesFindUnique: vi.fn(),
     issueFindMany: vi.fn(),
+    attachedVolumeFindMany: vi.fn(),
     libraryFindMany: vi.fn(),
     systemSettingFindMany: vi.fn(),
     mockSession: { user: { id: 'admin_1', role: 'ADMIN' } },
@@ -18,6 +19,7 @@ vi.mock('@/lib/db', () => ({
     prisma: {
         series: { findUnique: mocks.seriesFindUnique },
         issue: { findMany: mocks.issueFindMany },
+        attachedVolume: { findMany: mocks.attachedVolumeFindMany },
         library: { findMany: mocks.libraryFindMany },
         systemSetting: { findMany: mocks.systemSettingFindMany },
     },
@@ -33,6 +35,7 @@ const post = (body: Record<string, unknown>) => POST(new NextRequest('http://loc
 describe('API Route: Rename Preview', () => {
     beforeEach(() => {
         mocks.systemSettingFindMany.mockResolvedValue([]);
+        mocks.attachedVolumeFindMany.mockResolvedValue([]);
         mocks.libraryFindMany.mockResolvedValue([{ id: 'lib_1', path: '/data/comics', isDefault: true, isManga: false }]);
         mocks.seriesFindUnique.mockResolvedValue({
             id: 'series_1', libraryId: 'lib_1', folderPath: '/data/comics/DC Comics/Batman (2016)',
@@ -104,6 +107,30 @@ describe('API Route: Rename Preview', () => {
         ]);
     });
 
+    // #255: a Special is promised the name both renamers give it — its own volume's, in the fixed
+    // Special pattern — beside the run's same number.
+    it("promises a Special its own volume's name beside the run", async () => {
+        mocks.issueFindMany.mockResolvedValue([
+            {
+                id: 'sp1', number: '1', name: 'A History of Arkham', releaseDate: '2026-01-14',
+                filePath: '/data/comics/DC Comics/Batman (2016)/Ark-M 01.cbz',
+                attachedVolume: { kind: 'SPECIAL', metadataSource: 'COMICVINE', name: 'Batman: Ark-M' },
+            },
+            {
+                id: 'issue_1', number: '1', name: null, releaseDate: '2016-06-15',
+                filePath: '/data/comics/DC Comics/Batman (2016)/Batman 1.cbz', attachedVolume: null,
+            },
+        ]);
+
+        const res = await post({ seriesIds: ['series_1'], folderPattern: '{Publisher}/{Series} ({Year})', filePattern: '{Series} - {Issue}' });
+        const { previews } = await res.json();
+
+        expect(previews.map((p: { newPath: string }) => p.newPath)).toEqual([
+            '/data/comics/DC Comics/Batman (2016)/Batman Ark-M #001 (2026).cbz',
+            '/data/comics/DC Comics/Batman (2016)/Batman - 001.cbz',
+        ]);
+    });
+
     it('refuses a non-admin', async () => {
         const { getToken } = await import('next-auth/jwt');
         vi.mocked(getToken).mockResolvedValueOnce({ id: 'u1', role: 'USER' } as never);
@@ -124,5 +151,40 @@ describe('API Route: Rename Preview', () => {
         });
         const { previews } = await res.json();
         expect(previews[0].newPath).toBe('/data/comics/Black $& Label/Black $& Label/Batman/Black $& Label Black $& Label #001.cbz');
+    });
+
+    // #239: the preview promises what both renamers now do for a volume kept as its own series.
+    it('promises a kept-as-its-own collection its collected names in its own folder, ignoring a stray attachment id', async () => {
+        mocks.seriesFindUnique.mockResolvedValue({
+            id: 'child', libraryId: 'lib_1', folderPath: '/data/comics/DC Comics/Absolute Batman (2025)',
+            publisher: 'DC Comics', name: 'Absolute Batman', year: 2025, isManga: false,
+            metadataSource: 'COMICVINE', metadataId: '167340',
+        });
+        mocks.issueFindMany.mockResolvedValue([
+            {
+                id: 'c1', seriesId: 'child', number: '1', name: 'The Zoo', releaseDate: '2025-03-25',
+                filePath: '/data/comics/DC Comics/Absolute Batman (2025)/Absolute Batman #01.cbz', attachedVolume: null,
+            },
+            {
+                id: 'c2', seriesId: 'child', number: '2', name: 'Abomination', releaseDate: '2026-01-20',
+                filePath: '/data/comics/DC Comics/Absolute Batman (2025)/Absolute Batman #02.cbz',
+                attachedVolume: { kind: 'ANNUAL', metadataSource: 'COMICVINE', name: 'Elsewhere Annual', seriesId: 'parent' },
+            },
+        ]);
+        const body = { seriesIds: ['child'], folderPattern: '{Publisher}/{Series} ({Year})', filePattern: '{Series} #{Issue}' };
+
+        mocks.attachedVolumeFindMany.mockResolvedValue([{ kind: 'COLLECTED' }]);
+        let data = await (await post(body)).json();
+        expect(data.previews.map((p: any) => p.newPath)).toEqual([
+            '/data/comics/DC Comics/Absolute Batman (2025)/Absolute Batman Vol. 001 (2025).cbz',
+            '/data/comics/DC Comics/Absolute Batman (2025)/Absolute Batman Vol. 002 (2026).cbz',
+        ]);
+
+        mocks.attachedVolumeFindMany.mockResolvedValue([]);
+        data = await (await post(body)).json();
+        expect(data.previews.map((p: any) => p.newPath)).toEqual([
+            '/data/comics/DC Comics/Absolute Batman (2025)/Absolute Batman #001.cbz',
+            '/data/comics/DC Comics/Absolute Batman (2025)/Absolute Batman #002.cbz',
+        ]);
     });
 });

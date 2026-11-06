@@ -19,6 +19,7 @@ import { useToast } from "@/components/ui/use-toast"
 import { COMIC_EXT_REGEX } from "@/lib/utils/formats"
 import { SeriesLink } from "@/components/series-link"
 import { runBulk } from "@/lib/utils/bulk"
+import { CANCELLABLE_STATUSES, WAITING_STATUSES, requestStatusClass, requestStatusDetail, requestStatusLabel } from "@/lib/request-status"
 import {
   Select,
   SelectContent,
@@ -33,7 +34,7 @@ const STATUS_GROUPS: { tab: string, label: string, statuses: string[], color: st
   { tab: "GETCOMICS", label: "GetComics", statuses: ['MANUAL_DDL'], color: '#f59e0b', hint: "GetComics link found but Cloudflare blocks the auto-download; download it by hand" },
   { tab: "PENDING_APPROVAL", label: "Pending", statuses: ['PENDING_APPROVAL'], color: '#f97316', hint: "Waiting for an admin to approve the request" },
   { tab: "UNRELEASED", label: "Awaiting", statuses: ['UNRELEASED'], color: '#a855f7', hint: "Release date still ahead; searched automatically once it is out" },
-  { tab: "AWAITING", label: "No source", statuses: ['AWAITING_RELEASE'], color: '#0ea5e9', hint: "Released, but no indexer or GetComics had it; retried automatically" },
+  { tab: "AWAITING", label: "No source", statuses: [...WAITING_STATUSES], color: '#0ea5e9', hint: "Released, but no indexer or GetComics had it; retried automatically" },
   { tab: "COMPLETED", label: "Completed", statuses: ['IMPORTED', 'COMPLETED'], color: '#22c55e', hint: "In the library" },
   { tab: "REVIEW", label: "Not in pack", statuses: ['NEEDS_REVIEW'], color: '#eab308', hint: "A pack was downloaded and imported, but this issue was not in it; check the pack" }, // v1.4.9
   { tab: "FAILED", label: "Failed", statuses: ['FAILED', 'STALLED', 'ERROR'], color: '#ef4444', hint: "Download failed, or several editions matched and need an interactive pick" },
@@ -59,8 +60,7 @@ function batcaveBodyOf(req: any, others: any[] = []) {
     // never empty: no issues would queue every missing issue of the series
     issues: [req, ...others].map(x => String(x.issueNumber || (String(x.seriesName || '').match(/#\s*([^\s(]+)/) || [])[1] || '')).filter(Boolean).map(number => ({ number })) };
 }
-const CANCELLABLE = ['PENDING_APPROVAL', 'PENDING', 'DOWNLOADING', 'MANUAL_DDL', 'UNRELEASED', 'AWAITING_RELEASE'];
-const statusLabel = (status: string) => status === 'PENDING_APPROVAL' ? 'Needs Approval' : status === 'NEEDS_REVIEW' ? 'Not in pack' : status === 'MANUAL_DDL' ? 'GETCOMICS' : status === 'AWAITING_RELEASE' ? 'No source found' : status === 'UNRELEASED' ? 'Awaiting release' : status === 'IMPORTING' ? 'Importing…' : status;
+const statusLabel = (status: string) => status === 'PENDING_APPROVAL' ? 'Needs Approval' : status === 'NEEDS_REVIEW' ? 'Not in pack' : status === 'MANUAL_DDL' ? 'GETCOMICS' : status === 'NOT_FOUND' ? 'No source found' : status === 'UNRELEASED' ? 'Awaiting release' : requestStatusLabel(status);
 
 // Fork: ring of all requests by status group; a click filters to that group
 function StatusRing({ requests, active, onSelect }: { requests: any[], active: string, onSelect: (tab: string) => void }) {
@@ -107,13 +107,13 @@ function StatusRing({ requests, active, onSelect }: { requests: any[], active: s
 }
 
 // Fork: compact one-line request (table view)
-function RequestRow({ req, getStatusColor, onCancel, onRetry, isAdmin, isSelectionMode, isSelected, onToggleSelect, sameLink = [] }: {
-  req: any, getStatusColor: (status: string) => string, onCancel: (id: string) => void, onRetry: (id: string) => void, isAdmin: boolean,
+function RequestRow({ req, onCancel, onRetry, isAdmin, isSelectionMode, isSelected, onToggleSelect, sameLink = [] }: {
+  req: any, onCancel: (id: string) => void, onRetry: (id: string) => void, isAdmin: boolean,
   sameLink?: any[], // other requests waiting on the same manual download link (one pack for many issues)
   isSelectionMode: boolean, isSelected: boolean, onToggleSelect: (id: string) => void
 }) {
   const [isCancelling, setIsCancelling] = useState(false);
-  const cancellable = CANCELLABLE.includes(req.status);
+  const cancellable = CANCELLABLE_STATUSES.includes(req.status);
   const name = (req.seriesName || "Unknown Request").replace(COMIC_EXT_REGEX, '');
   const batcaveBody = batcaveBodyOf(req, sameLink);
   return (
@@ -121,7 +121,7 @@ function RequestRow({ req, getStatusColor, onCancel, onRetry, isAdmin, isSelecti
         onClick={() => { if (isSelectionMode && cancellable) onToggleSelect(req.id); }}>
       {isSelectionMode && <td className="pl-3 w-8">{cancellable ? (isSelected ? <CheckSquare className="w-4 h-4 text-primary" /> : <Square className="w-4 h-4 text-muted-foreground" />) : null}</td>}
       <td className={`px-3 py-2 w-32 ${needsAction(req) ? 'border-l-4 border-amber-500' : ''}`}>
-        <Badge variant="outline" className={`${getStatusColor(req.status)} text-[10px] font-bold uppercase tracking-wider whitespace-nowrap`}>{statusLabel(req.status)}</Badge>
+        <Badge variant="outline" className={`${requestStatusClass(req.status)} text-[10px] font-bold uppercase tracking-wider whitespace-nowrap`}>{statusLabel(req.status)}</Badge>
         {needsAction(req) && <p className="text-[9px] font-black uppercase text-amber-500 mt-0.5">Action needed</p>}
       </td>
       <td className="px-3 py-2 max-w-0 w-full"><p className="truncate font-medium" title={name}><SeriesLink folderPath={req.seriesPath}>{name}</SeriesLink>{sameLink.length > 0 && <span className="ml-2 text-[10px] font-black px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-500" title={`${sameLink.length + 1} requests share this download`}>×{sameLink.length + 1}</span>}</p></td>
@@ -135,7 +135,7 @@ function RequestRow({ req, getStatusColor, onCancel, onRetry, isAdmin, isSelecti
             <BatcaveButton body={batcaveBody} />
           </div>
         ) : (<>
-        {req.status === 'AWAITING_RELEASE' && <BatcaveButton body={batcaveBody} className="h-7 w-7 min-h-7 min-w-7 mr-1 align-middle" />}
+        {(WAITING_STATUSES as readonly string[]).includes(req.status) && <BatcaveButton body={batcaveBody} className="h-7 w-7 min-h-7 min-w-7 mr-1 align-middle" />}
         {req.seriesPath && <Button size="icon" variant="ghost" asChild className="h-7 w-7" title="Go to series"><Link href={`/library/series?path=${encodeURIComponent(req.seriesPath)}`}><Library className="w-3.5 h-3.5" /></Link></Button>}
         {req.volumeId && req.volumeId !== "0" && (
           <Button size="icon" variant="ghost" asChild className="h-7 w-7" title={`View on ${req.metadataSource === 'METRON' ? 'Metron' : 'ComicVine'}`}>
@@ -155,7 +155,7 @@ function RequestRow({ req, getStatusColor, onCancel, onRetry, isAdmin, isSelecti
 }
 
 // What no source delivered: not finished, cancelled, or on its way right now — worth a try on Batcave
-const batcaveWorthy = (r: any) => ['AWAITING_RELEASE', 'MANUAL_DDL', 'NEEDS_REVIEW', 'FAILED', 'STALLED', 'ERROR'].includes(r.status);
+const batcaveWorthy = (r: any) => [...WAITING_STATUSES, 'MANUAL_DDL', 'NEEDS_REVIEW', 'FAILED', 'STALLED', 'ERROR'].includes(r.status);
 // One queue entry per series for all of them ("All" above the table)
 function batcaveBatchOf(reqs: any[]) {
   const byKey = new Map<string, any[]>();
@@ -188,7 +188,10 @@ function SeriesGroupRow({ reqs, open, onToggle, colSpan }: { reqs: any[], open: 
 // Where a request is (being) downloaded from, for cards and table rows
 function providerOf(req: any): string {
   let provider = "Pending Search";
-  if (req.indexer) {
+  const waitingDetail = requestStatusDetail(req.status); // a waiting request says what happens next, not an earlier try's source
+  if (waitingDetail) {
+      provider = waitingDetail;
+  } else if (req.indexer) {
       provider = req.indexer;
   } else if (req.downloadLink === 'DIRECT_GETCOMICS') {
       provider = "GetComics";
@@ -219,8 +222,6 @@ function providerOf(req: any): string {
       provider = "Usenet / Torrent Indexer";
   } else if (req.status === 'PENDING_APPROVAL') {
       provider = "Awaiting Approval";
-  } else if (req.status === 'AWAITING_RELEASE') {
-      provider = "Not on any source yet — retrying automatically";
   } else if (['FAILED', 'ERROR', 'CANCELLED', 'STALLED'].includes(req.status)) {
       provider = "N/A";
   }
@@ -229,14 +230,12 @@ function providerOf(req: any): string {
 
 function RequestCard({ 
     req, 
-    getStatusColor, 
     onCancel, 
     isSelectionMode, 
     isSelected, 
     onToggleSelect 
 }: { 
     req: any, 
-    getStatusColor: (status: string) => string, 
     onCancel: (id: string) => void,
     isSelectionMode: boolean,
     isSelected: boolean,
@@ -248,7 +247,7 @@ function RequestCard({
   const [isCancelling, setIsCancelling] = useState(false)
 
   // Enforce the rule that users can only cancel pre-processed or active items
-  const isCancellable = CANCELLABLE.includes(req.status);
+  const isCancellable = CANCELLABLE_STATUSES.includes(req.status);
 
   const handleShowDesc = async () => {
     if (showDesc) {
@@ -322,7 +321,7 @@ function RequestCard({
                 <div className="space-y-1">
                     <h3 className="font-bold text-lg sm:text-xl leading-tight line-clamp-1 text-foreground" title={displayName}>{displayName}</h3>
                     <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="outline" className={`${getStatusColor(req.status)} text-[10px] font-bold uppercase tracking-wider`}>
+                        <Badge variant="outline" className={`${requestStatusClass(req.status)} text-[10px] font-bold uppercase tracking-wider`}>
                             {statusLabel(req.status)}
                         </Badge>
                         {req.status === 'DOWNLOADING' && <span className="text-[11px] font-mono text-primary font-bold bg-primary/10 px-2 py-0.5 rounded">{req.progress}%</span>}
@@ -489,24 +488,6 @@ export default function RequestsPage() {
       });
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'IMPORTED': case 'COMPLETED': return "bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800"
-      case 'DOWNLOADING': case 'MANUAL_DDL': return "bg-primary/20 text-primary border-primary/30"
-      case 'PENDING_APPROVAL': return "bg-orange-100 text-orange-800 border-orange-200 dark:bg-orange-900/30 dark:text-orange-400 dark:border-orange-800"
-      case 'FAILED': case 'STALLED': case 'ERROR': return "bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800"
-      case 'UNRELEASED': return "bg-purple-100 text-purple-800 border-purple-200 dark:bg-purple-900/30 dark:text-purple-400 dark:border-purple-800"
-      case 'AWAITING_RELEASE': return "bg-sky-100 text-sky-800 border-sky-200 dark:bg-sky-900/30 dark:text-sky-400 dark:border-sky-800"
-      // #240 PR B: the pack is in the watched folder and the sweep has not reported back yet —
-      // still active work, and deliberately not an arrival.
-      case 'IMPORTING': return "bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-800"
-      // #240: the pack this issue came in was already consumed but the issue never reached the
-      // library — a person has to look at it, so it reads as "attention", not as a failure.
-      case 'NEEDS_REVIEW': return "bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400 dark:border-yellow-800"
-      default: return "bg-muted text-foreground border-border"
-    }
-  }
-
   const filteredRequests = useMemo(() => {
       return requests.filter(req => {
           const matchesSearch = !searchQuery || (req.activeDownloadName || req.seriesName || "").toLowerCase().includes(searchQuery.toLowerCase());
@@ -553,7 +534,7 @@ export default function RequestsPage() {
   // Calculate which of the currently visible requests are eligible for cancellation
   // grouped: only the issues of expanded series on this page are visible
   const visibleRequests = seriesGroups ? seriesGroups.slice((page - 1) * limit, page * limit).flatMap(g => openGroups.has(g.key) ? g.reqs : []) : paginatedRequests;
-  const cancellableRequests = useMemo(() => visibleRequests.filter(r => CANCELLABLE.includes(r.status)), [visibleRequests]);
+  const cancellableRequests = useMemo(() => visibleRequests.filter(r => CANCELLABLE_STATUSES.includes(r.status)), [visibleRequests]);
 
   return (
     <div className="container mx-auto py-10 px-6 space-y-6 max-w-5xl transition-colors duration-300">
@@ -632,11 +613,11 @@ export default function RequestsPage() {
                       {seriesGroups ? seriesGroups.slice((page - 1) * limit, page * limit).flatMap(({ key, reqs }) => [
                           <SeriesGroupRow key={key} reqs={reqs} open={openGroups.has(key)} onToggle={() => toggleGroup(key)} colSpan={isSelectionMode ? 6 : 5} />,
                           ...(openGroups.has(key) ? reqs.map(req => (
-                              <RequestRow key={req.id} req={req} getStatusColor={getStatusColor} onCancel={handleCancelRequest} onRetry={handleRetry} isAdmin={isAdmin}
+                              <RequestRow key={req.id} req={req} onCancel={handleCancelRequest} onRetry={handleRetry} isAdmin={isAdmin}
                                   isSelectionMode={isSelectionMode} isSelected={selectedRequests.has(req.id)} onToggleSelect={toggleRequestSelection} />
                           )) : []),
                       ]) : tableRows.map(({ req, sameLink }) => (
-                          <RequestRow key={req.id} req={req} sameLink={sameLink} getStatusColor={getStatusColor} onCancel={handleCancelRequest} onRetry={handleRetry} isAdmin={isAdmin}
+                          <RequestRow key={req.id} req={req} sameLink={sameLink} onCancel={handleCancelRequest} onRetry={handleRetry} isAdmin={isAdmin}
                               isSelectionMode={isSelectionMode} isSelected={selectedRequests.has(req.id)} onToggleSelect={toggleRequestSelection} />
                       ))}
                   </tbody>
@@ -648,9 +629,8 @@ export default function RequestsPage() {
           {viewMode === "cards" && paginatedRequests.map((req) => (
               <RequestCard 
                   key={req.id} 
-                  req={req} 
-                  getStatusColor={getStatusColor} 
-                  onCancel={handleCancelRequest} 
+                  req={req}
+                  onCancel={handleCancelRequest}
                   isSelectionMode={isSelectionMode}
                   isSelected={selectedRequests.has(req.id)}
                   onToggleSelect={toggleRequestSelection}

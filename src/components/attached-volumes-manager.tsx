@@ -19,6 +19,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import Image from "next/image"
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -38,6 +39,9 @@ export interface Attachment {
     issueCount: number
     ownedCount: number
     lastSyncedAt: string | null
+    /** #239: the admin chose "Leave it as its own series" and that series still exists. */
+    retained?: boolean
+    retainedSeries?: { id: string; name: string; folderPath: string; issueCount: number } | null
 }
 
 interface AttachSummary {
@@ -68,7 +72,7 @@ export function summaryLine(s: AttachSummary, noun = "annual file"): string {
 
 const PROVIDERS = ["COMICVINE", "METRON"] as const
 
-type AttachKind = "ANNUAL" | "COLLECTED"
+type AttachKind = "ANNUAL" | "COLLECTED" | "SPECIAL"
 
 const KIND_COPY: Record<AttachKind, {
     title: string
@@ -108,6 +112,19 @@ const KIND_COPY: Record<AttachKind, {
         numberingNote: "Number them in the order you want to read them — that number is yours to set, it becomes the volume number in the filename, and the provider link holds regardless.",
         emptyWithFiles: () => "",
     },
+    // #255: a one-shot that belongs with the series but is neither an annual nor a trade.
+    SPECIAL: {
+        title: "Specials",
+        blurb: "One-shots and specials live in their own provider volume. Attach one and it's listed here, apart from the run.",
+        attachCta: "Attach special",
+        dialogTitle: "Attach a special",
+        dialogBlurb: series => `Find the special's own volume on the provider. It joins ${series} as a Special — listed on its own, and never counted as one of the run's issues.`,
+        searchPlaceholder: "Search the provider for the special",
+        seedQuery: series => series,
+        unclaimedNoun: "file",
+        numberingNote: "A Special keeps its own name: its files are named after its own volume (\"Name #001 (Year)\"), beside the run, and the provider link holds regardless of the number.",
+        emptyWithFiles: () => "",
+    },
 }
 
 export function AttachedVolumesManager({
@@ -120,7 +137,7 @@ export function AttachedVolumesManager({
 }: {
     seriesId: string
     seriesName: string
-    /** ANNUAL or COLLECTED — decides the copy, the search seed, and the absorb prompt. */
+    /** ANNUAL, COLLECTED or SPECIAL — decides the copy, the search seed, and the absorb prompt. */
     kind?: AttachKind
     defaultProvider?: string | null
     /** Annual files on this series that belong to no volume — the reason to act, when there is one. */
@@ -299,6 +316,33 @@ export function AttachedVolumesManager({
         }
     }
 
+    /** #239: "Leave it as its own series" is a stored choice — no re-prompt on the next Refresh, and
+     *  the parent stops holding skeletons for books the kept series already has. */
+    const leave = async () => {
+        if (!absorbPrompt) return
+        setIsAbsorbing(true)
+        try {
+            const res = await fetch(`/api/library/series/attachments`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ attachmentId: absorbPrompt.attachmentId, retain: true }),
+            })
+            const data = await res.json()
+            if (!res.ok || !data.success) throw new Error(data.error || "Couldn't keep it as its own series")
+            toast({
+                title: "Kept as its own series",
+                description: `"${absorbPrompt.series.name}" keeps its own folder and files. You won't be asked about it again; "Move it here" is still there if you change your mind.`,
+            })
+            setAbsorbPrompt(null)
+            await load()
+            onChanged?.()
+        } catch (e: any) {
+            toast({ title: "Couldn't keep it as its own series", description: e.message, variant: "destructive" })
+        } finally {
+            setIsAbsorbing(false)
+        }
+    }
+
     const detach = async () => {
         if (!detachTarget) return
         setBusyId(detachTarget.id)
@@ -366,10 +410,35 @@ export function AttachedVolumesManager({
                                     {a.metadataSource === "LOCAL"
                                         // A local edition has no provider id and no lane to be "of": its books are the files that carry its name.
                                         ? <>Local · {a.ownedCount} owned</>
-                                        : <>{a.metadataSource} {a.volumeId} · {a.ownedCount} of {a.issueCount} owned</>}
+                                        : a.retained
+                                            // Its books are that series' rows, not this lane's — no "0 of 0 owned".
+                                            ? <>{a.metadataSource} {a.volumeId}</>
+                                            : <>{a.metadataSource} {a.volumeId} · {a.ownedCount} of {a.issueCount} owned</>}
                                 </p>
+                                {a.retained && a.retainedSeries && (
+                                    <p className="text-xs text-muted-foreground">
+                                        Kept as its own series:{" "}
+                                        <Link
+                                            href={`/library/series?path=${encodeURIComponent(a.retainedSeries.folderPath)}`}
+                                            className="font-bold text-foreground underline-offset-2 hover:underline"
+                                        >
+                                            {a.retainedSeries.name}
+                                        </Link>
+                                    </p>
+                                )}
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
+                                {a.retained && a.retainedSeries && (
+                                    <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        className="h-8 px-3 text-xs font-bold"
+                                        disabled={busyId === a.id || isAbsorbing}
+                                        onClick={() => setAbsorbPrompt({ attachmentId: a.id, series: a.retainedSeries! })}
+                                    >
+                                        <Link2 className="w-4 h-4 sm:mr-1" /><span className="hidden sm:inline">Move it here</span>
+                                    </Button>
+                                )}
                                 {a.metadataSource !== "LOCAL" && (
                                     <Button
                                         size="sm"
@@ -562,7 +631,7 @@ export function AttachedVolumesManager({
                             variant="outline"
                             className="border-border"
                             disabled={isAbsorbing}
-                            onClick={() => setAbsorbPrompt(null)}
+                            onClick={leave}
                         >
                             Leave it as its own series
                         </Button>

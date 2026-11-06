@@ -22,7 +22,7 @@ describe('GET /api/search - ComicVine placeholders (fork)', () => {
     it('fills publisher, issue count, cover and description from /volumes/, then filters foreign publishers', async () => {
         m.cv.mockImplementation(async (url: string) => url.endsWith('/search/')
             ? { data: { results: [bare(18058, '1937'), bare(42, '2016')], number_of_total_results: 2 } }
-            : { data: { results: [
+            : { data: { status_code: 1, results: [
                 { id: 18058, publisher: { name: 'DC Comics' }, count_of_issues: 1100, image: { medium_url: 'https://cv/18058.jpg' }, deck: null, description: '<p>Batman</p>' },
                 { id: 42, publisher: { name: 'Panini' }, count_of_issues: 12, image: { medium_url: 'https://cv/42.jpg' }, deck: 'German', description: null },
             ] } });
@@ -39,6 +39,6 @@ describe('GET /api/search - ComicVine placeholders (fork)', () => {
             throw new Error('420');
         });
         const body = await (await GET(new Request('http://localhost/api/search?q=Detective%20Comics'))).json();
-        expect(body.results.map((r: any) => [r.id, r.publisher])).toEqual([[18058, 'Other']]);
+        expect(body.results.map((r: any) => [r.id, r.publisher])).toEqual([[18058, 'Unknown']]);
     });
 });

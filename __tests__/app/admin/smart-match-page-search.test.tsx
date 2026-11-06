@@ -280,8 +280,9 @@ describe('Smart Matcher — Start Auto-Scan error handling (review of #231)', ()
 
     it('retries an ERROR row on the next scan, but not a NOT_FOUND row', async () => {
         // The scan's 1.5 s pause between rows is real time otherwise: three of them made this test
-        // flaky under a loaded full-suite run.
-        stubImmediateTimers();
+        // flaky under a loaded full-suite run. Only that pause is collapsed, so waitFor's own
+        // timeout below stays real.
+        stubImmediateTimers(1500);
         const OTHER = { ...RAW_ITEM, id: 'raw_WmFnb3I', name: 'Zagor 001', folderPath: '/unmatched/Zagor 001.cbz' };
         const searches: string[] = [];
         stubFetchRouter([

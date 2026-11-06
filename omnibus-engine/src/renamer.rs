@@ -133,24 +133,43 @@ pub(crate) const ANNUAL_FILE_PATTERN: &str = "{Series} Annual #{Issue} ({IssueYe
 /// the filename carry reading order for free.
 pub(crate) const COLLECTED_FILE_PATTERN: &str = "{Series} Vol. {Issue} ({IssueYear})";
 
-fn file_pattern_for_issue<'a>(
+/// #255: a Special — a one-shot attached to a series, neither an annual nor a trade. Fixed, like the
+/// annual pattern, and named after the Special's OWN volume (`series_token_for_issue`): "Absolute
+/// Batman Ark-M #001 (2026)" is the provider's title, and the name the lane's name rule
+/// (`attachment_for_filename`) reads back after a rescan. Twin: file-pattern.ts SPECIAL_FILE_PATTERN.
+pub(crate) const SPECIAL_FILE_PATTERN: &str = "{Series} #{Issue} ({IssueYear})";
+
+/// `is_retained_collected` (#239): the row belongs to a series that a COLLECTED attachment keeps
+/// as its own ("Leave it as its own series") and the row has no attachment of its own. Its books are
+/// that collection's volumes, so they take the collected pattern in their own folder — ranked after
+/// the annual check, so an annual inside such a series keeps its Mylar name.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn file_pattern_for_issue<'a>(
     is_annual: bool,
     is_collected: bool,
+    is_special: bool,
+    is_retained_collected: bool,
     is_manga: bool,
     file_pattern: &'a str,
     manga_file_pattern: Option<&'a str>,
     collected_file_pattern: Option<&'a str>,
 ) -> &'a str {
+    let collected = || match collected_file_pattern {
+        Some(p) if !p.trim().is_empty() => p,
+        _ => COLLECTED_FILE_PATTERN,
+    };
     // Collected first: a collected edition of a manga series is still a collected edition, and an
     // attachment's kind is an explicit human decision that outranks the series-level template.
     if is_collected {
-        return match collected_file_pattern {
-            Some(p) if !p.trim().is_empty() => p,
-            _ => COLLECTED_FILE_PATTERN,
-        };
+        return collected();
+    }
+    if is_special {
+        return SPECIAL_FILE_PATTERN;
     }
     if is_annual {
         ANNUAL_FILE_PATTERN
+    } else if is_retained_collected {
+        collected()
     } else {
         effective_file_pattern(is_manga, file_pattern, manga_file_pattern)
     }
@@ -164,16 +183,19 @@ fn file_pattern_for_issue<'a>(
 /// issue id in a ComicInfo to fall back on. So its books are named after the EDITION ("Batman
 /// Compendium Vol. 001"), which the name rule still finds as the filename's prefix; naming them
 /// after the series ("Batman Vol. 001") would orphan them at the next wipe, where they would parse
-/// as the run's #1. Every other row — a plain issue, an annual, a provider-backed trade — names
-/// after the series as before.
+/// as the run's #1. A Special (#255) is named after its own volume for the same reason, whatever
+/// its source. Every other row — a plain issue, an annual, a provider-backed trade — names after
+/// the series as before.
 fn series_token_for_issue<'a>(
     is_collected: bool,
+    is_special: bool,
     attachment_source: Option<&'a str>,
     attachment_name: Option<&'a str>,
     series_name: &'a str,
 ) -> &'a str {
     match attachment_name.map(str::trim) {
         Some(edition) if is_collected && attachment_source == Some("LOCAL") && !edition.is_empty() => edition,
+        Some(edition) if is_special && !edition.is_empty() => edition,
         _ => series_name,
     }
 }
@@ -286,16 +308,27 @@ pub async fn run_bulk_rename(
         let target_folder_str = target_folder.to_string_lossy().to_string();
         let folder_changed = current_folder.is_empty() || norm_ci(&current_folder) != norm_ci(&target_folder_str);
 
+        // An issue's attachment names it only when the attachment is THIS series' own (#239): a row
+        // that strayed into another series with a foreign attachment id must not take that lane's
+        // naming here. The join condition, not a WHERE, so the row itself is still renamed.
         let issues = sqlx::query(
             r#"SELECT i.id, i.name, i.number, i."filePath", i."releaseDate", CAST(i."isAnnual" AS INTEGER) AS is_annual,
                       CASE WHEN av.kind = 'COLLECTED' THEN 1 ELSE 0 END AS is_collected,
-                      av."metadataSource" AS attachment_source, av.name AS attachment_name
-               FROM "Issue" i LEFT JOIN "AttachedVolume" av ON av.id = i."attachedVolumeId"
+                      CASE WHEN av.kind = 'SPECIAL' THEN 1 ELSE 0 END AS is_special,
+                      av.id AS attachment_id, av."metadataSource" AS attachment_source, av.name AS attachment_name
+               FROM "Issue" i LEFT JOIN "AttachedVolume" av ON av.id = i."attachedVolumeId" AND av."seriesId" = i."seriesId"
                WHERE i."seriesId" = $1"#,
         )
         .bind(&s.id)
         .fetch_all(&db.pool)
         .await?;
+
+        // #239: a series a COLLECTED attachment keeps as its own ("Leave it as its own series") is that
+        // collection — its books take the collected pattern, in its own folder, under its own name.
+        let retained_collected = crate::attached_volumes::retaining_kinds(db, &s.id)
+            .await?
+            .iter()
+            .any(|k| k == "COLLECTED");
 
         // Only act if at least one real file exists (the recorded folder, or any issue file wherever
         // it lives) — avoids creating an empty target folder for a series with nothing on disk.
@@ -329,6 +362,8 @@ pub async fn run_bulk_rename(
             let release_date: Option<String> = issue.get("releaseDate");
             let is_annual: bool = issue.try_get::<i64, _>("is_annual").map(|v| v != 0).unwrap_or(false);
             let is_collected: bool = issue.try_get::<i64, _>("is_collected").map(|v| v != 0).unwrap_or(false);
+            let is_special: bool = issue.try_get::<i64, _>("is_special").map(|v| v != 0).unwrap_or(false);
+            let has_attachment = issue.try_get::<Option<String>, _>("attachment_id").unwrap_or(None).is_some();
             let attachment_source: Option<String> = issue.try_get("attachment_source").unwrap_or(None);
             let attachment_name: Option<String> = issue.try_get("attachment_name").unwrap_or(None);
 
@@ -372,8 +407,8 @@ pub async fn run_bulk_rename(
             }
 
             // A LOCAL collected edition's books are named after the edition — its files' names are
-            // the only claim it has (twinned with the Node loop + the preview).
-            let series_token = series_token_for_issue(is_collected, attachment_source.as_deref(), attachment_name.as_deref(), &s.name);
+            // the only claim it has (twinned with the Node loop + the preview). A Special, after itself.
+            let series_token = series_token_for_issue(is_collected, is_special, attachment_source.as_deref(), attachment_name.as_deref(), &s.name);
             let issue_values = NamingInput {
                 series: series_token.to_string(),
                 issue_number: issue_number.clone(),
@@ -384,7 +419,10 @@ pub async fn run_bulk_rename(
 
             // #203 Phase 1: an annual takes the Mylar-shaped name (see ANNUAL_FILE_PATTERN), named
             // through the same naming.rs rules as every other file.
-            let pattern = file_pattern_for_issue(is_annual, is_collected, s.is_manga, file_pattern, manga_file_pattern, collected_file_pattern);
+            let pattern = file_pattern_for_issue(
+                is_annual, is_collected, is_special, retained_collected && !has_attachment, s.is_manga,
+                file_pattern, manga_file_pattern, collected_file_pattern,
+            );
             let Some(stem) = naming::file_name(pattern, &issue_values, padding) else {
                 log::warn!("[Renamer] Skipping issue {:?} - the file pattern leaves no name.", issue_name);
                 continue;
@@ -508,22 +546,22 @@ mod tests {
         // The annual name outranks both the comic and the manga template — a manga annual is still
         // an annual, and Mylar/Komga expect "<Series> Annual #NNN (YYYY)" beside the main run.
         assert_eq!(
-            file_pattern_for_issue(true, false, false, comic, manga, None),
+            file_pattern_for_issue(true, false, false, false, false, comic, manga, None),
             "{Series} Annual #{Issue} ({IssueYear})"
         );
         assert_eq!(
-            file_pattern_for_issue(true, false, true, comic, manga, None),
+            file_pattern_for_issue(true, false, false, false, true, comic, manga, None),
             "{Series} Annual #{Issue} ({IssueYear})"
         );
         // Non-annual rows are untouched by any of this.
-        assert_eq!(file_pattern_for_issue(false, false, true, comic, manga, None), "{Series} Vol. {Issue}");
-        assert_eq!(file_pattern_for_issue(false, false, false, comic, manga, None), "{Series} #{Issue}");
+        assert_eq!(file_pattern_for_issue(false, false, false, false, true, comic, manga, None), "{Series} Vol. {Issue}");
+        assert_eq!(file_pattern_for_issue(false, false, false, false, false, comic, manga, None), "{Series} #{Issue}");
 
         // End to end through the naming rules the rename loop uses: zero-padded number, the
         // annual's own year, sanitized result.
         let annual = naming_values("Batman", "1", "2012-05-01");
         assert_eq!(
-            naming::file_name(file_pattern_for_issue(true, false, false, comic, None, None), &annual, IssuePadding::Three).as_deref(),
+            naming::file_name(file_pattern_for_issue(true, false, false, false, false, comic, None, None), &annual, IssuePadding::Three).as_deref(),
             Some("Batman Annual #001 (2012)")
         );
     }
@@ -542,22 +580,22 @@ mod tests {
 
         // No setting configured → the built-in default.
         assert_eq!(
-            file_pattern_for_issue(false, true, false, comic, manga, None),
+            file_pattern_for_issue(false, true, false, false, false, comic, manga, None),
             "{Series} Vol. {Issue} ({IssueYear})"
         );
         // A configured pattern wins, for manga series too.
         assert_eq!(
-            file_pattern_for_issue(false, true, true, comic, manga, Some("{Series} v{Issue}")),
+            file_pattern_for_issue(false, true, false, false, true, comic, manga, Some("{Series} v{Issue}")),
             "{Series} v{Issue}"
         );
         // A blank setting is not a pattern — fall back rather than emit empty file names.
         assert_eq!(
-            file_pattern_for_issue(false, true, false, comic, manga, Some("   ")),
+            file_pattern_for_issue(false, true, false, false, false, comic, manga, Some("   ")),
             "{Series} Vol. {Issue} ({IssueYear})"
         );
         // Collected outranks annual when a row is somehow both.
         assert_eq!(
-            file_pattern_for_issue(true, true, false, comic, manga, None),
+            file_pattern_for_issue(true, true, false, false, false, comic, manga, None),
             "{Series} Vol. {Issue} ({IssueYear})"
         );
 
@@ -565,7 +603,7 @@ mod tests {
         // reading order they curated.
         let trade = naming_values("Batman", "2", "2012-05-01");
         assert_eq!(
-            naming::file_name(file_pattern_for_issue(false, true, false, comic, None, None), &trade, IssuePadding::Three).as_deref(),
+            naming::file_name(file_pattern_for_issue(false, true, false, false, false, comic, None, None), &trade, IssuePadding::Three).as_deref(),
             Some("Batman Vol. 002 (2012)")
         );
     }
@@ -584,23 +622,23 @@ mod tests {
     // which parses as run #1). Twin of Node's seriesTokenForIssue (src/lib/utils/file-pattern.ts).
     #[test]
     fn local_collected_books_are_named_after_their_edition() {
-        assert_eq!(series_token_for_issue(true, Some("LOCAL"), Some("Batman Compendium"), "Batman"), "Batman Compendium");
-        assert_eq!(series_token_for_issue(true, Some("LOCAL"), Some("  Batman Compendium "), "Batman"), "Batman Compendium");
+        assert_eq!(series_token_for_issue(true, false, Some("LOCAL"), Some("Batman Compendium"), "Batman"), "Batman Compendium");
+        assert_eq!(series_token_for_issue(true, false, Some("LOCAL"), Some("  Batman Compendium "), "Batman"), "Batman Compendium");
         // Provider-backed books keep the series name: their claim is the issue id.
-        assert_eq!(series_token_for_issue(true, Some("COMICVINE"), Some("Batman: The Deluxe Edition"), "Batman"), "Batman");
-        assert_eq!(series_token_for_issue(true, Some("METRON"), Some("Batman TPB"), "Batman"), "Batman");
+        assert_eq!(series_token_for_issue(true, false, Some("COMICVINE"), Some("Batman: The Deluxe Edition"), "Batman"), "Batman");
+        assert_eq!(series_token_for_issue(true, false, Some("METRON"), Some("Batman TPB"), "Batman"), "Batman");
         // Nothing to name after → the series; a non-collected row never takes the edition's name.
-        assert_eq!(series_token_for_issue(true, Some("LOCAL"), Some("   "), "Batman"), "Batman");
-        assert_eq!(series_token_for_issue(true, Some("LOCAL"), None, "Batman"), "Batman");
-        assert_eq!(series_token_for_issue(false, Some("LOCAL"), Some("Batman Compendium"), "Batman"), "Batman");
-        assert_eq!(series_token_for_issue(false, None, None, "Batman"), "Batman");
+        assert_eq!(series_token_for_issue(true, false, Some("LOCAL"), Some("   "), "Batman"), "Batman");
+        assert_eq!(series_token_for_issue(true, false, Some("LOCAL"), None, "Batman"), "Batman");
+        assert_eq!(series_token_for_issue(false, false, Some("LOCAL"), Some("Batman Compendium"), "Batman"), "Batman");
+        assert_eq!(series_token_for_issue(false, false, None, None, "Batman"), "Batman");
 
         // End to end through the collected pattern: the edition's name is what the name rule will
         // find as the filename's prefix after the rename.
-        let token = series_token_for_issue(true, Some("LOCAL"), Some("Batman Compendium"), "Batman");
+        let token = series_token_for_issue(true, false, Some("LOCAL"), Some("Batman Compendium"), "Batman");
         let book = naming_values(token, "1", "2016-01-01");
         assert_eq!(
-            naming::file_name(file_pattern_for_issue(false, true, false, "{Series} #{Issue}", None, None), &book, IssuePadding::Three).as_deref(),
+            naming::file_name(file_pattern_for_issue(false, true, false, false, false, "{Series} #{Issue}", None, None), &book, IssuePadding::Three).as_deref(),
             Some("Batman Compendium Vol. 001 (2016)")
         );
     }
@@ -617,11 +655,14 @@ mod tests {
         let db = Db::connect(&db_url, 2).await.expect("connect file-backed sqlite");
         for ddl in [
             r#"CREATE TABLE "Series" (id TEXT PRIMARY KEY, name TEXT NOT NULL, publisher TEXT, year INTEGER NOT NULL DEFAULT 0,
-                universe TEXT, "seriesGroup" TEXT, imprint TEXT, "folderPath" TEXT NOT NULL DEFAULT '', "libraryId" TEXT, "isManga" INTEGER NOT NULL DEFAULT 0)"#,
+                universe TEXT, "seriesGroup" TEXT, imprint TEXT, "folderPath" TEXT NOT NULL DEFAULT '', "libraryId" TEXT, "isManga" INTEGER NOT NULL DEFAULT 0,
+                "metadataId" TEXT, "metadataSource" TEXT NOT NULL DEFAULT 'COMICVINE')"#,
             r#"CREATE TABLE "Library" (id TEXT PRIMARY KEY, path TEXT NOT NULL, "isDefault" INTEGER NOT NULL DEFAULT 0, "isManga" INTEGER NOT NULL DEFAULT 0)"#,
             r#"CREATE TABLE "Issue" (id TEXT PRIMARY KEY, "seriesId" TEXT, name TEXT, number TEXT NOT NULL, "filePath" TEXT,
                 "releaseDate" TEXT, "isAnnual" INTEGER NOT NULL DEFAULT 0, "attachedVolumeId" TEXT)"#,
-            r#"CREATE TABLE "AttachedVolume" (id TEXT PRIMARY KEY, "seriesId" TEXT, "metadataSource" TEXT NOT NULL, kind TEXT NOT NULL, name TEXT)"#,
+            // #239: the renamer reads `retained` (and the child's metadata ids) to name a retained child's books.
+            r#"CREATE TABLE "AttachedVolume" (id TEXT PRIMARY KEY, "seriesId" TEXT, "metadataSource" TEXT NOT NULL, "volumeId" TEXT NOT NULL DEFAULT '',
+                kind TEXT NOT NULL, name TEXT, "retained" BOOLEAN NOT NULL DEFAULT false)"#,
         ] {
             sqlx::query(ddl).execute(&db.pool).await.expect("create schema");
         }
@@ -797,5 +838,174 @@ mod tests {
         assert!(!base.join("Batman").exists(), "nothing built beside the library");
         assert!(inbox.join("b1.cbz").exists(), "the file stays where it was");
         let _ = fs::remove_dir_all(&base);
+    }
+
+    // ==== #239: a volume kept as its own series ("Leave it as its own series") ====
+
+    /// Absolute Batman (2024) with the 2025 collected volume attached; that volume is ALSO a series
+    /// of its own, in its own folder, holding the books as the field report had them.
+    async fn seed_retained(db: &Db, root: &Path, retained: bool) -> (PathBuf, PathBuf) {
+        let root_str = root.to_string_lossy().replace('\\', "/");
+        let parent_dir = root.join("DC Comics").join("Absolute Batman (2024)");
+        let child_dir = root.join("DC Comics").join("Absolute Batman (2025)");
+        fs::create_dir_all(&parent_dir).unwrap();
+        fs::create_dir_all(&child_dir).unwrap();
+        fs::write(parent_dir.join("Absolute Batman #001.cbz"), b"parent").unwrap();
+        fs::write(child_dir.join("Absolute Batman #01.cbz"), b"trade1").unwrap();
+        fs::write(child_dir.join("Absolute Batman #02.cbz"), b"trade2").unwrap();
+        let (p, c) = (parent_dir.to_string_lossy().replace('\\', "/"), child_dir.to_string_lossy().replace('\\', "/"));
+
+        sqlx::query(r#"INSERT INTO "Library" (id, path, "isDefault", "isManga") VALUES ('lib_1', $1, 1, 0)"#).bind(&root_str).execute(&db.pool).await.unwrap();
+        for (id, meta, year, folder) in [("parent", "160294", 2024, &p), ("child", "167340", 2025, &c)] {
+            sqlx::query(r#"INSERT INTO "Series" (id, name, publisher, year, "folderPath", "libraryId", "metadataId", "metadataSource") VALUES ($1, 'Absolute Batman', 'DC Comics', $2, $3, 'lib_1', $4, 'COMICVINE')"#)
+                .bind(id).bind(year).bind(folder).bind(meta).execute(&db.pool).await.unwrap();
+        }
+        sqlx::query(&format!(
+            r#"INSERT INTO "AttachedVolume" (id, "seriesId", "metadataSource", "volumeId", kind, name, retained) VALUES ('att', 'parent', 'COMICVINE', '167340', 'COLLECTED', 'Absolute Batman', {})"#,
+            if retained { "true" } else { "false" }
+        ))
+        .execute(&db.pool).await.unwrap();
+        for (id, series, number, file, date, att) in [
+            ("p1", "parent", "1", format!("{}/Absolute Batman #001.cbz", p), "2024-10-09", None),
+            ("c1", "child", "1", format!("{}/Absolute Batman #01.cbz", c), "2025-03-25", None),
+            // The reproduction's damage: the child's sync once adopted the parent's skeleton for this
+            // book, and the row kept the PARENT's attachment id. It must not name the book by that lane.
+            ("c2", "child", "2", format!("{}/Absolute Batman #02.cbz", c), "2026-01-20", Some("att")),
+        ] {
+            sqlx::query(r#"INSERT INTO "Issue" (id, "seriesId", number, "filePath", "releaseDate", "attachedVolumeId") VALUES ($1, $2, $3, $4, $5, $6)"#)
+                .bind(id).bind(series).bind(number).bind(file).bind(date).bind(att)
+                .execute(&db.pool).await.unwrap();
+        }
+        (parent_dir, child_dir)
+    }
+
+    #[tokio::test]
+    async fn a_retained_child_names_its_books_as_collected_editions_in_its_own_folder() {
+        let (db, root) = rename_fixture("retained").await;
+        let (parent_dir, child_dir) = seed_retained(&db, &root, true).await;
+        let (folder, file) = ("{Publisher}/{Series} ({Year})", "{Series} #{Issue}");
+
+        // The parent's run touches the parent's rows only.
+        let parent = run_bulk_rename(&db, &["parent".to_string()], folder, file, None, None, IssuePadding::Three).await.unwrap();
+        assert_eq!((parent.files_renamed, parent.conflicts), (0, 0));
+        assert!(child_dir.join("Absolute Batman #01.cbz").exists(), "the parent never reaches into the child");
+        assert!(parent_dir.join("Absolute Batman #001.cbz").exists());
+
+        // The child's own run: collected pattern, its own folder and year, each book's own year.
+        let child = run_bulk_rename(&db, &["child".to_string()], folder, file, None, None, IssuePadding::Three).await.unwrap();
+        assert_eq!((child.files_renamed, child.folders_renamed, child.conflicts), (2, 0, 0));
+        assert!(child_dir.join("Absolute Batman Vol. 001 (2025).cbz").exists());
+        assert!(child_dir.join("Absolute Batman Vol. 002 (2026).cbz").exists(), "the 2026 book stays under the 2025 folder");
+        assert!(!parent_dir.join("Absolute Batman Vol. 001 (2025).cbz").exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn a_child_left_unretained_keeps_the_plain_pattern_and_ignores_a_stray_attachment_id() {
+        let (db, root) = rename_fixture("not_retained").await;
+        let (_, child_dir) = seed_retained(&db, &root, false).await;
+
+        let child = run_bulk_rename(&db, &["child".to_string()], "{Publisher}/{Series} ({Year})", "{Series} #{Issue}", None, None, IssuePadding::Three).await.unwrap();
+        assert_eq!(child.files_renamed, 2);
+        assert!(child_dir.join("Absolute Batman #001.cbz").exists());
+        // c2 carries the parent's COLLECTED attachment id, but that lane is not this series' own.
+        assert!(child_dir.join("Absolute Batman #002.cbz").exists());
+        assert!(!child_dir.join("Absolute Batman Vol. 002 (2026).cbz").exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // ==== #255: a Special — a one-shot attached to a series ====
+
+    #[test]
+    fn a_special_takes_its_fixed_pattern_named_after_its_own_volume() {
+        let (comic, manga) = ("{Series} #{Issue}", Some("{Series} Vol. {Issue}"));
+        assert_eq!(SPECIAL_FILE_PATTERN, "{Series} #{Issue} ({IssueYear})");
+        assert_eq!(file_pattern_for_issue(false, false, true, false, false, "{Series} - {Issue}", manga, None), SPECIAL_FILE_PATTERN);
+        assert_eq!(file_pattern_for_issue(false, false, true, false, true, comic, manga, None), SPECIAL_FILE_PATTERN, "a manga Special is still a Special");
+        assert_eq!(file_pattern_for_issue(false, false, true, false, false, comic, manga, Some("{Series} v{Issue}")), SPECIAL_FILE_PATTERN);
+        assert_eq!(file_pattern_for_issue(false, false, true, true, false, comic, manga, None), SPECIAL_FILE_PATTERN, "inside a kept-as-its-own collection too");
+
+        assert_eq!(series_token_for_issue(false, true, Some("COMICVINE"), Some("Absolute Batman: Ark-M"), "Absolute Batman"), "Absolute Batman: Ark-M");
+        assert_eq!(series_token_for_issue(false, true, Some("METRON"), Some(" Absolute Batman: Ark-M "), "Absolute Batman"), "Absolute Batman: Ark-M");
+        assert_eq!(series_token_for_issue(false, true, Some("COMICVINE"), None, "Absolute Batman"), "Absolute Batman", "no cached name: the series name");
+
+        // The colon goes with the usual sanitization; the name rule still reads the file back as #1.
+        let values = naming_values("Absolute Batman: Ark-M", "1", "2026-01-14");
+        let stem = naming::file_name(SPECIAL_FILE_PATTERN, &values, IssuePadding::Three).unwrap();
+        assert_eq!(stem, "Absolute Batman Ark-M #001 (2026)");
+        let refs = [crate::attached_volumes::AttachmentNameRef { id: "att_sp".into(), name: "Absolute Batman: Ark-M".into(), kind: "SPECIAL".into() }];
+        let back = crate::attached_volumes::attachment_for_filename(&format!("{stem}.cbz"), "Absolute Batman", &refs).expect("the name rule claims it");
+        assert_eq!((back.id.as_str(), back.number.as_str()), ("att_sp", "1"));
+    }
+
+    #[tokio::test]
+    async fn bulk_rename_names_a_special_after_itself_beside_the_run() {
+        let (db, root) = rename_fixture("special").await;
+        let root_str = root.to_string_lossy().replace('\\', "/");
+        let dir = root.join("DC Comics").join("Absolute Batman (2024)");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("Absolute Batman #001.cbz"), b"run").unwrap();
+        fs::write(dir.join("Absolute Batman - Ark-M 01.cbz"), b"special").unwrap();
+        let d = dir.to_string_lossy().replace('\\', "/");
+
+        sqlx::query(r#"INSERT INTO "Library" (id, path, "isDefault", "isManga") VALUES ('lib_1', $1, 1, 0)"#).bind(&root_str).execute(&db.pool).await.unwrap();
+        sqlx::query(r#"INSERT INTO "Series" (id, name, publisher, year, "folderPath", "libraryId", "metadataId", "metadataSource") VALUES ('parent', 'Absolute Batman', 'DC Comics', 2024, $1, 'lib_1', '160294', 'COMICVINE')"#)
+            .bind(&d).execute(&db.pool).await.unwrap();
+        sqlx::query(r#"INSERT INTO "AttachedVolume" (id, "seriesId", "metadataSource", "volumeId", kind, name) VALUES ('att_sp', 'parent', 'COMICVINE', '169970', 'SPECIAL', 'Absolute Batman: Ark-M')"#)
+            .execute(&db.pool).await.unwrap();
+        for (id, file, date, att) in [
+            ("p1", "Absolute Batman #001.cbz", "2024-10-09", None),
+            ("sp1", "Absolute Batman - Ark-M 01.cbz", "2026-01-14", Some("att_sp")),
+        ] {
+            sqlx::query(r#"INSERT INTO "Issue" (id, "seriesId", number, "filePath", "releaseDate", "attachedVolumeId") VALUES ($1, 'parent', '1', $2, $3, $4)"#)
+                .bind(id).bind(format!("{}/{}", d, file)).bind(date).bind(att)
+                .execute(&db.pool).await.unwrap();
+        }
+
+        let summary = run_bulk_rename(&db, &["parent".to_string()], "{Publisher}/{Series} ({Year})", "{Series} #{Issue}", None, None, IssuePadding::Three).await.unwrap();
+        assert_eq!((summary.files_renamed, summary.conflicts), (1, 0));
+        // Same number, two comics: the Special is named after itself, beside the run's #1, which is untouched.
+        assert!(dir.join("Absolute Batman Ark-M #001 (2026).cbz").exists());
+        assert!(dir.join("Absolute Batman #001.cbz").exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // Pattern choice parity (#239): the same table drives file-pattern.ts filePatternForIssue.
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct PatternCase {
+        label: String,
+        annual: bool,
+        collected: bool,
+        #[serde(default)]
+        special: bool,
+        retained_collected: bool,
+        manga: bool,
+        file_pattern: String,
+        manga_file_pattern: Option<String>,
+        collected_file_pattern: Option<String>,
+        expected: String,
+    }
+
+    #[test]
+    fn pattern_choice_matches_the_parity_table() {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Table {
+            pattern_choice: Vec<PatternCase>,
+        }
+        let table: Table = serde_json::from_str(include_str!("../tests/fixtures/naming_parity.json")).expect("naming_parity.json parses");
+        assert!(!table.pattern_choice.is_empty());
+        let mut wrong = Vec::new();
+        for c in &table.pattern_choice {
+            let got = file_pattern_for_issue(
+                c.annual, c.collected, c.special, c.retained_collected, c.manga,
+                &c.file_pattern, c.manga_file_pattern.as_deref(), c.collected_file_pattern.as_deref(),
+            );
+            if got != c.expected {
+                wrong.push(format!("{}: got {got:?}, want {:?}", c.label, c.expected));
+            }
+        }
+        assert!(wrong.is_empty(), "pattern-choice mismatches:\n{}", wrong.join("\n"));
     }
 }

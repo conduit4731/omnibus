@@ -8,7 +8,6 @@ import { parseComicVineCredits, stripGenreNoise } from '@/lib/utils';
 import { getErrorMessage } from './utils/error';
 import { MetronProvider } from './metadata/providers/metron';
 import { omnibusQueue } from './queue';
-import { comicInfoWriteEnabled } from '@/lib/utils/comicinfo-write';
 import { markSystemFlag, countApiUsage } from './utils/system-flags';
 import { metronOptionalBudgetExhausted } from '@/lib/metron/client';
 import { metronCreditCandidatesWhere, metronDetailCreditsEnabled } from '@/lib/metron/credit-candidates';
@@ -17,6 +16,8 @@ import { isSameIssue } from '@/lib/utils/issue-parser';
 import { resolveSyncedName, detailNameWrite } from '@/lib/utils/synced-name';
 import { findLocalCoverBasename, providerCoverBlocked } from '@/lib/utils/cover-plan';
 import { CV_VOLUME_CREDIT_FIELDS, parseVolumeCredits, persistSeriesCredits } from '@/lib/utils/volume-credits';
+import { syncedReleaseDate } from '@/lib/utils/synced-release-date';
+import { comicInfoWritesEnabled } from '@/lib/comicinfo-writes';
 
 // ComicVine signals its velocity/burst block with HTTP 420 (not 429) -- a separate throttle from
 // the documented 200/hr quota that can trip even well under it. Engine parity: metadata.rs
@@ -56,6 +57,27 @@ export function guessBookTypeFromCvVolume(
         return startYear > 0 && startYear <= currentYear - 2 ? 'OneShot' : null;
     }
     return null;
+}
+
+/**
+ * What a sync does to a series' files once its rows are refreshed (#251): the ComicInfo.xml embed
+ * while "Write metadata to ComicInfo.xml" is on, otherwise series.json alone - it is its own setting,
+ * and it used to ride inside the embed. Delayed 5 minutes to let the whole batch finish downloading,
+ * one job per series per 15-minute window. Engine twin: metadata_writer.rs refresh_files_after_sync.
+ */
+async function queueFilesAfterSync(series: { id: string; name: string }) {
+    try {
+        const ioTimeWindow = Math.floor(Date.now() / 900000);
+        const opts = { delay: 300000, removeOnComplete: true, removeOnFail: true };
+        if (await comicInfoWritesEnabled()) {
+            await omnibusQueue.add('EMBED_METADATA', { type: 'EMBED_METADATA', seriesId: series.id },
+                { jobId: `EMBED_META_${series.id}_${ioTimeWindow}`, ...opts });
+            Logger.log(`[Metadata] Queued XML injection for ${series.name}`, 'info');
+        } else {
+            await omnibusQueue.add('EXPORT_SERIES_JSON', { type: 'EXPORT_SERIES_JSON', seriesId: series.id },
+                { jobId: `EXPORT_SJ_SYNC_${series.id}_${ioTimeWindow}`, ...opts });
+        }
+    } catch {}
 }
 
 export async function syncSeriesMetadata(metadataId: string, folderPath: string, metadataSource: string = 'COMICVINE') {
@@ -149,10 +171,12 @@ export async function syncSeriesMetadata(metadataId: string, folderPath: string,
             
             // #203: annual rows are NEVER pairing candidates for the parent volume — their issues
             // belong to a different provider volume (linked through AttachedVolume in Phase 1), so a
-            // number match here would steal an annual's identity. Engine parity: the pair snapshots
-            // in metadata.rs carry the same WHERE "isAnnual" = false.
+            // number match here would steal an annual's identity. #255: nor is a book on one of this
+            // series' attached lanes — a Special's "#1" or a trade's "Vol. 1" is the lane's (a #239
+            // stray carrying another series' lane id still pairs; the rule is matkozera's, #258).
+            // Engine parity: metadata.rs run_rows.
             const allSeriesIssues = await prisma.issue.findMany({
-                where: { seriesId: series.id, isAnnual: false }
+                where: { seriesId: series.id, isAnnual: false, OR: [{ attachedVolumeId: null }, { attachedVolume: { seriesId: { not: series.id } } }] }
             });
 
             let latestDateMs = 0;
@@ -182,20 +206,24 @@ export async function syncSeriesMetadata(metadataId: string, folderPath: string,
                         Logger.log(`[Metadata] Duplicate provider number #${issueNumStr} (${issue.sourceId}) for "${series.name}" — first listing wins, skipping.`, 'info');
                         continue;
                     }
+                    // Never an attached lane's skeleton (#239) — see the ComicVine twin below.
                     const global = await prisma.issue.findFirst({
-                        where: { metadataId: issue.sourceId, metadataSource: 'METRON', seriesId: { not: series.id }, isAnnual: false }
+                        where: { metadataId: issue.sourceId, metadataSource: 'METRON', seriesId: { not: series.id }, isAnnual: false, attachedVolumeId: null }
                     });
                     if (global && isSameIssue(global.number, issueNumStr)) { targetRecord = global; crossSeries = true; }
                 }
                 const healId = !!targetRecord && targetRecord.metadataId !== issue.sourceId;
                 const isLocked = (targetRecord as any)?.hasCustomMetadata || false;
+                // file_metadata_priority keeps a filed issue's own release date; a placeholder keeps
+                // taking the store date (review of #232 - the shared policy, engine twin).
+                const releaseVal = syncedReleaseDate(targetRecord?.releaseDate, issue.releaseDate, isLocked, fillOnly, !!targetRecord?.filePath);
 
                 const issueDataPayload = {
                     // #199 round 3: Metron list names are composites ("X-Men (1991) #154") — the
                     // shared resolver lets them fill blanks but never clobber a real story title
                     // (detail-fetched or ComicInfo-read), and honors lock + file priority.
                     name: resolveSyncedName(targetRecord?.name, issue.name, issueNumStr, isLocked, fillOnly),
-                    releaseDate: isLocked ? targetRecord!.releaseDate : issue.releaseDate,
+                    releaseDate: releaseVal,
                     description: issue.description,
                     coverUrl: issue.coverUrl,
                     // Metron's issue_list carries no per-issue credits — the old unconditional
@@ -313,24 +341,7 @@ export async function syncSeriesMetadata(metadataId: string, folderPath: string,
                 if (enriched > 0) Logger.log(`[Metadata] Enriched ${enriched} Metron issue(s) of "${series.name}" with detail-call credits.`, 'info');
             }
 
-            try {
-                // Respect Settings → Metadata → "Write ComicInfo.xml" (#251)
-                if (await comicInfoWriteEnabled()) {
-                    // 15-minute rolling window for heavy disk I/O
-                    const ioTimeWindow = Math.floor(Date.now() / 900000); 
-                
-                    await omnibusQueue.add('EMBED_METADATA', { 
-                        type: 'EMBED_METADATA', 
-                        seriesId: series.id 
-                    }, {
-                        jobId: `EMBED_META_${series.id}_${ioTimeWindow}`,
-                        delay: 300000, // 5-minute delay to let the entire batch finish downloading
-                        removeOnComplete: true,
-                        removeOnFail: true
-                    });
-                    Logger.log(`[Metadata] Queued XML injection for ${series.name}`, 'info');
-                }
-            } catch(e) {}
+            await queueFilesAfterSync(series);
 
             Logger.log(`[Metadata] Successfully synced ${syncedCount} Metron issues.`, 'success');
             return { success: true, count: syncedCount };
@@ -485,10 +496,11 @@ export async function syncSeriesMetadata(metadataId: string, folderPath: string,
         
         const cvIssues = data.results || [];
 
-        // #203 safety rule (see the Metron branch above): annual rows are excluded from the parent
-        // volume's pairing snapshot outright.
+        // #203 safety rule (see the Metron branch above): annual rows — and (#255) every book on
+        // one of this series' attached lanes — are excluded from the parent volume's pairing
+        // snapshot outright.
         const allSeriesIssuesForCv = await prisma.issue.findMany({
-            where: { seriesId: series.id, isAnnual: false }
+            where: { seriesId: series.id, isAnnual: false, OR: [{ attachedVolumeId: null }, { attachedVolume: { seriesId: { not: series.id } } }] }
         });
 
         for (const cvIssue of cvIssues) {
@@ -518,20 +530,26 @@ export async function syncSeriesMetadata(metadataId: string, folderPath: string,
                     continue;
                 }
                 // Cross-series adoption only when id AND number agree (a mispaired global id match
-                // is never a steal target).
+                // is never a steal target), and never a row bound to an attached volume (#239): that
+                // skeleton is the parent's lane's, and taking it carried the parent's attachment id
+                // into this series. Twin of the engine's cross_series_candidates (metadata.rs).
                 const global = await prisma.issue.findFirst({
-                    where: { metadataId: cvIdStr, metadataSource: 'COMICVINE', seriesId: { not: series.id }, isAnnual: false }
+                    where: { metadataId: cvIdStr, metadataSource: 'COMICVINE', seriesId: { not: series.id }, isAnnual: false, attachedVolumeId: null }
                 });
                 if (global && isSameIssue(global.number, issueNumStr)) { targetRecord = global; crossSeries = true; }
             }
             const healId = !!targetRecord && targetRecord.metadataId !== cvIdStr;
             const isLocked = (targetRecord as any)?.hasCustomMetadata || false;
+            // file_metadata_priority keeps a filed issue's own release date; a placeholder keeps
+            // taking the store date (review of #232 - the shared policy, engine twin).
+            const releaseVal = syncedReleaseDate(targetRecord?.releaseDate, cvIssue.store_date || cvIssue.cover_date || null,
+                isLocked, fillOnly, !!targetRecord?.filePath);
 
             const issueDataPayload = {
                 // Shared resolver (#199 round 3): keeps lock + file-priority semantics and stops a
                 // null/generic provider name from wiping a real story title (engine parity).
                 name: resolveSyncedName(targetRecord?.name, cvIssue.name, issueNumStr, isLocked, fillOnly),
-                releaseDate: isLocked ? targetRecord!.releaseDate : (cvIssue.store_date || cvIssue.cover_date || null),
+                releaseDate: releaseVal,
                 description: cvIssue.description || cvIssue.deck || null,
                 coverUrl: cvIssue.image?.medium_url || cvIssue.image?.small_url || null,
                 matchState: 'MATCHED'
@@ -607,24 +625,7 @@ export async function syncSeriesMetadata(metadataId: string, folderPath: string,
         }
     }
 
-    try {
-                // Respect Settings → Metadata → "Write ComicInfo.xml" (#251)
-                if (await comicInfoWriteEnabled()) {
-                    // 15-minute rolling window for heavy disk I/O
-                    const ioTimeWindow = Math.floor(Date.now() / 900000); 
-                
-                    await omnibusQueue.add('EMBED_METADATA', { 
-                        type: 'EMBED_METADATA', 
-                        seriesId: series.id 
-                    }, {
-                        jobId: `EMBED_META_${series.id}_${ioTimeWindow}`,
-                        delay: 300000, // 5-minute delay to let the entire batch finish downloading
-                        removeOnComplete: true,
-                        removeOnFail: true
-                    });
-                    Logger.log(`[Metadata] Queued XML injection for ${series.name}`, 'info');
-                }
-            } catch(e) {}
+    await queueFilesAfterSync(series);
 
     Logger.log(`[Metadata] Successfully synced ${syncedCount} ComicVine issues.`, 'success');
     return { success: true, count: syncedCount };

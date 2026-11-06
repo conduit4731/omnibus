@@ -11,21 +11,23 @@ const mocks = vi.hoisted(() => ({
     seriesUpdate: vi.fn(),
     issueFindMany: vi.fn(),
     issueUpdate: vi.fn(),
+    issueFindFirst: vi.fn(),
     getIssueDetails: vi.fn(),
+    getSeriesIssues: vi.fn(async (): Promise<Record<string, unknown>[]> => []),
     queueAdd: vi.fn(),
 }));
 
 vi.mock('@/lib/db', () => ({
     prisma: {
         series: { findFirst: mocks.seriesFindFirst, update: mocks.seriesUpdate },
-        issue: { findMany: mocks.issueFindMany, update: mocks.issueUpdate, findFirst: vi.fn(), create: vi.fn() },
+        issue: { findMany: mocks.issueFindMany, update: mocks.issueUpdate, findFirst: mocks.issueFindFirst, create: vi.fn(async () => ({ id: 'new' })) },
         systemSetting: { findUnique: vi.fn(async ({ where }: any) => (mocks.settings.has(where.key) ? { key: where.key, value: mocks.settings.get(where.key) } : null)) },
     },
 }));
 vi.mock('@/lib/metadata/providers/metron', () => ({
     MetronProvider: class {
         getSeriesDetails = async () => ({ name: 'Saga', publisher: 'Image', year: 2012, status: 'Ongoing', coverUrl: null, description: null });
-        getSeriesIssues = async () => [];
+        getSeriesIssues = mocks.getSeriesIssues;
         getIssueDetails = mocks.getIssueDetails;
     },
 }));
@@ -73,6 +75,54 @@ describe('Metron request-path detail pass (metadata-fetcher)', () => {
         expect(mocks.issueUpdate).toHaveBeenCalledWith(expect.objectContaining({
             where: { id: 'i1' }, data: expect.objectContaining({ matchState: 'DEEP_SYNCED', writers: JSON.stringify(['Brian K. Vaughan']) }),
         }));
+    });
+
+    // Review of #232 (#251 beta): the Metron list sync's release-date guard, through the real loop.
+    it("with file priority on, keeps a filed issue's own release date and moves a placeholder's", async () => {
+        mocks.settings.set('file_metadata_priority', 'true');
+        mocks.issueFindMany.mockImplementation(async ({ where }: { where?: { isAnnual?: boolean } }) => (where?.isAnnual === false ? [
+            { id: 'r1', number: '1', metadataId: '9001', matchState: 'MATCHED', hasCustomMetadata: false,
+              filePath: '/comics/Saga/Saga #001.cbz', releaseDate: '2012-03-21' },
+            { id: 'r2', number: '2', metadataId: '9002', matchState: 'MATCHED', hasCustomMetadata: false,
+              filePath: null, releaseDate: '2012-04-04' },
+        ] : []));
+        mocks.getSeriesIssues.mockResolvedValueOnce([
+            { issueNumber: '1', sourceId: '9001', name: 'Saga (2012) #1', releaseDate: '2012-03-14' },
+            { issueNumber: '2', sourceId: '9002', name: 'Saga (2012) #2', releaseDate: '2012-04-25' },
+        ]);
+
+        await syncSeriesMetadata('4000', '', 'METRON');
+
+        const updates = mocks.issueUpdate.mock.calls.map(c => c[0]);
+        expect(updates.find(u => u.where.id === 'r1').data.releaseDate).toBe('2012-03-21');
+        expect(updates.find(u => u.where.id === 'r2').data.releaseDate).toBe('2012-04-25');
+    });
+
+    // #239: the cross-series adoption probe never reaches for an attached lane's skeleton (ComicVine twin
+    // asserted in metadata-fetcher.test.ts).
+    it("never adopts another series' attached-lane row", async () => {
+        mocks.getSeriesIssues.mockResolvedValueOnce([{ issueNumber: '2', sourceId: '9002', name: 'Saga (2012) #2', releaseDate: '2012-04-25' }]);
+
+        await syncSeriesMetadata('4000', '', 'METRON');
+
+        // #255: the in-series pairing snapshot is the run alone - no annual, no book on this series'
+        // lanes - but a #239 stray carrying another series' lane id still pairs.
+        const snapshot = mocks.issueFindMany.mock.calls.map(c => c[0]).find((a: any) => a?.where?.seriesId === 's1' && a?.where?.isAnnual === false);
+        expect(snapshot?.where?.OR).toEqual([{ attachedVolumeId: null }, { attachedVolume: { seriesId: { not: 's1' } } }]);
+        const probe = mocks.issueFindFirst.mock.calls.map(c => c[0]).find((a: any) => a?.where?.metadataId === '9002');
+        expect(probe?.where).toMatchObject({ metadataSource: 'METRON', seriesId: { not: 's1' }, isAnnual: false });
+        expect(probe?.where?.attachedVolumeId).toBeNull();
+    });
+
+    // #251: the Metron branch queued its embed unconditionally too.
+    it('with ComicInfo writing off, queues the series.json export instead of an embed', async () => {
+        mocks.settings.set('metadata_write_comicinfo', 'false');
+
+        await syncSeriesMetadata('4000', '', 'METRON');
+
+        expect(mocks.queueAdd).not.toHaveBeenCalledWith('EMBED_METADATA', expect.anything(), expect.anything());
+        expect(mocks.queueAdd).toHaveBeenCalledWith('EXPORT_SERIES_JSON',
+            { type: 'EXPORT_SERIES_JSON', seriesId: 's1' }, expect.objectContaining({ delay: 300000 }));
     });
 
     it('the candidates are Metron issues with a file, not yet detailed, not hand-edited', () => {
