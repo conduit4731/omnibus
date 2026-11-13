@@ -3,7 +3,7 @@
 // per run so the search queue and GetComics' rate limit are not flooded.
 import { prisma } from '@/lib/db';
 import { isReleasedYet } from '@/lib/utils';
-import { extractIssueNumber, isSameIssue } from '@/lib/utils/issue-parser';
+import { extractIssueNumber, isSameIssue, normalizeFractionNumbers } from '@/lib/utils/issue-parser';
 import { searchAndDownload } from '@/lib/automation';
 import { normIssueNumber } from '@/lib/batcave';
 
@@ -16,12 +16,14 @@ export type Gap = {
 
 /** Released gaps without any request yet (any status: a cancelled one stays cancelled) and not on the Batcave
  *  queue (`onBatcave`: "volumeId|number"), oldest first. */
-export function pickBackfill(gaps: Gap[], existing: { volumeId: string | null, activeDownloadName: string | null }[], limit: number, onBatcave = new Set<string>()): Gap[] {
+export function pickBackfill(gaps: Gap[], existing: { volumeId: string | null, activeDownloadName: string | null, issueNumber?: string | null }[], limit: number, onBatcave = new Set<string>()): Gap[] {
     return gaps
         .filter(g => g.releaseDate && isReleasedYet(g.releaseDate, null)) // dateless = probably just solicited
         .filter(g => !onBatcave.has(`${g.volumeId}|${normIssueNumber(g.number)}`))
+        // The stored number wins: a finished request's name becomes the downloaded file's ("… Crossover (1993).cbz"),
+        // which no longer names the issue, so the gap was requested again every day (Savage Dragon #½)
         .filter(g => !existing.some(r => r.volumeId === g.volumeId
-            && isSameIssue(extractIssueNumber(r.activeDownloadName || ''), g.number)))
+            && isSameIssue((r.issueNumber || '').trim() || extractIssueNumber(r.activeDownloadName || ''), g.number)))
         .sort((a, b) => a.releaseDate!.localeCompare(b.releaseDate!))
         .slice(0, limit);
 }
@@ -42,7 +44,7 @@ export async function backfillWantedGaps(userId: string, limit = BACKFILL_PER_RU
     }));
     const existing = await prisma.request.findMany({
         where: { volumeId: { in: [...new Set(gaps.map(g => g.volumeId))] } },
-        select: { volumeId: true, activeDownloadName: true },
+        select: { volumeId: true, activeDownloadName: true, issueNumber: true },
     });
     // Queued for or already uploaded by the Batcave userscript: a GetComics request would fetch it a second time
     const volumeOf = new Map(rows.map(r => [r.series.id, r.series.metadataId!]));
@@ -56,7 +58,7 @@ export async function backfillWantedGaps(userId: string, limit = BACKFILL_PER_RU
     for (const g of pickBackfill(gaps, existing, limit, onBatcave)) {
         const name = `${g.seriesName} #${g.number}`;
         const req = await prisma.request.create({
-            data: { userId, volumeId: g.volumeId, metadataSource: g.metadataSource, status: 'PENDING', activeDownloadName: name },
+            data: { userId, volumeId: g.volumeId, metadataSource: g.metadataSource, status: 'PENDING', activeDownloadName: name, issueNumber: normalizeFractionNumbers(g.number) },
         });
         const year = g.releaseDate?.split('-')[0] || String(g.seriesYear || '');
         searchAndDownload(req.id, name, year, g.publisher || 'Unknown', g.isManga).catch(() => {});

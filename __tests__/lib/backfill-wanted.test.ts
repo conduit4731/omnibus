@@ -33,6 +33,15 @@ describe('pickBackfill (fork)', () => {
         expect(picked.map(g => g.volumeId)).toEqual(['99999']);
     });
 
+    it('matches a finished request by its stored number after the name became the file name', () => {
+        const picked = pickBackfill(
+            [gap('½', '1993-01-01'), gap('2', '1993-02-01')],
+            [{ volumeId: '42722', activeDownloadName: 'Savage Dragon – Teenage Mutant Ninja Turtles Crossover (1993).cbz', issueNumber: '0.5' }],
+            10,
+        );
+        expect(picked.map(g => g.number)).toEqual(['2']);
+    });
+
     it('skips issues on the Batcave queue', () => {
         const picked = pickBackfill([gap('5', '2012-03-01'), gap('6', '2012-04-01')], [], 10, new Set(['42722|5']));
         expect(picked.map(g => g.number)).toEqual(['6']);
