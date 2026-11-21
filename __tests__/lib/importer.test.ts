@@ -231,6 +231,19 @@ describe('File System: Importer Engine', () => {
         }));
     });
 
+    it('finds a download SABnzbd saved as "<name>.1" because "<name>" already existed', async () => {
+        mocks.findUniqueRequest.mockResolvedValueOnce({
+            id: 'req_1', status: 'DOWNLOADING', activeDownloadName: 'Batman 01', volumeId: 'cv_123', createdAt: new Date()
+        });
+        mocks.findFirstSeries.mockResolvedValueOnce({
+            id: 'series_1', name: 'Batman', publisher: 'DC Comics', year: 2016, libraryId: 'lib_1', isManga: false
+        });
+        vi.mocked(fs.existsSync).mockImplementation((p: any) => typeof p !== 'string' || !/Batman 01($|\.(?!1$))/.test(p));
+
+        expect(await Importer.importRequest('req_1')).toBe(true);
+        expect(mocks.updateRequest).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'STALLED' }) }));
+    });
+
     it('should successfully rename and copy a comic to the library', async () => {
         mocks.findUniqueRequest.mockResolvedValueOnce({
             id: 'req_1', status: 'DOWNLOADING', activeDownloadName: 'Batman 01.cbz', volumeId: 'cv_123', createdAt: new Date()

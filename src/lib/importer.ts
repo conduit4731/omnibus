@@ -186,6 +186,12 @@ export const Importer = {
         }
     }
 
+    // SABnzbd saves a job as "<name>.1", "<name>.2"… when "<name>" already exists in the complete folder
+    if (!fs.existsSync(sourcePath)) {
+        const suffixed = [1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => `${sourcePath}.${n}`).find(p => fs.existsSync(p));
+        if (suffixed) sourcePath = suffixed;
+    }
+
     if (!fs.existsSync(sourcePath)) {
       const parentDir = path.dirname(sourcePath);
       const isDriveOnline = fs.existsSync(parentDir) || fs.existsSync(downloadRoot);
