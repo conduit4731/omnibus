@@ -9,7 +9,6 @@ import { Loader2, ChevronLeft, ChevronRight, Plus, Info, Calendar, Paintbrush, P
 import { useToast } from "@/components/ui/use-toast"
 import { useLibraryOwnership } from "@/hooks/use-library-ownership"
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogHeader } from "@/components/ui/dialog"
-import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import Link from "next/link"
 import { Search as SearchIcon } from "lucide-react"
@@ -534,83 +533,51 @@ export function ComicGrid({ title, type, refreshSignal = 0 }: Props) {
                     <div className="space-y-4 pt-4 border-t border-border">
                         <h4 className="font-semibold flex items-center gap-2 text-base sm:text-lg text-foreground"><Layers className="w-4 h-4 sm:w-5 h-5"/> More in this Series</h4>
                         <div className="w-full">
-                            {loadingRelated ? (<div className="flex gap-3 sm:gap-4 overflow-hidden">{[1,2,3,4,5].map(i => (<div key={i} className="w-[120px] aspect-[2/3] bg-muted animate-pulse rounded-md border border-border" />))}</div>) : relatedIssues.length > 0 ? (
-                                <ScrollArea className="w-full whitespace-nowrap pb-4">
-                                    <div className="flex w-max gap-4 px-1">
-                                        {relatedIssues.map(issue => {
-                                            const relIssueTargetName = issue.name;
-                                            const relIssueStatus = getIssueStatus(issue.id, selectedComic.volumeId, relIssueTargetName, issue.isReleased, issue.issueNumber, seriesBaseName);
-                                            
-                                            return (
-                                            <div 
-                                                key={issue.id} 
-                                                role="button"
-                                                tabIndex={0}
-                                                className="w-[110px] sm:w-[130px] shrink-0 group/issue cursor-pointer relative text-left focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none rounded-md"
-                                                onClick={() => {
-                                                    setSelectedComic({
-                                                        ...issue,
-                                                        volumeId: selectedComic.volumeId,
-                                                        publisher: selectedComic.publisher,
-                                                        issueNumber: issue.issueNumber,
-                                                        description: undefined,
-                                                        writers: undefined,
-                                                        artists: undefined,
-                                                        characters: undefined,
-                                                        metadataSource: (selectedComic as any).metadataSource || 'COMICVINE'
-                                                    } as Comic);
-                                                }}
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter' || e.key === ' ') {
-                                                        e.preventDefault();
-                                                        setSelectedComic({
-                                                            ...issue,
-                                                            volumeId: selectedComic.volumeId,
-                                                            publisher: selectedComic.publisher,
-                                                            issueNumber: issue.issueNumber,
-                                                            description: undefined,
-                                                            writers: undefined,
-                                                            artists: undefined,
-                                                            characters: undefined,
-                                                            metadataSource: (selectedComic as any).metadataSource || 'COMICVINE'
-                                                        } as Comic);
-                                                    }
-                                                }}
-                                                aria-label={`View details for ${issue.name}`}
-                                              >
-                                                <div className="relative aspect-[2/3] rounded-md overflow-hidden bg-muted border border-border shadow-sm hover:ring-2 hover:ring-primary transition-all">
-                                                    {issue.image ? (
-                                                        <img src={issue.image} className="absolute inset-0 w-full h-full object-contain" alt={issue.name} />
-                                                    ) : (
-                                                        <div className="absolute inset-0 w-full h-full flex flex-col items-center justify-center bg-muted text-muted-foreground/30">
-                                                            <ImageIcon className="w-6 h-6" />
-                                                        </div>
-                                                    )}
-                                                    <div className="absolute inset-0 bg-linear-to-t from-black/80 via-transparent to-transparent z-10 pointer-events-none" />
-                                                    
-                                                    <div className="absolute bottom-1 left-2 z-20 text-white text-[11px] font-black truncate drop-shadow-md">#{issue.issueNumber}</div>
-
-                                                    {!relIssueStatus && (
-                                                        <div className="absolute bottom-2 inset-x-2 z-30 opacity-100 sm:opacity-0 sm:group-hover/issue:opacity-100 transition-opacity flex justify-center items-center pointer-events-none">
-                                                            <RequestIconButton className="pointer-events-auto" title="Request Issue" busy={requestingTarget === `iss-${relIssueTargetName}`}
-                                                                onClick={() => handleRequest(selectedComic.volumeId, issue.name, issue.image, issue.year, 'issue', selectedComic.publisher, false, undefined, issue.issueNumber, false, (selectedComic as any).metadataSource || 'COMICVINE')} />
-                                                            <GetComicsButton className="pointer-events-auto" onClick={() => handleRequest(selectedComic.volumeId, issue.name, issue.image, issue.year, 'issue', selectedComic.publisher, false, 'getcomics', issue.issueNumber, false, (selectedComic as any).metadataSource || 'COMICVINE')} />
-                                                            <BatcaveButton className="pointer-events-auto" body={{ cvId: selectedComic.volumeId, issues: [{ number: String(issue.issueNumber || '1') }] }} />
-                                                        </div>
-                                                    )}
-
-                                                    {relIssueStatus === 'REQUESTED' && (<div className="absolute top-1 left-1 bg-orange-500 text-white rounded-md px-1 py-0.5 text-[8px] font-bold z-20">REQUESTED</div>)}
-                                                    {relIssueStatus === 'PENDING_APPROVAL' && (<div className="absolute top-1 left-1 bg-yellow-500 text-white rounded-md px-1 py-0.5 text-[8px] font-bold z-20" title="Pending Admin Approval">PENDING</div>)}
-                                                    {relIssueStatus === 'ISSUE_OWNED' && (<div className="absolute top-1 left-1 bg-emerald-500 text-white rounded-md px-1 py-0.5 text-[8px] font-bold z-20">IN LIBRARY</div>)}
-                                                    {relIssueStatus === 'ISSUE_COVERED' && (<div className="absolute top-1 left-1 bg-emerald-700 text-white rounded-md px-1 py-0.5 text-[8px] font-bold z-20" title="In a collection you own">COVERED</div>)}
-                                                    {relIssueStatus === 'UNRELEASED' && (<div className="absolute top-1 left-1 bg-purple-500 text-white rounded-md px-1 py-0.5 text-[8px] font-bold z-20">UNRELEASED</div>)}
-                                                    {(!relIssueStatus && issue.isReleased === false) && (<div className="absolute top-1 left-1 bg-purple-500/80 text-white rounded-md px-1 py-0.5 text-[8px] font-bold z-20">UNRELEASED</div>)}
-                                                </div>
+                            {loadingRelated ? (<div className="space-y-2">{[1,2,3,4,5].map(i => (<div key={i} className="h-14 bg-muted animate-pulse rounded-md border border-border" />))}</div>) : relatedIssues.length > 0 ? (
+                                // Fork: a list (cover, number, title, year, status) instead of a sideways strip of covers, like the search dialog
+                                <div className="divide-y divide-border rounded-lg border border-border">
+                                    {relatedIssues.map(issue => {
+                                        const relIssueTargetName = issue.name;
+                                        const relIssueStatus = getIssueStatus(issue.id, selectedComic.volumeId, relIssueTargetName, issue.isReleased, issue.issueNumber, seriesBaseName);
+                                        const badge = relIssueStatus === 'REQUESTED' ? ['Requested', 'bg-orange-500'] : relIssueStatus === 'PENDING_APPROVAL' ? ['Pending', 'bg-yellow-500']
+                                            : relIssueStatus === 'ISSUE_OWNED' ? ['In library', 'bg-emerald-500'] : relIssueStatus === 'ISSUE_COVERED' ? ['Covered', 'bg-emerald-700']
+                                            : relIssueStatus === 'UNRELEASED' || (!relIssueStatus && issue.isReleased === false) ? ['Unreleased', 'bg-purple-500'] : null;
+                                        const metadataSource = (selectedComic as any).metadataSource || 'COMICVINE';
+                                        return (
+                                        <div
+                                            key={issue.id}
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-label={`View details for ${issue.name}`}
+                                            className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none"
+                                            onClick={() => setSelectedComic({ ...issue, volumeId: selectedComic.volumeId, publisher: selectedComic.publisher, issueNumber: issue.issueNumber, description: undefined, writers: undefined, artists: undefined, characters: undefined, metadataSource } as Comic)}
+                                            onKeyDown={(e) => {
+                                                if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return;
+                                                e.preventDefault();
+                                                setSelectedComic({ ...issue, volumeId: selectedComic.volumeId, publisher: selectedComic.publisher, issueNumber: issue.issueNumber, description: undefined, writers: undefined, artists: undefined, characters: undefined, metadataSource } as Comic);
+                                            }}
+                                        >
+                                            <div className="relative w-10 h-14 shrink-0 rounded overflow-hidden bg-muted border border-border">
+                                                {issue.image ? <img src={issue.image} className="absolute inset-0 w-full h-full object-cover" alt="" loading="lazy" />
+                                                    : <ImageIcon className="w-4 h-4 m-auto mt-5 text-muted-foreground/40" />}
                                             </div>
-                                        )})}
-                                    </div>
-                                    <ScrollBar orientation="horizontal" className="h-4" />
-                                </ScrollArea>
+                                            <span className="w-12 shrink-0 text-xs font-black text-muted-foreground">#{issue.issueNumber}</span>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm font-bold truncate text-foreground">{issue.name}</p>
+                                                <p className="text-[11px] text-muted-foreground">{issue.year || '????'}</p>
+                                            </div>
+                                            {badge && <span className={`shrink-0 text-[9px] font-black uppercase tracking-wider text-white px-1.5 py-0.5 rounded ${badge[1]}`}>{badge[0]}</span>}
+                                            {!relIssueStatus && (
+                                                <div className="flex items-center justify-end gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                                                    <RequestIconButton title="Request Issue" busy={requestingTarget === `iss-${relIssueTargetName}`}
+                                                        onClick={() => handleRequest(selectedComic.volumeId, issue.name, issue.image, issue.year, 'issue', selectedComic.publisher, false, undefined, issue.issueNumber, false, metadataSource)} />
+                                                    <GetComicsButton onClick={() => handleRequest(selectedComic.volumeId, issue.name, issue.image, issue.year, 'issue', selectedComic.publisher, false, 'getcomics', issue.issueNumber, false, metadataSource)} />
+                                                    <BatcaveButton body={{ cvId: selectedComic.volumeId, issues: [{ number: String(issue.issueNumber || '1') }] }} />
+                                                </div>
+                                            )}
+                                        </div>
+                                    )})}
+                                </div>
                             ) : (<p className="text-sm text-muted-foreground">No individual issues found.</p>)}
                         </div>
                     </div>

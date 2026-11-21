@@ -48,7 +48,7 @@ function ReadButton({ l }: { l: ListSummary }) {
     const router = useRouter()
     const { toast } = useToast()
     const [busy, setBusy] = useState(false)
-    if (l.ownedCount === 0) return <Button size="sm" variant="ghost" className="h-8 text-xs" asChild><Link href={`/reading-lists?id=${l.id}`}>Open</Link></Button>
+    if (l.ownedCount === 0) return <Button size="sm" variant="ghost" className="h-8 w-24 text-xs" asChild><Link href={`/reading-lists?id=${l.id}`}>Open</Link></Button>
     const go = async () => {
         setBusy(true)
         const d = await fetch(`/api/reading-lists?id=${encodeURIComponent(l.id)}`).then(r => r.ok ? r.json() : null).catch(() => null)
@@ -57,8 +57,9 @@ function ReadButton({ l }: { l: ListSummary }) {
         if (item?.issue?.filePath) router.push(`/reader?path=${encodeURIComponent(item.issue.filePath)}&series=${encodeURIComponent(item.issue.series.folderPath)}&list=${encodeURIComponent(l.id)}`)
         else toast({ title: displayName(l.name), description: d ? "Nothing left to read that you own." : "Could not load the list." })
     }
+    // fixed width (w-24): "Open"/"Start"/"Continue" differ in length and would shift the download buttons beside it
     return (
-        <Button size="sm" className="h-8 text-xs font-bold" disabled={busy} onClick={go}>
+        <Button size="sm" className="h-8 w-24 text-xs font-bold" disabled={busy} onClick={go}>
             {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5 mr-1" />}{l.readCount > 0 ? 'Continue' : 'Start'}
         </Button>
     )

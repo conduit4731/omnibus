@@ -529,8 +529,8 @@ fn has_same_name_volume(series: &[SeriesRec], m_series_name: &str, year_began: O
     series.iter().any(|s| normalize(&s.name) == m_series_name && (s.year == 0 || year_began.is_none_or(|y| (s.year - y).abs() <= 1)))
 }
 
-/// Fork: every pull-list series the library lacks becomes a Metron-sourced series row, monitored, so its new issues
-/// are requested automatically (user's call, 2026-11-02). Folder from the naming pattern in the default comics library, created empty
+/// Fork: every pull-list series the library lacks becomes a Metron-sourced series row, NOT monitored: in the
+/// library and calendar, but nothing downloads until the user monitors it (user's call, 2026-11-21). Folder from the naming pattern in the default comics library, created empty
 /// so the scan's ghost purge (unmonitored + folder missing) leaves the row alone.
 /// Its full issue list comes from the same run's `unsynced_series` sync.
 async fn add_pull_list_series(db: &Db, unknown: &HashMap<String, (String, Option<i32>, Option<String>)>) -> usize {
@@ -551,7 +551,7 @@ async fn add_pull_list_series(db: &Db, unknown: &HashMap<String, (String, Option
         let folder = std::path::Path::new(&lib_path).join(parts.join("/")).to_string_lossy().replace('\\', "/");
         let res = sqlx::query(&format!(
             r#"INSERT INTO "Series" (id, name, publisher, year, "folderPath", "metadataId", "metadataSource", "matchState", monitored, "isManga", "libraryId", "updatedAt")
-               VALUES ($1, $2, $3, $4, $5, $6, 'METRON', 'MATCHED', true, false, $7, {now})
+               VALUES ($1, $2, $3, $4, $5, $6, 'METRON', 'MATCHED', false, false, $7, {now})
                ON CONFLICT ("metadataSource", "metadataId") DO NOTHING"#,
             now = db.now_expr()
         ))
@@ -1307,7 +1307,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pull_list_series_are_added_monitored_once() {
+    async fn pull_list_series_are_added_unmonitored_once() {
         let db = fixture("pulllist").await;
         for ddl in [
             r#"ALTER TABLE "Series" ADD COLUMN "folderPath" TEXT"#,
@@ -1335,7 +1335,7 @@ mod tests {
         assert_eq!(row.get::<String, _>("folderPath"), folder);
         assert!(std::path::Path::new(&folder).is_dir(), "folder exists, so the scan's ghost purge keeps the row");
         assert_eq!(row.get::<String, _>("libraryId"), "comics");
-        assert_eq!(row.get::<i64, _>("monitored"), 1, "added and monitored");
+        assert_eq!(row.get::<i64, _>("monitored"), 0, "added, not monitored");
     }
 
     #[test]
