@@ -79,6 +79,13 @@ export function ComicGrid({ title, type, refreshSignal = 0 }: Props) {
   const [selectedComic, setSelectedComic] = useState<Comic | null>(null)
   const [relatedIssues, setRelatedIssues] = useState<Comic[]>([])
   const [loadingRelated, setLoadingRelated] = useState(false)
+  // Fork: the owned series' folder, for "Open series" (same lookup as the search dialog)
+  const [seriesPath, setSeriesPath] = useState<string | null>(null)
+  useEffect(() => {
+      setSeriesPath(null)
+      if (!selectedComic?.volumeId) return
+      fetch(`/api/library/series-path?id=${encodeURIComponent(String(selectedComic.volumeId))}`).then(r => r.ok ? r.json() : {}).then((d: { path?: string | null }) => setSeriesPath(d.path || null)).catch(() => {})
+  }, [selectedComic?.volumeId])
   const { toast } = useToast()
   const [interactiveQuery, setInteractiveQuery] = useState<{ query: string, type: 'volume' | 'issue' } | null>(null)
   const [monitorPrompt, setMonitorPrompt] = useState<{ id: number, name: string, image: string, year: string, publisher: string, directSource?: string, metadataSource?: string } | null>(null);
@@ -377,6 +384,11 @@ export function ComicGrid({ title, type, refreshSignal = 0 }: Props) {
 
                               return (
                                 <div className="flex flex-col gap-2.5 sm:gap-3 w-full max-w-[300px] mx-auto md:max-w-none mt-2">
+                                    {seriesPath && (
+                                        <Button asChild className="w-full gap-1.5 shadow-sm h-auto min-h-10 py-1.5 text-sm font-bold">
+                                            <Link href={`/library/series?path=${encodeURIComponent(seriesPath)}`}><Library className="w-4 h-4 shrink-0" /> <span className="leading-tight">Open series</span></Link>
+                                        </Button>
+                                    )}
                                     {/* VOLUME BUTTONS */}
                                     {loadingRelated ? (
                                         <Button className="w-full gap-1.5 shadow-sm h-auto min-h-10 py-1.5 text-sm font-bold whitespace-normal" variant="outline" disabled>
@@ -433,11 +445,21 @@ export function ComicGrid({ title, type, refreshSignal = 0 }: Props) {
                                             body={selectedComic.isVolume ? { cvId: selectedComic.volumeId } : { cvId: selectedComic.volumeId, issues: [{ number: String(selectedComic.issueNumber || '1') }] }} />}
                                         </AllSources>
                                       )}
-                                      <Button 
+                                      {/* Fork: an issue's dialog also offers the whole series' missing issues */}
+                                      {!selectedComic.isVolume && selectedComic.volumeId && canRequest && !loadingRelated && missingAvailableIssues.length > 0 && (
+                                        <AllSources className="justify-center" label={`All ${missingAvailableIssues.length} missing`}>
+                                          <RequestIconButton title="Alle fehlenden anfragen (Usenet)" srText="Request Missing" busy={requestingTarget === `vol-${selectedComic.volumeId}`}
+                                            onClick={() => setMonitorPrompt({ id: selectedComic.volumeId, name: seriesBaseName, image: selectedComic.image, year: selectedComic.year, publisher: selectedComic.publisher || 'Unknown', directSource: undefined, metadataSource: (selectedComic as any).metadataSource || 'COMICVINE' })} />
+                                          <GetComicsButton title="Alle fehlenden über GetComics"
+                                            onClick={() => handleRequest(selectedComic.volumeId, seriesBaseName, selectedComic.image, selectedComic.year, 'volume', selectedComic.publisher || 'Unknown', false, 'getcomics', undefined, false, (selectedComic as any).metadataSource || 'COMICVINE')} />
+                                          {((selectedComic as any).metadataSource || 'COMICVINE') === 'COMICVINE' && <BatcaveButton title="Alle fehlenden über Batcave" body={{ cvId: selectedComic.volumeId }} />}
+                                        </AllSources>
+                                      )}
+                                      {!(!selectedComic.isVolume && isIssueOwned) && <Button 
                                         variant="outline" 
                                         className="w-full gap-1.5 border-dashed shadow-sm h-auto min-h-10 py-1.5 text-sm font-bold border-border hover:bg-muted text-foreground whitespace-normal" 
                                         onClick={() => setInteractiveQuery({ query: selectedComic.isVolume ? seriesBaseName : selectedComic.name, type: selectedComic.isVolume ? 'issue' : 'volume' })}
-                                        disabled={(isAllAvailableOwned && volStatus === 'LIBRARY_MONITORED') || (!selectedComic.isVolume && isIssueOwned) || overallStatus === 'PENDING_APPROVAL' || overallStatus === 'REQUESTED'}
+                                        disabled={(isAllAvailableOwned && volStatus === 'LIBRARY_MONITORED') || overallStatus === 'PENDING_APPROVAL' || overallStatus === 'REQUESTED'}
                                       >
                                           {(isAllAvailableOwned && volStatus === 'LIBRARY_MONITORED') ? (
                                               <><FileCheck className="w-4 h-4 text-emerald-500 shrink-0" /> <span className="leading-tight">Up to Date</span></>
@@ -445,12 +467,10 @@ export function ComicGrid({ title, type, refreshSignal = 0 }: Props) {
                                               <><Clock className="w-4 h-4 text-yellow-500 shrink-0" /> <span className="leading-tight">Pending Approval</span></>
                                           ) : overallStatus === 'REQUESTED' ? (
                                               <><Clock className="w-4 h-4 text-orange-500 shrink-0" /> <span className="leading-tight">Requested</span></>
-                                          ) : (!selectedComic.isVolume && isIssueOwned) ? (
-                                              <><FileCheck className="w-4 h-4 text-emerald-500 shrink-0" /> <span className="leading-tight">In Library</span></>
                                           ) : (
                                               <><SearchIcon className="w-4 h-4 text-primary shrink-0" /> <span className="leading-tight">Interactive Search</span></>
                                           )}
-                                      </Button>
+                                      </Button>}
                                   </div>
                                 );
                             })()}
